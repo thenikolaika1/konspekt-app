@@ -4,12 +4,76 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Konspekt by NK</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main>
-    <h1>Konspekt by NK</h1>
-    <p>Новая версия приложения готовится.</p>
-  </main>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">Konspekt <span>by NK</span></div>
+      <button class="icon-btn" type="button" aria-label="Профиль">◯</button>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="section-head"><h1>Закладки</h1></div>
+        <div class="tabs" id="tabs">
+          <button class="tab add" id="addTab" type="button" aria-label="Новая закладка">+</button>
+          <button class="tab active" type="button">История</button>
+          <button class="tab" type="button">Биология</button>
+          <button class="tab" type="button">Физика</button>
+        </div>
+      </section>
+
+      <section class="create-card">
+        <div class="camera-mark" aria-hidden="true">
+          <span class="lens"></span>
+        </div>
+        <div class="create-copy">
+          <h2>Новый конспект</h2>
+          <p>Сфотографируй страницы учебника — остальное сделает ИИ.</p>
+        </div>
+        <button class="primary" id="newNote" type="button">Сфотографировать</button>
+      </section>
+
+      <section class="section recent-section">
+        <div class="section-head">
+          <h2>Недавние</h2>
+          <button class="text-btn" type="button">Все</button>
+        </div>
+        <div class="empty" id="recentEmpty">
+          <div class="empty-icon">▤</div>
+          <strong>Здесь появятся конспекты</strong>
+          <p>Первый созданный материал автоматически сохранится здесь.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden>
+    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="grabber"></div>
+      <button class="sheet-close" id="sheetClose" type="button" aria-label="Закрыть">×</button>
+      <h2 id="sheetTitle">Создать конспект</h2>
+      <p>Добавь фотографии страниц. Можно выбрать сразу несколько.</p>
+      <label class="upload">
+        <input id="pageInput" type="file" accept="image/*" capture="environment" multiple>
+        <span class="upload-icon">＋</span>
+        <strong>Добавить страницы</strong>
+        <small>Камера или фотографии</small>
+      </label>
+      <div class="previews" id="previews"></div>
+      <button class="primary wide" id="generateBtn" type="button" disabled>Создать конспект</button>
+      <div class="prototype-note">Сейчас собираем интерфейс. ИИ подключим через защищённый backend на следующем этапе.</div>
+    </section>
+  </div>
+
+  <script src="./app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+  </script>
 </body>
 </html>
