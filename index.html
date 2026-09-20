@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Konspekt by NK</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div class="app-shell">
@@ -71,9 +71,9 @@
     </section>
   </div>
 
-  <script src="./app.js?v=3"></script>
+  <script src="./app.js"></script>
   <script>
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).catch(()=>{});
   </script>
 </body>
 </html>
