@@ -1,12 +1,1 @@
-{
-  "name": "Konspekt by NK",
-  "short_name": "Konspekt",
-  "description": "Конспекты из страниц учебника",
-  "id": "/konspekt-app/",
-  "start_url": "/konspekt-app/",
-  "scope": "/konspekt-app/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
-  "lang": "ru"
-}
+{"name":"Konspekt by NK","short_name":"Konspekt","description":"Конспекты из страниц учебника","id":"/konspekt-app/","start_url":"/konspekt-app/","scope":"/konspekt-app/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","lang":"ru"}
