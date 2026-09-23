@@ -137,9 +137,41 @@
   const searchBox = (id, placeholder) =>
     '<label class="search-box">' + icon("search") + '<input class="search" id="' + id + '" placeholder="' + esc(placeholder) + '"></label>';
 
-  // иконка закладки на цветной плашке: цвет иконки по типу, фон — выбранный цвет или цвет типа
+  // Иконки категорий закладок: собственный двухтоновый набор (inline SVG, без <use>).
+  // Классы слоёв: s — мягкая заливка, i — основной контур, a — акцентный контур, af — акцентная заливка.
+  // Цвета задаёт тон плитки (.tone-*), поэтому одна иконка работает на любом цвете закладки.
+  const BM_GLYPHS = {
+    plus: '<circle class="s" cx="12" cy="12" r="9.4"/><path class="i w" d="M12 7v10M7 12h10"/>',
+    book:
+      '<path class="s i" d="M6.9 4.3h9.6c.8 0 1.5.7 1.5 1.5v12.7c0 .6-.4 1-1 1H7.9a2.4 2.4 0 0 1-2.4-2.4V5.7c0-.8.6-1.4 1.4-1.4Z"/>' +
+      '<path class="i" d="M5.5 17.1c0-1.2 1-2.1 2.2-2.1H18"/><path class="af" d="M13.4 4.3v6.2l1.8-1.3 1.8 1.3V4.3Z"/><path class="a" d="M8.4 8h2.4"/>',
+    leaf:
+      '<path class="s i" d="M19.3 4.7C11 4.8 5.2 8.6 5.2 14.6c0 2.9 2 4.9 4.9 4.9 6.1 0 9.1-6.5 9.2-14.8Z"/>' +
+      '<path class="i" d="M4.6 20.3c3.1-5.2 7-8.7 11.7-11"/><path class="i t" d="M9.6 15l-.4-2.9M12.6 12.4l2.8-.3"/>',
+    atom:
+      '<circle class="s" cx="12" cy="12" r="8.6"/><ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(35 12 12)"/>' +
+      '<ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(-35 12 12)"/><circle class="af" cx="12" cy="12" r="2.2"/><circle class="if" cx="19.4" cy="6.8" r="1.35"/>',
+    flask:
+      '<path class="af" d="M7.2 15.3h9.6l1.4 2.4a1.5 1.5 0 0 1-1.3 2.3H7.1a1.5 1.5 0 0 1-1.3-2.3Z"/>' +
+      '<path class="i" d="M9.3 4h5.4M10.4 4.2v5l-4.8 8.4A1.8 1.8 0 0 0 7.2 20h9.6a1.8 1.8 0 0 0 1.6-2.4l-4.8-8.4v-5"/><circle class="if" cx="12.6" cy="12.6" r=".9"/>',
+    globe:
+      '<circle class="s i" cx="12" cy="12" r="8.2"/><ellipse class="i" cx="12" cy="12" rx="3.5" ry="8.2"/>' +
+      '<path class="a" d="M4.4 9.3h15.2M4.4 14.7h15.2"/>',
+    folder:
+      '<path class="s i" d="M4 7.3c0-1 .8-1.8 1.8-1.8h3.8l1.9 2h6.7c1 0 1.8.8 1.8 1.8v7.8c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8Z"/>' +
+      '<path class="a" d="M4.2 10.4h15.6"/>',
+    more:
+      '<rect class="s i" x="4.6" y="4.6" width="6.1" height="6.1" rx="2"/><rect class="s i" x="13.3" y="4.6" width="6.1" height="6.1" rx="2"/>' +
+      '<rect class="s i" x="4.6" y="13.3" width="6.1" height="6.1" rx="2"/><rect class="af" x="13.3" y="13.3" width="6.1" height="6.1" rx="2"/>',
+  };
+  const bmGlyph = (n) => {
+    if (!BM_GLYPHS[n]) console.warn("[icon] unknown bookmark icon:", n);
+    return '<svg class="kt-glyph" viewBox="0 0 24 24" aria-hidden="true">' + (BM_GLYPHS[n] || BM_GLYPHS.book) + "</svg>";
+  };
+
+  // плитка закладки: мягкая поверхность тона; свой цвет закладки меняет только фон
   const bmTile = (b, cls) =>
-    '<div class="' + cls + " tone-" + esc(b.icon) + '"' + bmIconStyle(b) + ">" + icon(b.icon) + "</div>";
+    '<div class="' + cls + " kt tone-" + esc(b.icon) + '"' + bmIconStyle(b) + ">" + bmGlyph(b.icon) + "</div>";
 
   // processing и error — промежуточные экраны, в историю «назад» не попадают
   const TRANSIENT = ["processing", "error"];
@@ -215,7 +247,7 @@
   const emptyState = (title, text) =>
     '<div class="empty"><div class="empty-icon">' + icon("doc") + "</div><strong>" + title + "</strong><p>" + text + "</p></div>";
 
-  const bmIconStyle = (b) => (isColor(b.color) ? ' style="background:' + b.color + '"' : "");
+  const bmIconStyle = (b) => (isColor(b.color) ? ' style="--kt-bg:' + b.color + '"' : "");
 
   function home() {
     const notes = store.listNotes();
@@ -223,19 +255,18 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">✦</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon" style="color:var(--blue)">' +
-      icon("plus") +
+      '<div class="brand-spark">✦</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
         .listBookmarks()
         .map(
           (b) =>
-            '<button class="bm ' + esc(b.cls) + '" data-bookmark="' + esc(b.id) + '"><div class="bm-icon"><span class="plate tone-' + esc(b.icon) + '"' + bmIconStyle(b) + ">" +
-            icon(b.icon) + "</span></div><span>" + esc(b.name) + "</span></button>",
+            '<button class="bm ' + esc(b.cls) + '" data-bookmark="' + esc(b.id) + '">' + bmTile(b, "bm-icon") + "<span>" + esc(b.name) + "</span></button>",
         )
         .join("") +
-      '<button class="bm" data-go="bookmarks"><div class="bm-icon">' +
-      icon("dots") +
+      '<button class="bm" data-go="bookmarks"><div class="bm-icon kt tone-more">' +
+      bmGlyph("more") +
       '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div><div class="hero-label">✦ AI КОНСПЕКТ</div><h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p><button class="primary" data-go="camera">' +
       icon("camera") +
       "Сфотографировать</button>" +
@@ -371,7 +402,7 @@
       esc(editing ? editing.name : "") +
       '"><button class="field-clear" type="button" data-clear-field aria-label="Очистить">' + icon("close") + '</button></div><label class="form-label">Иконка</label><div class="choices" id="icons">' +
       BM_ICONS.map(
-        (x) => '<button class="choice ' + (d.icon === x ? "selected" : "") + '" data-icon="' + x + '"><span class="plate tone-' + x + '">' + icon(x) + "</span></button>",
+        (x) => '<button class="choice ' + (d.icon === x ? "selected" : "") + '" data-icon="' + x + '"><span class="plate kt tone-' + x + '">' + bmGlyph(x) + "</span></button>",
       ).join("") +
       '</div><label class="form-label">Цвет</label><div class="choices colors" id="colors">' +
       BM_COLORS.map(
