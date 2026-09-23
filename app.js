@@ -73,6 +73,7 @@
       check: '<path d="m5 12.5 4.2 4.2L19 7"/>',
       open: '<path d="M3 5.5c3-1.3 6-1.3 9 .8 3-2.1 6-2.1 9-.8V19c-3-1.3-6-1.3-9 .8-3-2.1-6-2.1-9-.8V5.5ZM12 6.3v13.5"/>',
     };
+    if (!p[n]) console.warn("[icon] unknown icon:", n);
     return (
       '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       (p[n] || p.doc) +
@@ -90,7 +91,7 @@
 
   // ---------- helpers ----------
 
-  const logo = () => '<div class="bookmark-logo"><i class="logo-fold"></i></div>';
+  const logo = () => '<div class="bookmark-logo logo-img"><img src="./assets/logo-mark.png" alt="Konspekt" width="84" height="84"></div>';
   const brand = () => '<div class="brand">Konspekt <span class="badge">by NK</span></div>';
   const app = (c) => '<div class="app ' + (c || "") + '">';
 
