@@ -12,3 +12,53 @@ html,body{width:100%;min-height:100%;overflow-x:hidden}body{background:linear-gr
 /* premium pass */
 .hero{min-height:238px;padding:22px 18px;isolation:isolate}.hero p{width:55%;max-width:210px}.hero-illustration{position:absolute;width:174px;height:174px;right:-2px;bottom:0;z-index:2;filter:drop-shadow(0 14px 16px rgba(37,72,104,.12))}.scan-art,.hero:after{display:none!important}.visual-stage{height:245px;display:grid;place-items:center;margin-top:5px}.pages-illustration{width:260px;height:220px;filter:drop-shadow(0 15px 22px rgba(35,65,94,.08))}.processing{background:radial-gradient(circle at 50% 20%,rgba(39,137,232,.08),transparent 35%),#fff}.processing .top{justify-content:center}.processing .brand{font-size:23px}.spinner{box-shadow:0 5px 15px rgba(39,137,232,.08)}.note-card .thumb{border:1px solid rgba(255,255,255,.8)}.bookmark-logo{filter:drop-shadow(0 8px 13px rgba(39,137,232,.08))}.welcome{justify-content:flex-start}.welcome .primary{margin-top:auto}.welcome .steps{margin-bottom:32px}.welcome:after{content:"";position:absolute;top:0;left:0;right:0;height:5px;background:linear-gradient(90deg,#2789e8,#54b37a,#b985c8)}@media(max-width:370px){.hero-illustration{width:148px;right:-12px}.hero p{width:58%}.hero{min-height:225px}}
 .choice,.color,.bm,.link,.dots,.fab,.primary,.back,.more{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}.choice.selected{border:2px solid #2789e8!important;background:#eef6ff!important;color:#2789e8;box-shadow:0 0 0 3px rgba(39,137,232,.10)}.color{position:relative;border:2px solid transparent!important}.color.selected{border-color:#2789e8!important;box-shadow:0 0 0 3px rgba(39,137,232,.12)}.color.selected:after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#173653;font-weight:900;font-size:15px}.bm-icon .ui-icon{pointer-events:none}
+
+/* phase 0: note blocks from StudyContent */
+.special.main,.special.remember{background:#edf5fe;border-color:var(--blue)}
+.special.example{background:var(--soft);border-color:#b7c3d1}
+.special.formulas,.special.cause{background:#f4f8fd;border-color:#8fb6de}
+.special.main p,.special.example p,.special.formulas p,.special.remember ul,.special.cause ul{margin:4px 0 8px}
+.special.main p:last-child,.special.example p:last-child,.special.formulas p:last-child,.special.remember ul:last-child,.special.cause ul:last-child{margin-bottom:0}
+.special ul,.note-body ol{padding-left:21px}
+.formula{font-family:"Times New Roman",Georgia,serif;font-size:20px;font-style:italic;text-align:center;padding:6px 0 4px;color:var(--navy)}
+.formula-inline{font-family:"Times New Roman",Georgia,serif;font-style:italic;font-weight:700}
+.vars{font-size:13px;margin:6px 0 0}
+.note-body ol.sequence li{margin-bottom:4px}
+.table-wrap{overflow-x:auto;margin:12px 0}
+.note-table{border-collapse:collapse;width:100%;font-size:13px;line-height:1.4}
+.note-table th,.note-table td{border:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+.note-table th{background:var(--soft);font-weight:750}
+.note-warning{font-size:12px;color:#7c899a;background:var(--soft);border-radius:8px;padding:9px 11px}
+/* subject badges and thumbnails */
+.subject.bio{background:#eef8f2;color:var(--green)}
+.subject.physics{background:#edf5fe;color:var(--blue)}
+.subject.other,.pill.other{background:#f1f4f8;color:#5b6b80}
+.note-card .thumb.t-history{background:linear-gradient(155deg,#d8c2a3,#8090a1);color:#fff}
+.note-card .thumb.t-physics{background:linear-gradient(145deg,#f2f3f4,#cbd4dd);color:#65758b}
+.note-card .thumb.t-biology{background:linear-gradient(145deg,#dcefdc,#87b789);color:#386b43}
+.note-card .thumb.t-other{background:linear-gradient(145deg,#e8eef5,#f9fbfd);color:#65758b}
+.thumb-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+.note-card>div:nth-child(2){min-width:0}
+.note-card,.sheet-action{cursor:pointer}
+/* camera: real previews */
+.page-strip{align-items:center}
+.page-thumb{position:relative;flex:0 0 auto}
+.page-shot{display:block;flex:0 0 auto;cursor:pointer;background:#f3f6f9}
+.page-thumb.selected .page-shot{border:2px solid var(--blue)}
+.page-shot.loading{background:linear-gradient(100deg,#eef2f6 30%,#f8fafc 50%,#eef2f6 70%) 0 0/300% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position:-150% 0}}
+.page-remove{position:absolute;top:3px;right:3px;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.95);color:var(--navy);display:grid;place-items:center;box-shadow:0 2px 6px rgba(16,23,34,.25);cursor:pointer}
+.page-remove .ui-icon{width:12px;height:12px}
+.add-page{flex:0 0 auto;cursor:pointer}
+.shot-preview{max-width:86%;max-height:80%;object-fit:contain;border-radius:6px;box-shadow:0 12px 35px #0008;background:#fff}
+.preview-actions{position:absolute;left:0;right:0;bottom:34px;display:flex;justify-content:center;gap:8px}
+.preview-actions button{border:0;background:#101722cc;color:#fff;border-radius:18px;padding:8px 14px;font-size:12px;font-weight:650;cursor:pointer}
+.camera-message{margin-top:4px;color:var(--wine)}
+.gallery,.shutter{cursor:pointer}
+.primary:disabled,.gallery:disabled,.shutter:disabled{opacity:.45;box-shadow:none;cursor:default}
+/* rename modal */
+.modal .field{margin-top:6px;font-size:15px}
+.modal-buttons .primary{border-radius:12px;padding:12px}
+/* camera header: dark text on the white app background, as in the mockup */
+.camera .camera-title b{color:var(--navy)}
+.camera .back{color:var(--navy);background:transparent}
