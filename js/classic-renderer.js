@@ -11,8 +11,12 @@
   const esc = K.esc;
   const INLINE = { d: "date", t: "term", p: "person", f: "formula-inline" };
 
+  // Типографика: однобуквенные предлоги и союзы не остаются в конце строки («с европейскими», «и шведской»).
+  const ONE_LETTER = /(^|[\s(«„])([А-Яа-яЁё]) (?=\S)/g;
+  const nbsp = (s) => String(s ?? "").replace(ONE_LETTER, "$1$2 ").replace(ONE_LETTER, "$1$2 ");
+
   function inline(s) {
-    return esc(s)
+    return esc(nbsp(s))
       .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\[(d|t|p|f):([^\]\n]+?)\]/g, (_, k, v) => '<span class="' + INLINE[k] + '">' + v + "</span>");
   }
@@ -104,7 +108,7 @@
     return (
       '<span class="subject ' + subject.badge + '">' + esc(c.meta.subjectLabel) + "</span>" +
       '<h1 class="note-title">' + esc(c.meta.title) + "</h1>" +
-      (c.meta.tagline.length ? '<div class="note-meta">' + c.meta.tagline.map(esc).join(" · ") + "</div>" : '<div class="note-meta"></div>')
+      '<div class="note-meta">' + c.meta.tagline.map(esc).join('<span class="sep">·</span>') + "</div>"
     );
   }
 
@@ -120,19 +124,19 @@
       h += card(
         "terms",
         "Термины и определения",
-        g.terms.map((t) => '<p><span class="term">' + esc(t.term) + "</span> — " + inline(t.definition) + "</p>").join(""),
+        g.terms.map((t) => '<p class="gl"><span class="term">' + esc(t.term) + '</span> —<span class="gl-def">' + inline(t.definition) + "</span></p>").join(""),
       );
     if (g.people.length)
       h += card(
         "people",
         "Личности",
-        g.people.map((p) => '<p><span class="person">' + esc(p.name) + "</span> — " + inline(p.role) + "</p>").join(""),
+        g.people.map((p) => '<p class="gl"><span class="person">' + esc(p.name) + '</span> —<span class="gl-def">' + inline(p.role) + "</span></p>").join(""),
       );
     if (g.dates.length)
       h += card(
         "dates",
         "Даты",
-        "<p>" + g.dates.map((d) => '<span class="date">' + esc(d.date) + "</span> — " + inline(d.event)).join("<br>") + "</p>",
+        g.dates.map((d) => '<p class="gl-date"><span class="date">' + esc(d.date) + "</span> — " + inline(d.event) + "</p>").join(""),
       );
     if (g.formulas.length)
       h += card(
@@ -151,8 +155,8 @@
         c.selfCheck
           .map(
             (x, i) =>
-              "<p><strong>" + (i + 1) + ". " + inline(x.q) + "</strong>" +
-              (x.a ? '<br><span class="answer">Ответ:</span> ' + inline(x.a) : "") + "</p>",
+              '<div class="qa"><span class="qa-n">' + (i + 1) + '.</span><div><div class="qa-q">' + inline(x.q) + "</div>" +
+              (x.a ? '<span class="answer">Ответ:</span><div class="qa-a">' + inline(x.a) + "</div>" : "") + "</div></div>",
           )
           .join("");
     return h + "</div>";

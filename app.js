@@ -16,6 +16,8 @@
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
+  // как цвет выглядит в палитре выбора (06-new-bookmark.png); сохраняется светлый оттенок из BM_COLORS
+  const BM_SWATCHES = ["#f6e1d2", "#c5eecc", "#bcdefc", "#d3cff5", "#facbcc", "#cad2e0"];
   const isColor = (c) => /^#[0-9a-f]{6}$/i.test(c || "");
 
   const S = {
@@ -50,7 +52,7 @@
       dots: '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>',
       doc: '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/>',
       gallery: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 5"/>',
-      back: '<path d="m15 18-6-6 6-6"/>',
+      back: '<path d="M20 12H4M10 6l-6 6 6 6"/>',
       close: '<path d="M6 6l12 12M18 6 6 18"/>',
       bookmark: '<path d="M6 3h12v18l-6-4-6 4z"/>',
       trash: '<path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6M14 11v6"/>',
@@ -63,6 +65,13 @@
       biology: '<path d="M19 4C11 4 5 8 5 14c0 4 3 6 6 5 5-1 7-7 8-15ZM5 21c3-6 7-9 12-11"/>',
       help: '<circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.8 2.8 0 1 1 4.2 2.4c-1.2.7-1.7 1.2-1.7 2.6M12 18h.01"/>',
       info: '<circle cx="12" cy="12" r="10"/><path d="M12 10v7M12 7h.01"/>',
+      search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+      dotsv: '<circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/>',
+      chev: '<path d="m9 6 6 6-6 6"/>',
+      palette: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.7 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7.3" r="1.2" fill="currentColor"/><circle cx="14.5" cy="7.3" r="1.2" fill="currentColor"/>',
+      sparkle: '<path d="M12 3c.6 4.2 2.4 6.3 7 7-4.6.7-6.4 2.8-7 7-.6-4.2-2.4-6.3-7-7 4.6-.7 6.4-2.8 7-7Z" fill="currentColor" stroke="none"/>',
+      check: '<path d="m5 12.5 4.2 4.2L19 7"/>',
+      open: '<path d="M3 5.5c3-1.3 6-1.3 9 .8 3-2.1 6-2.1 9-.8V19c-3-1.3-6-1.3-9 .8-3-2.1-6-2.1-9-.8V5.5ZM12 6.3v13.5"/>',
     };
     return (
       '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -114,14 +123,22 @@
     } else go("home", false);
   };
 
-  const head = (title, sub, more = false) =>
-    '<div class="screen-head"><button class="back" data-back aria-label="Назад">' + icon("back") + '</button><div style="flex:1"><h1>' +
+  const head = (title, sub, more = false, stacked = false) =>
+    '<div class="screen-head' + (stacked ? " stacked" : "") + '"><button class="back" data-back aria-label="Назад">' + icon("back") +
+    '</button><div class="head-text"><h1>' +
     esc(title) +
     "</h1>" +
-    (sub ? '<div class="sub" style="margin:2px 0 0">' + esc(sub) + "</div>" : "") +
+    (sub ? '<div class="sub">' + esc(sub) + "</div>" : "") +
     "</div>" +
-    (more ? '<button class="more" data-sheet="bookmark">•••</button>' : "") +
+    (more ? '<button class="more" data-sheet="bookmark" aria-label="Действия">' + icon("dots") + "</button>" : "") +
     "</div>";
+
+  const searchBox = (id, placeholder) =>
+    '<label class="search-box">' + icon("search") + '<input class="search" id="' + id + '" placeholder="' + esc(placeholder) + '"></label>';
+
+  // иконка закладки на цветной плашке: цвет иконки по типу, фон — выбранный цвет или цвет типа
+  const bmTile = (b, cls) =>
+    '<div class="' + cls + " tone-" + esc(b.icon) + '"' + bmIconStyle(b) + ">" + icon(b.icon) + "</div>";
 
   // processing и error — промежуточные экраны, в историю «назад» не попадают
   const TRANSIENT = ["processing", "error"];
@@ -190,7 +207,7 @@
       "<div><h3>" + esc(n.title) + '</h3><div class="meta"><span class="pill ' + sub.pill + '">' +
       esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt)) +
       '</div><div class="preview">' + esc(n.preview) + "</div></div>" +
-      '<button class="dots" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") + "</button></div>"
+      '<button class="dots" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dotsv") + "</button></div>"
     );
   }
 
@@ -212,15 +229,15 @@
         .listBookmarks()
         .map(
           (b) =>
-            '<button class="bm ' + esc(b.cls) + '" data-bookmark="' + esc(b.id) + '"><div class="bm-icon"' + bmIconStyle(b) + ">" +
-            icon(b.icon) + "</div><span>" + esc(b.name) + "</span></button>",
+            '<button class="bm ' + esc(b.cls) + '" data-bookmark="' + esc(b.id) + '"><div class="bm-icon"><span class="plate tone-' + esc(b.icon) + '"' + bmIconStyle(b) + ">" +
+            icon(b.icon) + "</span></div><span>" + esc(b.name) + "</span></button>",
         )
         .join("") +
       '<button class="bm" data-go="bookmarks"><div class="bm-icon">' +
       icon("dots") +
       '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div><div class="hero-label">✦ AI КОНСПЕКТ</div><h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p><button class="primary" data-go="camera">' +
       icon("camera") +
-      " &nbsp; Сфотографировать</button>" +
+      "Сфотографировать</button>" +
       art("scan") +
       '</div><div class="section-row"><h2>Недавние</h2><button class="link" data-go="all-notes">Все ›</button></div>' +
       (notes.length
@@ -232,20 +249,18 @@
 
   function bookmarks() {
     const list = store.listBookmarks();
-    const thumbCls = { history: "t-history", bio: "t-biology", physics: "t-physics" };
     return (
       app() +
-      head("Все закладки", plural(list.length, "закладка", "закладки", "закладок")) +
-      '<div class="note-list">' +
+      head("Все закладки", plural(list.length, "закладка", "закладки", "закладок"), false, true) +
+      '<div class="bm-list">' +
       list
         .map(
           (b) =>
-            '<div class="note-card" data-bookmark="' + esc(b.id) + '"><div class="thumb ' + (thumbCls[b.cls] || "") + '"' + bmIconStyle(b) + ">" +
-            icon(b.icon) + "</div><div><h3>" + esc(b.name) + '</h3><div class="meta">' + notesCount(store.notesInBookmark(b.id).length) +
-            '</div></div><button class="dots" data-bookmark-menu="' + esc(b.id) + '" aria-label="Действия">' + icon("dots") + "</button></div>",
+            '<div class="bm-row" data-bookmark="' + esc(b.id) + '">' + bmTile(b, "bm-tile") + "<div><h3>" + esc(b.name) +
+            '</h3><div class="meta">' + notesCount(store.notesInBookmark(b.id).length) + '</div></div><span class="chev">' + icon("chev") + "</span></div>",
         )
         .join("") +
-      '</div><button class="primary wide" style="margin-top:18px" data-go="new-bookmark">＋ Новая закладка</button></div>'
+      '</div><button class="add-row" data-go="new-bookmark">' + icon("plus") + "<span>Новая закладка</span></button></div>"
     );
   }
 
@@ -256,9 +271,9 @@
     return (
       app() +
       head(b.name, notesCount(list.length), true) +
-      '<input class="search" id="bmSearch" placeholder="Поиск в ' + esc(b.name) + '"><div class="note-list" id="bmList">' +
+      searchBox("bmSearch", "Поиск в " + b.name) + '<div class="note-list" id="bmList">' +
       (list.length ? list.map(noteCard).join("") : emptyState("Пока пусто", "Добавь сюда конспект")) +
-      '</div><button class="fab" data-go="camera" aria-label="Новый конспект">＋</button></div>'
+      '</div><button class="fab" data-go="camera" aria-label="Новый конспект">' + icon("plus") + "</button></div>"
     );
   }
 
@@ -267,7 +282,7 @@
     return (
       app() +
       head("Все конспекты", notesCount(list.length)) +
-      '<input class="search" id="noteSearch" placeholder="Поиск по конспектам"><div class="note-list" id="allList">' +
+      searchBox("noteSearch", "Поиск по конспектам") + '<div class="note-list" id="allList">' +
       (list.length ? list.map(noteCard).join("") : emptyState("Здесь появятся твои конспекты", "Создай первый конспект из страниц учебника")) +
       "</div></div>"
     );
@@ -297,25 +312,22 @@
         )
         .join("") +
       '<div class="page-shot loading"></div>'.repeat(S.pagesLoading) +
-      (canAdd ? '<button class="add-page" data-camera aria-label="Добавить страницу">' + icon("plus") + "</button>" : "") +
-      '</div><div class="meta" style="margin-top:8px">Страницы · ' + n +
+      (canAdd ? '<button class="add-page" data-camera aria-label="Добавить страницу">' + icon("plus") + "<span>Ещё<br>страница</span></button>" : "") +
+      '</div><div class="meta pages-count">Страницы · ' + n +
       (S.pagesMessage ? '</div><div class="meta camera-message">' + esc(S.pagesMessage) : "") +
-      '</div><div class="camera-actions"><button class="gallery" data-gallery aria-label="Галерея"' + (canAdd ? "" : " disabled") + ">" +
+      '</div><div class="camera-actions"><div class="gallery-wrap"><button class="gallery" data-gallery aria-label="Галерея"' + (canAdd ? "" : " disabled") + ">" +
       icon("gallery") +
-      '</button><button class="shutter" data-camera aria-label="Сфотографировать"' + (canAdd ? "" : " disabled") +
+      '</button><span>Галерея</span></div><button class="shutter" data-camera aria-label="Сфотографировать"' + (canAdd ? "" : " disabled") +
       '></button><button class="primary" data-process ' + (!n || S.pagesLoading ? "disabled" : "") +
-      ">Создать конспект</button></div></div></div>"
+      ">" + icon("sparkle") + "Создать конспект</button></div></div></div>"
     );
   }
 
   function progressRows() {
-    return STEPS.map((t, i) =>
-      i < S.gen.step
-        ? '<div class="progress-row done">✓ &nbsp; ' + t + "</div>"
-        : i === S.gen.step
-          ? '<div class="progress-row active">● &nbsp; ' + t + "…</div>"
-          : '<div class="progress-row">○ &nbsp; ' + t + "</div>",
-    ).join("");
+    return STEPS.map((t, i) => {
+      const st = i < S.gen.step ? "done" : i === S.gen.step ? "active" : "";
+      return '<div class="progress-row ' + st + '"><span class="step-dot">' + (st === "done" ? icon("check") : "") + "</span>" + t + "</div>";
+    }).join("");
   }
 
   function processing() {
@@ -338,8 +350,8 @@
     return (
       app() +
       '<div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
-      '</button><div><button class="circle-btn" data-sheet="add" aria-label="Добавить в закладку">' + icon("bookmark") +
-      '</button> <button class="circle-btn" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
+      '</button><div class="note-actions"><button class="circle-btn note-bookmark" data-sheet="add" aria-label="Добавить в закладку">' + icon("bookmark") +
+      '</button><button class="circle-btn note-menu" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
       "</button></div></div>" +
       view.head +
       "</div>" +
@@ -353,18 +365,20 @@
     const d = S.draftBookmark;
     return (
       app() +
-      head(editing ? "Изменить закладку" : "Новая закладка", editing ? "Название и оформление" : "Создай раздел для своих конспектов") +
-      '<label class="form-label">Название</label><input class="field" id="bmName" maxlength="40" placeholder="Например, История" value="' +
+      head(editing ? "Изменить закладку" : "Новая закладка", editing ? "Название и оформление" : "Создай раздел для своих конспектов", false, true) +
+      '<label class="form-label">Название</label><div class="field-wrap"><input class="field" id="bmName" maxlength="40" placeholder="Например, История" value="' +
       esc(editing ? editing.name : "") +
-      '"><label class="form-label">Иконка</label><div class="choices" id="icons">' +
-      BM_ICONS.map((x) => '<button class="choice ' + (d.icon === x ? "selected" : "") + '" data-icon="' + x + '">' + icon(x) + "</button>").join("") +
-      '</div><label class="form-label">Цвет</label><div class="colors" id="colors">' +
-      BM_COLORS.map(
-        (x) =>
-          '<button class="color ' + (d.color === x ? "selected" : "") + '" data-color="' + x + '" style="background:' + x + ";border-color:" +
-          (d.color === x ? "#2789e8" : "transparent") + '"></button>',
+      '"><button class="field-clear" type="button" data-clear-field aria-label="Очистить">' + icon("close") + '</button></div><label class="form-label">Иконка</label><div class="choices" id="icons">' +
+      BM_ICONS.map(
+        (x) => '<button class="choice ' + (d.icon === x ? "selected" : "") + '" data-icon="' + x + '"><span class="plate tone-' + x + '">' + icon(x) + "</span></button>",
       ).join("") +
-      '</div><button class="primary wide" style="margin-top:30px" data-create-bm>' +
+      '</div><label class="form-label">Цвет</label><div class="choices colors" id="colors">' +
+      BM_COLORS.map(
+        (x, i) =>
+          '<button class="choice color-choice ' + (d.color === x ? "selected" : "") + '" data-color="' + x + '"><span class="swatch" style="background:' +
+          BM_SWATCHES[i] + '"></span></button>',
+      ).join("") +
+      '</div><button class="primary wide create-bm" data-create-bm>' +
       (editing ? "Сохранить" : "Создать закладку") +
       "</button></div>"
     );
@@ -397,11 +411,13 @@
       brand() +
       '</div><div class="visual-stage">' +
       art("pages") +
-      '</div><div class="error-icon">!</div><h1>Не удалось создать конспект</h1><p>Что-то пошло не так. Твои фотографии сохранены.</p><div class="error-actions"><button class="primary wide" data-retry>Попробовать снова</button><button class="text-action" data-go="camera">Вернуться к страницам</button><p>Проверь подключение к интернету и попробуй ещё раз.</p></div></div>'
+      '</div><div class="error-icon">!</div><h1>Не удалось создать конспект</h1><p>Что-то пошло не так. Твои фотографии сохранены.</p><div class="error-actions"><button class="primary wide" data-retry>Попробовать снова</button><button class="text-action" data-go="camera">Вернуться к страницам</button><p class="error-hint">Проверь подключение к интернету и попробуй ещё раз.</p></div></div>'
     );
   }
 
   // ---------- sheets & modals ----------
+
+  const CHEV = '<span class="chev">' + icon("chev") + "</span>";
 
   function sheet() {
     const sh = S.sheet;
@@ -414,40 +430,40 @@
         subjectThumb(n.subject) +
         "<div><h3>" + esc(n.title) + '</h3><span class="subject ' + study.subject(n.subject).badge + '">' + esc(n.subjectLabel) +
         '</span></div></div><button class="sheet-action" data-open-note="' + esc(n.id) +
-        '">▤ &nbsp; Открыть</button><button class="sheet-action" data-sheet="add">＋ &nbsp; Добавить в закладку</button><button class="sheet-action" data-rename="note">' +
-        icon("edit") +
-        ' &nbsp; Переименовать</button><button class="sheet-action danger" data-delete="note">' +
-        icon("trash") +
-        " &nbsp; Удалить</button></div></div>"
+        '">' + icon("open") + "<span>Открыть</span>" + CHEV + '</button><button class="sheet-action" data-sheet="add">' + icon("bookmark") +
+        "<span>Добавить в закладку</span>" + CHEV + '</button><button class="sheet-action" data-rename="note">' + icon("edit") +
+        "<span>Переименовать</span>" + CHEV + '</button><button class="sheet-action danger" data-delete="note">' + icon("trash") +
+        "<span>Удалить</span>" + CHEV + "</button></div></div>"
       );
     }
     if (sh.type === "add") {
       const n = store.getNote(sh.id);
       if (!n) return "";
       return (
-        '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><h2>Добавить в закладку</h2><p class="sub">' + esc(n.title) + "</p>" +
+        '<div class="overlay" data-backdrop><div class="sheet add-sheet"><div class="grab"></div><h2>Добавить в закладку</h2><p class="sub">' + esc(n.title) + '</p><div class="pick-list">' +
         store
           .listBookmarks()
-          .map(
-            (b) =>
-              '<button class="sheet-action" data-toggle-bm="' + esc(b.id) + '">' + icon(b.icon) + " &nbsp; " + esc(b.name) +
-              (b.noteIds.includes(n.id) ? '<span style="margin-left:auto;color:var(--blue)">✓</span>' : "") + "</button>",
-          )
+          .map((b) => {
+            const on = b.noteIds.includes(n.id);
+            return (
+              '<button class="pick-row' + (on ? " on" : "") + '" data-toggle-bm="' + esc(b.id) + '">' + bmTile(b, "pick-tile") + '<span class="pick-text"><b>' +
+              esc(b.name) + "</b><small>" + notesCount(store.notesInBookmark(b.id).length) + '</small></span><span class="radio">' +
+              (on ? icon("check") : "") + "</span></button>"
+            );
+          })
           .join("") +
-        '<button class="sheet-action" data-new-bm-for-note>＋ &nbsp; Новая закладка</button><button class="primary wide" data-close>Готово</button></div></div>'
+        '</div><button class="add-row" data-new-bm-for-note>' + icon("plus") + '<span>Новая закладка</span></button><button class="primary wide" data-close>Готово</button></div></div>'
       );
     }
     if (sh.type === "bookmark") {
       const b = store.getBookmark(sh.id);
       if (!b) return "";
       return (
-        '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><div class="sheet-title"><div class="thumb"' + bmIconStyle(b) + ">" +
-        icon(b.icon) + "</div><div><h3>" + esc(b.name) + '</h3><span class="meta">' + notesCount(store.notesInBookmark(b.id).length) +
-        '</span></div></div><button class="sheet-action" data-rename="bookmark">' +
-        icon("edit") +
-        ' &nbsp; Переименовать</button><button class="sheet-action" data-edit-bm>◉ &nbsp; Изменить оформление</button><button class="sheet-action danger" data-delete="bookmark">' +
-        icon("trash") +
-        " &nbsp; Удалить закладку</button></div></div>"
+        '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><div class="sheet-title">' + bmTile(b, "bm-tile") + "<div><h3>" + esc(b.name) +
+        '</h3><span class="meta">' + notesCount(store.notesInBookmark(b.id).length) + '</span></div></div><button class="sheet-action" data-rename="bookmark">' +
+        icon("edit") + "<span>Переименовать</span>" + CHEV + '</button><button class="sheet-action" data-edit-bm>' + icon("palette") +
+        "<span>Изменить оформление</span>" + CHEV + '</button><button class="sheet-action danger" data-delete="bookmark">' + icon("trash") +
+        "<span>Удалить закладку</span>" + CHEV + "</button></div></div>"
       );
     }
     if (sh.type === "delete") {
@@ -455,9 +471,9 @@
       const item = isNote ? store.getNote(sh.id) : store.getBookmark(sh.id);
       if (!item) return "";
       return (
-        '<div class="overlay modal-wrap" data-backdrop><div class="modal"><div class="warn">⌫</div><h2>' +
+        '<div class="overlay modal-wrap" data-backdrop><div class="modal"><div class="warn">' + icon("trash") + "</div><h2>" +
         (isNote ? "Удалить конспект?" : "Удалить закладку?") +
-        "</h2><p>«" + esc(isNote ? item.title : item.name) + "» будет удалён" + (isNote ? "" : "а") + ".<br>" +
+        "</h2><p>«" + esc(isNote ? item.title : item.name) + "» будет удалён" + (isNote ? "" : "а") + '.</p><p class="modal-note">' +
         (isNote ? "Это действие нельзя отменить." : "Конспекты из неё останутся.") +
         '</p><div class="modal-buttons"><button class="secondary" data-close>Отмена</button><button class="danger-btn" data-confirm-delete>Удалить</button></div></div></div>'
       );
@@ -712,13 +728,15 @@
     }
     if ((x = el("[data-color]"))) {
       S.draftBookmark.color = x.dataset.color;
-      root.querySelectorAll("[data-color]").forEach((y) => {
-        y.classList.toggle("selected", y === x);
-        y.style.borderColor = y === x ? "#2789e8" : "transparent";
-      });
+      root.querySelectorAll("[data-color]").forEach((y) => y.classList.toggle("selected", y === x));
       return;
     }
     if (el("[data-create-bm]")) return saveBookmarkForm();
+    if (el("[data-clear-field]")) {
+      const f = root.querySelector("#bmName");
+      f.value = "";
+      return f.focus();
+    }
 
     // камера
     if ((x = el("[data-remove-page]"))) return removePage(+x.dataset.removePage);
