@@ -1,0 +1,24 @@
+=== HTTP ===
+/ 200 etag=W/"6ab553cd-515" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=1301 v=22:YES v=16:no
+index.html 200 etag=W/"6ab553cd-515" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=1301 v=22:YES v=16:no
+service-worker.js 200 etag=W/"6ab553cd-671" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=1444 konspekt-v22:YES konspekt-v16:no
+styles.css?v=22 200 etag=W/"6ab553cd-14851" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=80710 CLASSIC NOTE:YES COLOR & DEPTH:YES обложки конспектов:YES
+styles.css 200 etag=W/"6ab553cd-14851" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=HIT len=80710 CLASSIC NOTE:YES
+app.js?v=22 200 etag=W/"6ab553cd-bc33" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=45201 noteThumb:YES inNoteSearch:YES
+app.js 200 etag=W/"6ab553cd-bc33" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=HIT len=45201 noteThumb:YES inNoteSearch:YES
+js/classic-renderer.js?v=22 200 etag=W/"6ab553cd-2597" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=8608 cn-intro:YES section-bar:no
+js/classic-renderer.js 200 etag=W/"6ab553cd-2597" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=HIT len=8608 cn-intro:YES section-bar:no
+js/mock-content.js?v=22 200 etag=W/"6ab553cd-4395" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=12713 assets/thumbs:YES
+js/store.js?v=22 200 etag=W/"6ab553cd-15f4" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=5219 migrateThumbnails:YES
+assets/thumbs/leaf.svg 200 etag=W/"6ab553cd-838" last-modified=Thu, 24 Sep 2026 16:46:05 GMT cache-control=max-age=600 age=0 x-cache=MISS len=2055 
+=== FRESH USER FLOW ===
+loaded {"scripts":["/konspekt-app/js/study-content.js?v=22","/konspekt-app/js/mock-content.js?v=22","/konspekt-app/js/classic-renderer.js?v=22","/konspekt-app/js/store.js?v=22","/konspekt-app/js/images.js?v=22","/konspekt-app/js/generator.js?v=22","/konspekt-app/app.js?v=22"],"css":["/konspekt-app/styles.css?v=22"],"sw":"https://thenikolaika1.github.io/konspekt-app/service-worker.js"}
+home {"thumbImgs":3,"cardPills":["pill  s-history","pill physics s-physics","pill bio s-biology"]}
+created note DOM {"cnIntro":true,"oldSectionBar":0,"cnH2":3,"qa":2,"theme":"app note-view nt-history","boxBg":"rgb(247, 239, 218)"}
+caches ["konspekt-v22"]
+=== LEGACY LOCALSTORAGE ===
+legacy store bytes 12536 notes ["demo-northern-war","demo-internal-energy","demo-leaf","0dc9feaa-d4e9-4c6f-8edd-abf240a22590"]
+legacy home {"cards":3,"thumbImgs":2,"stored":["demo-northern-war+thumb","demo-internal-energy+thumb","demo-leaf+thumb","0dc9feaa-d4e9-4c6f-8edd-abf240a22590"]}
+legacy user-created note {"title":"§7. Северная война","cnIntro":true,"oldSectionBar":0}
+legacy demo note {"cnIntro":true,"oldSectionBar":0}
+after reload {"scripts":["/konspekt-app/js/study-content.js?v=22","/konspekt-app/js/mock-content.js?v=22","/konspekt-app/js/classic-renderer.js?v=22","/konspekt-app/js/store.js?v=22","/konspekt-app/js/images.js?v=22","/konspekt-app/js/generator.js?v=22","/konspekt-app/app.js?v=22"],"css":["/konspekt-app/styles.css?v=22"],"sw":"https://thenikolaika1.github.io/konspekt-app/service-worker.js"} ["konspekt-v22"]
