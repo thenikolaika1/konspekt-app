@@ -1,0 +1,35 @@
+# Временная диагностика мигания иконок: WebKit (как Safari на iPhone) и Chromium, production и код ветки.
+name: prod-check
+on:
+  push:
+    branches: [claude/dreamy-brahmagupta-8foooq]
+    paths: [".github/workflows/prod-check.yml", "tools/prod-check/**"]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps webkit chromium && sudo apt-get install -y ffmpeg >/dev/null
+      - name: Serve branch code under /konspekt-app/
+        run: |
+          mkdir -p /tmp/site && ln -s "$PWD" /tmp/site/konspekt-app && (cd /tmp/site && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
+      - name: Flicker probe
+        run: |
+          mkdir -p prod-check-results
+          for E in webkit chromium; do
+            node tools/prod-check/flicker.mjs https://thenikolaika1.github.io/konspekt-app/ $E | sed "s/^/[PROD] /" | tee -a prod-check-results/report.txt
+            node tools/prod-check/flicker.mjs http://localhost:8000/konspekt-app/ $E | sed "s/^/[BRANCH] /" | tee -a prod-check-results/report.txt
+          done
+      - name: WebKit video frames
+        run: |
+          node tools/prod-check/video.mjs https://thenikolaika1.github.io/konspekt-app/ /tmp/vid
+          V=$(ls /tmp/vid/*.webm | head -1)
+          ffmpeg -loglevel error -i "$V" -vf "fps=30,scale=195:-1,tile=12x8" -frames:v 3 prod-check-results/webkit-frames-%d.png
+      - name: Commit results
+        run: |
+          git config user.name "prod-check" && git config user.email "prod-check@users.noreply.github.com"
+          git add prod-check-results && git commit -m "prod-check results $(date -u +%FT%TZ) [skip ci]" && git push
