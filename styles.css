@@ -134,14 +134,14 @@ html,body{width:100%;min-height:100%;overflow-x:hidden}body{background:linear-gr
 .primary.wide{font-size:17px;padding:0;height:42px;font-weight:500}
 /* тона иконок закладок */
 /* тона плиток закладок: --kt-bg поверхность, --kt-sh тень (rgb), --g-* цвета иконки */
-.tone-new{--kt-bg:#e3eefd;--kt-sh:31,111,214;--g-ink:#1f7be6;--g-soft:rgba(31,123,230,.12);--g-acc:#1f7be6}
-.tone-book{--kt-bg:#f6e4e1;--kt-sh:140,58,66;--g-ink:#8a2f3d;--g-soft:rgba(138,47,61,.10);--g-acc:#cf9a3c}
-.tone-leaf{--kt-bg:#dff0e6;--kt-sh:46,125,87;--g-ink:#2c7a55;--g-soft:rgba(44,122,85,.13);--g-acc:#7fb99a}
-.tone-atom{--kt-bg:#e4e5fa;--kt-sh:78,86,184;--g-ink:#4953b4;--g-soft:rgba(94,108,210,.09);--g-acc:#7b6fd6}
-.tone-flask{--kt-bg:#f6e1e6;--kt-sh:170,70,95;--g-ink:#a8455d;--g-soft:rgba(168,69,93,.10);--g-acc:#e3a0b0}
-.tone-globe{--kt-bg:#ddedf9;--kt-sh:31,118,181;--g-ink:#1f6fae;--g-soft:rgba(31,111,174,.10);--g-acc:#6fb0dd}
-.tone-folder{--kt-bg:#f6ebd2;--kt-sh:176,122,20;--g-ink:#a8740f;--g-soft:rgba(214,160,40,.16);--g-acc:#e2b44a}
-.tone-more{--kt-bg:#e9eaf5;--kt-sh:60,70,130;--g-ink:#2b3566;--g-soft:rgba(43,53,102,.07);--g-acc:#a9a3dc}
+.tone-new{--kt-bg:#edf4fe;--kt-sh:31,111,214;--g-ink:#1f73d6;--g-soft:rgba(31,115,214,.07);--g-acc:#1f73d6}
+.tone-book{--kt-bg:#f8efec;--kt-sh:140,58,66;--g-ink:#8e3f49;--g-soft:rgba(142,63,73,.07);--g-acc:#b98a4a}
+.tone-leaf{--kt-bg:#ecf5f0;--kt-sh:46,125,87;--g-ink:#3a7a5a;--g-soft:rgba(58,122,90,.08);--g-acc:#3a7a5a}
+.tone-atom{--kt-bg:#eff0fb;--kt-sh:78,86,184;--g-ink:#5159b0;--g-soft:rgba(81,89,176,.07);--g-acc:#5159b0}
+.tone-flask{--kt-bg:#f9eff2;--kt-sh:170,70,95;--g-ink:#a3526a;--g-soft:rgba(163,82,106,.07);--g-acc:#a3526a}
+.tone-globe{--kt-bg:#ebf3fa;--kt-sh:31,118,181;--g-ink:#2f6fa5;--g-soft:rgba(47,111,165,.07);--g-acc:#2f6fa5}
+.tone-folder{--kt-bg:#f8f2e4;--kt-sh:176,122,20;--g-ink:#a37a22;--g-soft:rgba(163,122,34,.09);--g-acc:#a37a22}
+.tone-more{--kt-bg:#eff1f6;--kt-sh:60,70,130;--g-ink:#4b5578;--g-soft:rgba(75,85,120,.06);--g-acc:#4b5578}
 /* плитка: пастельная поверхность, лёгкий блик сверху, мягкая тень снизу */
 .kt{position:relative;display:grid;place-items:center;border-radius:19px;
   background-color:var(--kt-bg,#eceff6);
@@ -505,3 +505,49 @@ button,.note-card,.bm-row,.pick-row,.sheet-action{transition:transform .16s var(
 .camera-actions .primary .ui-icon{width:18px;height:18px}
 .camera-bottom{padding:16px 20px calc(16px + env(safe-area-inset-bottom))}
 .camera .viewfinder{height:max(300px,calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 376px))}
+
+/* ===== закладки на главной: спокойная вторичная навигация ===== */
+/* плитка: очень светлая поверхность тона, еле заметная граница, без бликов и объёма */
+.kt{border-radius:15px;background-image:none;box-shadow:inset 0 0 0 1px rgba(var(--kt-sh,60,70,130),.09)}
+.kt-glyph .i,.kt-glyph .a{stroke-width:1.7}
+.kt-glyph .i.w{stroke-width:1.9}
+/* оптическая поправка: при одной ширине формы должны казаться одного размера */
+.kt-glyph.g-plus{transform:scale(.86)}
+.kt-glyph.g-more{transform:scale(.92)}
+.kt-glyph.g-atom,.kt-glyph.g-globe{transform:scale(1.04)}
+.kt-glyph.g-leaf{transform:scale(1.02)}
+/* строка: 5 равных колонок, иконка и подпись — один элемент */
+.bookmarks{margin:0 -20px;padding:2px 20px 4px;gap:0}
+.bookmarks .bm{flex:0 0 20%;display:flex;flex-direction:column;align-items:center;min-width:0}
+.bookmarks .bm .bm-icon.kt{width:48px;height:48px;border-radius:15px;margin:0 0 6px}
+.bookmarks .bm .kt-glyph{width:22px;height:22px}
+.bookmarks .bm span{max-width:100%;padding:0 2px;font-size:12px;line-height:16px;font-weight:500;color:#3a4266;letter-spacing:0}
+.bookmarks .bm .bm-icon{transition:transform .16s var(--ease),background-color .16s var(--ease)}
+.bookmarks .bm:active .bm-icon{transform:scale(.97);box-shadow:inset 0 0 0 1px rgba(var(--kt-sh,60,70,130),.16)}
+/* вертикальный ритм главной: заголовок → строка 12, строка → hero 24, hero → «Недавние» 28 */
+.home-kicker{margin-top:12px}
+.section-row{margin:24px 0 12px}
+.bookmarks+.hero{margin-top:24px}
+.hero+.section-row{margin-top:28px}
+/* списки и меню: те же спокойные плитки, иконка чуть крупнее */
+.bm-tile{border-radius:15px}
+.bm-tile .kt-glyph{width:24px;height:24px}
+.sheet-title .bm-tile{border-radius:16px}
+.sheet-title .bm-tile .kt-glyph{width:28px;height:28px}
+.pick-tile{border-radius:12px}
+.pick-tile .kt-glyph{width:20px;height:20px}
+/* «Новая закладка»: выбор чуть крупнее, чем на главной; тонкое кольцо выбора */
+.choice .plate{width:38px;height:38px;border-radius:12px}
+.choice .plate .kt-glyph{width:22px;height:22px}
+.choice.selected{border:1px solid var(--blue)!important;background:#f3f8ff!important;box-shadow:0 0 0 3px rgba(10,124,244,.08)}
+.choice.selected::after{width:15px;height:15px;top:-5px;right:-5px;background-size:9px;box-shadow:0 0 0 2px var(--bg)}
+/* pass 2: крайние плитки — по краям контента (линия заголовка и «Все ›»), равные промежутки */
+.bookmarks{justify-content:space-between;gap:12px}
+.bookmarks .bm{flex:0 0 auto;min-width:48px}
+.kt-glyph.g-plus{transform:scale(.96)}
+.kt-glyph.g-more{transform:none}
+.kt-glyph.g-book .i{stroke-width:1.8}
+/* pass 3: одинаковая ширина элементов (62px) → равные промежутки; поля ряда 13px = 20px − (62−48)/2,
+   поэтому крайние плитки по-прежнему на линии заголовка и «Все ›» */
+.bookmarks{padding:2px 13px 4px;gap:8px}
+.bookmarks .bm{flex:0 0 62px;min-width:0}

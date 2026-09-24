@@ -141,32 +141,27 @@
   // Классы слоёв: s — мягкая заливка, i — основной контур, a — акцентный контур, af — акцентная заливка.
   // Цвета задаёт тон плитки (.tone-*), поэтому одна иконка работает на любом цвете закладки.
   const BM_GLYPHS = {
-    plus: '<circle class="s" cx="12" cy="12" r="9.4"/><path class="i w" d="M12 7v10M7 12h10"/>',
+    plus: '<path class="i w" d="M12 6.5v11M6.5 12h11"/>',
     book:
-      '<path class="s i" d="M6.9 4.3h9.6c.8 0 1.5.7 1.5 1.5v12.7c0 .6-.4 1-1 1H7.9a2.4 2.4 0 0 1-2.4-2.4V5.7c0-.8.6-1.4 1.4-1.4Z"/>' +
-      '<path class="i" d="M5.5 17.1c0-1.2 1-2.1 2.2-2.1H18"/><path class="af" d="M13.4 4.3v6.2l1.8-1.3 1.8 1.3V4.3Z"/><path class="a" d="M8.4 8h2.4"/>',
+      '<path class="s i" d="M7 4.5h9.5c.8 0 1.5.7 1.5 1.5v12c0 .6-.4 1-1 1H8a2.5 2.5 0 0 1-2.5-2.5V6c0-.8.7-1.5 1.5-1.5Z"/>' +
+      '<path class="i" d="M5.5 16.5c0-1.1.9-2 2-2H18"/><path class="a" d="M13.5 4.7v5.6l1.5-1.1 1.5 1.1V4.7"/>',
     leaf:
-      '<path class="s i" d="M19.3 4.7C11 4.8 5.2 8.6 5.2 14.6c0 2.9 2 4.9 4.9 4.9 6.1 0 9.1-6.5 9.2-14.8Z"/>' +
-      '<path class="i" d="M4.6 20.3c3.1-5.2 7-8.7 11.7-11"/><path class="i t" d="M9.6 15l-.4-2.9M12.6 12.4l2.8-.3"/>',
+      '<path class="s i" d="M19 5C11.2 5.1 5.5 8.7 5.5 14.4c0 2.8 1.9 4.6 4.6 4.6C16 19 18.9 12.9 19 5Z"/><path class="i" d="M5 19.8c3-4.9 6.7-8.3 11.2-10.5"/>',
     atom:
-      '<circle class="s" cx="12" cy="12" r="8.6"/><ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(35 12 12)"/>' +
-      '<ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(-35 12 12)"/><circle class="af" cx="12" cy="12" r="2.2"/><circle class="if" cx="19.4" cy="6.8" r="1.35"/>',
+      '<ellipse class="i" cx="12" cy="12" rx="8.6" ry="3.4" transform="rotate(35 12 12)"/>' +
+      '<ellipse class="i" cx="12" cy="12" rx="8.6" ry="3.4" transform="rotate(-35 12 12)"/><circle class="if" cx="12" cy="12" r="1.9"/>',
     flask:
-      '<path class="af" d="M7.2 15.3h9.6l1.4 2.4a1.5 1.5 0 0 1-1.3 2.3H7.1a1.5 1.5 0 0 1-1.3-2.3Z"/>' +
-      '<path class="i" d="M9.3 4h5.4M10.4 4.2v5l-4.8 8.4A1.8 1.8 0 0 0 7.2 20h9.6a1.8 1.8 0 0 0 1.6-2.4l-4.8-8.4v-5"/><circle class="if" cx="12.6" cy="12.6" r=".9"/>',
+      '<path class="s i" d="M9.5 4h5M10.4 4.2v5l-4.7 8.3A1.7 1.7 0 0 0 7.2 20h9.6a1.7 1.7 0 0 0 1.5-2.5l-4.7-8.3v-5"/><path class="a" d="M7.6 15.5h8.8"/>',
     globe:
-      '<circle class="s i" cx="12" cy="12" r="8.2"/><ellipse class="i" cx="12" cy="12" rx="3.5" ry="8.2"/>' +
-      '<path class="a" d="M4.4 9.3h15.2M4.4 14.7h15.2"/>',
+      '<circle class="s i" cx="12" cy="12" r="8"/><ellipse class="i" cx="12" cy="12" rx="3.4" ry="8"/><path class="i" d="M4.4 12h15.2"/>',
     folder:
-      '<path class="s i" d="M4 7.3c0-1 .8-1.8 1.8-1.8h3.8l1.9 2h6.7c1 0 1.8.8 1.8 1.8v7.8c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8Z"/>' +
-      '<path class="a" d="M4.2 10.4h15.6"/>',
-    more:
-      '<rect class="s i" x="4.6" y="4.6" width="6.1" height="6.1" rx="2"/><rect class="s i" x="13.3" y="4.6" width="6.1" height="6.1" rx="2"/>' +
-      '<rect class="s i" x="4.6" y="13.3" width="6.1" height="6.1" rx="2"/><rect class="af" x="13.3" y="13.3" width="6.1" height="6.1" rx="2"/>',
+      '<path class="s i" d="M4 7.5c0-1 .8-1.8 1.8-1.8h3.7l1.9 2h6.8c1 0 1.8.8 1.8 1.8v7.5c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8Z"/>',
+    more: '<circle class="if" cx="6.5" cy="12" r="1.6"/><circle class="if" cx="12" cy="12" r="1.6"/><circle class="if" cx="17.5" cy="12" r="1.6"/>',
   };
   const bmGlyph = (n) => {
     if (!BM_GLYPHS[n]) console.warn("[icon] unknown bookmark icon:", n);
-    return '<svg class="kt-glyph" viewBox="0 0 24 24" aria-hidden="true">' + (BM_GLYPHS[n] || BM_GLYPHS.book) + "</svg>";
+    const key = BM_GLYPHS[n] ? n : "book";
+    return '<svg class="kt-glyph g-' + key + '" viewBox="0 0 24 24" aria-hidden="true">' + BM_GLYPHS[key] + "</svg>";
   };
 
   // плитка закладки: мягкая поверхность тона; свой цвет закладки меняет только фон
@@ -247,7 +242,12 @@
   const emptyState = (title, text) =>
     '<div class="empty"><div class="empty-icon">' + icon("doc") + "</div><strong>" + title + "</strong><p>" + text + "</p></div>";
 
-  const bmIconStyle = (b) => (isColor(b.color) ? ' style="--kt-bg:' + b.color + '"' : "");
+  // свой цвет закладки: сохранённый светлый оттенок — поверхность, иконка — приглушённый цвет той же гаммы
+  const BM_INKS = { "#f7eadc": "#95592f", "#e7f4e9": "#3a7a5a", "#e7f1fd": "#2f6db8", "#f0eafa": "#6552aa", "#f9e8ed": "#a04a62", "#edf0f3": "#4b5578" };
+  const bmIconStyle = (b) =>
+    isColor(b.color)
+      ? ' style="--kt-bg:' + b.color + (BM_INKS[b.color.toLowerCase()] ? ";--g-ink:" + BM_INKS[b.color.toLowerCase()] + ";--g-acc:" + BM_INKS[b.color.toLowerCase()] : "") + '"'
+      : "";
 
   function home() {
     const notes = store.listNotes();
