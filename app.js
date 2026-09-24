@@ -65,6 +65,7 @@
       biology: '<path d="M19 4C11 4 5 8 5 14c0 4 3 6 6 5 5-1 7-7 8-15ZM5 21c3-6 7-9 12-11"/>',
       help: '<circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.8 2.8 0 1 1 4.2 2.4c-1.2.7-1.7 1.2-1.7 2.6M12 18h.01"/>',
       info: '<circle cx="12" cy="12" r="10"/><path d="M12 10v7M12 7h.01"/>',
+      alert: '<path d="M12 6.5v7.5M12 17.6h.01" stroke-width="2.6"/>',
       search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
       dotsv: '<circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/>',
       chev: '<path d="m9 6 6 6-6 6"/>',
@@ -121,7 +122,7 @@
       S.screen = S.history.pop();
       S.sheet = null;
       render();
-      scrollTo(0, 0);
+      scrollTo(0, scrollMem[S.screen] || 0);
     } else go("home", false);
   };
 
@@ -171,7 +172,10 @@
 
   // processing и error — промежуточные экраны, в историю «назад» не попадают
   const TRANSIENT = ["processing", "error"];
+  // запоминаем прокрутку экрана, с которого уходим, чтобы «назад» вернул на то же место
+  const scrollMem = {};
   function go(s, push = true) {
+    scrollMem[S.screen] = scrollY;
     if (push && S.screen !== s && !TRANSIENT.includes(S.screen)) S.history.push(S.screen);
     S.screen = s;
     S.sheet = null;
@@ -209,7 +213,7 @@
     return (
       '<div class="thumb ' + sub.thumb + '" style="--cv1:' + c1 + ";--cv2:" + c2 + '">' +
       '<span class="thumb-page">' + icon(sub.icon) + "</span>" +
-      (src ? '<img class="thumb-img" src="' + esc(src) + '" alt="" loading="lazy" decoding="async">' : "") +
+      (src ? '<img class="thumb-img" src="' + esc(src) + '" alt="" width="60" height="60" decoding="sync">' : "") +
       "</div>"
     );
   }
@@ -247,8 +251,47 @@
     );
   }
 
+  // Декоративные детали: четырёхлучевые искры, скруглённые квадратики, точки.
+  // Только оформление: лежат под контентом, не перехватывают нажатия (.deco в styles.css).
+  const spark = (x, y, r, c) =>
+    '<path fill="' + c + '" d="M' + x + " " + (y - r) + "C" + (x + r * 0.14) + " " + (y - r * 0.14) + " " + (x + r * 0.14) + " " + (y - r * 0.14) + " " + (x + r) + " " + y +
+    "C" + (x + r * 0.14) + " " + (y + r * 0.14) + " " + (x + r * 0.14) + " " + (y + r * 0.14) + " " + x + " " + (y + r) +
+    "C" + (x - r * 0.14) + " " + (y + r * 0.14) + " " + (x - r * 0.14) + " " + (y + r * 0.14) + " " + (x - r) + " " + y +
+    "C" + (x - r * 0.14) + " " + (y - r * 0.14) + " " + (x - r * 0.14) + " " + (y - r * 0.14) + " " + x + " " + (y - r) + 'Z"/>';
+  const square = (x, y, s, c, rot) =>
+    '<rect x="' + (x - s / 2) + '" y="' + (y - s / 2) + '" width="' + s + '" height="' + s + '" rx="' + s * 0.3 + '" fill="' + c + '" transform="rotate(' + rot + " " + x + " " + y + ')"/>';
+  const dot = (x, y, r, c) => '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + c + '"/>';
+  const deco = (cls, w, h, inner) => '<svg class="deco ' + cls + '" viewBox="0 0 ' + w + " " + h + '" aria-hidden="true">' + inner + "</svg>";
+  const DECO = {
+    head: () =>
+      deco("deco-head", 112, 84, spark(76, 26, 13, "#2f86f6") + spark(101, 56, 7, "#9b7ff0") + square(42, 52, 11, "#9fe0c4", 18) + dot(55, 14, 3.5, "#ff9f8a") + dot(94, 12, 2.5, "#f5b83d")),
+    hero: () =>
+      deco("deco-hero-a", 40, 40, spark(20, 20, 13, "#f5b83d")) +
+      deco("deco-hero-b", 20, 20, dot(10, 10, 5, "#a78bfa")) +
+      deco("deco-hero-c", 24, 24, square(12, 12, 12, "#8ddbb8", 20)),
+    camera: () =>
+      deco("deco-cam-a", 30, 30, spark(15, 15, 12, "#2f86f6")) +
+      deco("deco-cam-b", 24, 24, square(12, 12, 12, "#8ddbb8", 18)) +
+      deco("deco-cam-c", 30, 30, spark(15, 15, 10, "#a78bfa")),
+    foot: () =>
+      deco("deco-foot", 180, 90, spark(40, 40, 10, "#9b7ff0") + square(96, 58, 10, "#9fe0c4", 20) + spark(140, 30, 14, "#2f86f6") + dot(120, 70, 3.5, "#ff9f8a") + dot(66, 20, 2.5, "#f5b83d")),
+    processing: () =>
+      deco("deco-proc-a", 30, 30, spark(15, 15, 12, "#f5b83d")) +
+      deco("deco-proc-b", 24, 24, square(12, 12, 12, "#8ddbb8", 22)) +
+      deco("deco-proc-c", 20, 20, dot(10, 10, 5, "#ff9f8a")) +
+      deco("deco-proc-d", 26, 26, spark(13, 13, 9, "#9b7ff0")),
+  };
+
+  // пустое состояние: небольшая иллюстрация из листов вместо одинокой иконки
+  const EMPTY_ART =
+    '<svg class="empty-art" viewBox="0 0 120 96" aria-hidden="true"><ellipse cx="60" cy="88" rx="38" ry="5" fill="#1c4fa0" opacity=".10"/>' +
+    '<rect x="22" y="18" width="50" height="62" rx="8" fill="#efeafd" stroke="#dcd3f8" transform="rotate(-10 47 49)"/>' +
+    '<rect x="44" y="12" width="52" height="66" rx="8" fill="#fff" stroke="#d6e4f5"/><rect x="52" y="22" width="24" height="5" rx="2.5" fill="#0a7cf4"/>' +
+    '<path d="M52 36h34M52 44h28M52 52h32" stroke="#cfd9e8" stroke-width="3.5" stroke-linecap="round"/><rect x="52" y="60" width="22" height="7" rx="3" fill="#d8f1e6"/>' +
+    spark(98, 16, 9, "#2f86f6") + square(20, 70, 9, "#8ddbb8", 18) + dot(104, 40, 3, "#ff9f8a") + "</svg>";
+
   const emptyState = (title, text) =>
-    '<div class="empty"><div class="empty-icon">' + icon("doc") + "</div><strong>" + title + "</strong><p>" + text + "</p></div>";
+    '<div class="empty">' + EMPTY_ART + "<strong>" + title + "</strong><p>" + text + "</p></div>";
 
   // свой цвет закладки: сохранённый светлый оттенок — поверхность, иконка — приглушённый цвет той же гаммы
   const BM_INKS = { "#f7eadc": "#95592f", "#e7f4e9": "#3a7a5a", "#e7f1fd": "#2f6db8", "#f0eafa": "#6552aa", "#f9e8ed": "#a04a62", "#edf0f3": "#4b5578" };
@@ -263,7 +306,7 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">✦</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
       bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
@@ -275,7 +318,7 @@
         .join("") +
       '<button class="bm" data-go="bookmarks"><div class="bm-icon kt tone-more">' +
       bmGlyph("more") +
-      '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div><div class="hero-label">✦ AI КОНСПЕКТ</div><h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p><button class="primary" data-go="camera">' +
+      '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() + '<div class="hero-label">' + icon("sparkle") + 'AI КОНСПЕКТ</div><h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p><button class="primary" data-go="camera">' +
       icon("camera") +
       "Сфотографировать</button>" +
       art("scan") +
@@ -291,6 +334,7 @@
     const list = store.listBookmarks();
     return (
       app() +
+      DECO.head() +
       head("Все закладки", plural(list.length, "закладка", "закладки", "закладок"), false, true) +
       '<div class="bm-list">' +
       list
@@ -321,6 +365,7 @@
     const list = store.listNotes();
     return (
       app() +
+      DECO.head() +
       head("Все конспекты", notesCount(list.length)) +
       searchBox("noteSearch", "Поиск по конспектам") + '<div class="note-list" id="allList">' +
       (list.length ? list.map(noteCard).join("") : emptyState("Здесь появятся твои конспекты", "Создай первый конспект из страниц учебника")) +
@@ -340,7 +385,7 @@
     return (
       app("camera") +
       '<div class="screen-head"><button class="back" data-back aria-label="Закрыть">' + icon("close") +
-      '</button><div class="camera-title"><b>Новый конспект</b><span>Сфотографируй страницы</span></div><span style="width:40px"></span></div><div class="viewfinder">' +
+      '</button><div class="camera-title"><b>Новый конспект</b><span>Сфотографируй страницы</span></div><span style="width:40px"></span></div><div class="viewfinder">' + DECO.camera() +
       viewfinder +
       '</div><div class="camera-bottom"><div class="page-strip">' +
       S.pages
@@ -375,7 +420,7 @@
       app("processing") +
       '<div class="top">' +
       brand() +
-      '</div><div class="visual-stage">' +
+      '</div><div class="visual-stage">' + DECO.processing() +
       art("pages") +
       '</div><div class="spinner"></div><h1>Создаём конспект</h1><p>Изучаем материал и выделяем главное</p><div class="progress-card" id="progress">' +
       progressRows() +
@@ -408,6 +453,7 @@
     const d = S.draftBookmark;
     return (
       app() +
+      DECO.head() +
       head(editing ? "Изменить закладку" : "Новая закладка", editing ? "Название и оформление" : "Создай раздел для своих конспектов", false, true) +
       '<label class="form-label">Название</label><div class="field-wrap"><input class="field" id="bmName" maxlength="40" placeholder="Например, История" value="' +
       esc(editing ? editing.name : "") +
@@ -423,7 +469,7 @@
       ).join("") +
       '</div><button class="primary wide create-bm" data-create-bm>' +
       (editing ? "Сохранить" : "Создать закладку") +
-      "</button></div>"
+      "</button>" + DECO.foot() + "</div>"
     );
   }
 
@@ -454,7 +500,7 @@
       brand() +
       '</div><div class="visual-stage">' +
       art("pages") +
-      '</div><div class="error-icon">!</div><h1>Не удалось создать конспект</h1><p>Что-то пошло не так. Твои фотографии сохранены.</p><div class="error-actions"><button class="primary wide" data-retry>Попробовать снова</button><button class="text-action" data-go="camera">Вернуться к страницам</button><p class="error-hint">Проверь подключение к интернету и попробуй ещё раз.</p></div></div>'
+      '</div><div class="error-icon">' + icon("alert") + '</div><h1>Не удалось создать конспект</h1><p>Что-то пошло не так. Твои фотографии сохранены.</p><div class="error-actions"><button class="primary wide" data-retry>Попробовать снова</button><button class="text-action" data-go="camera">Вернуться к страницам</button><p class="error-hint">Проверь подключение к интернету и попробуй ещё раз.</p></div></div>'
     );
   }
 
@@ -469,7 +515,7 @@
       const n = store.getNote(sh.id);
       if (!n) return "";
       return (
-        '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><div class="sheet-title">' +
+        '<div class="overlay" data-backdrop><div class="sheet s-' + esc(n.subject) + '"><div class="grab"></div><div class="sheet-title">' +
         noteThumb(n) +
         "<div><h3>" + esc(n.title) + '</h3><span class="subject ' + study.subject(n.subject).badge + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel) +
         '</span></div></div><button class="sheet-action" data-open-note="' + esc(n.id) +
@@ -551,9 +597,56 @@
     error,
   };
 
+  // ---------- обложки конспектов без мигания ----------
+  // Safari начинает загрузку <img>, созданного через innerHTML, асинхронно даже из кэша, поэтому
+  // в первом кадре под ним видна запасная обложка предмета, а через кадр — настоящая.
+  // Решение: держим уже загруженные <img> для каждой обложки и вставляем их вместо новых
+  // до первой отрисовки кадра. Такой элемент рисуется сразу, без промежуточного состояния.
+  const THUMB_POOL = new Map(); // src → загруженные HTMLImageElement
+
+  function pooledThumb(src) {
+    const pool = THUMB_POOL.get(src) || [];
+    return pool.find((img) => !img.isConnected && img.complete && img.naturalWidth > 0) || null;
+  }
+
+  function hydrateThumbs() {
+    root.querySelectorAll("img.thumb-img").forEach((fresh) => {
+      const src = fresh.getAttribute("src");
+      const ready = pooledThumb(src);
+      if (ready) {
+        fresh.replaceWith(ready);
+      } else {
+        const pool = THUMB_POOL.get(src) || [];
+        if (pool.length < 8) pool.push(fresh); // после загрузки пригодится при следующей отрисовке
+        THUMB_POOL.set(src, pool);
+      }
+    });
+  }
+
+  /** Заранее загружает обложки: к первому показу списка они уже готовы. */
+  function preloadThumbs() {
+    const srcs = [...new Set(store.listNotes().map((n) => n.thumbnail || n.thumbnailUrl).filter(Boolean))];
+    const jobs = srcs.flatMap((src) =>
+      [0, 1, 2].map(() => {
+        const img = new Image();
+        img.className = "thumb-img";
+        img.alt = "";
+        img.width = img.height = 60;
+        img.src = src;
+        const pool = THUMB_POOL.get(src) || [];
+        pool.push(img);
+        THUMB_POOL.set(src, pool);
+        return (img.decode ? img.decode() : Promise.resolve()).catch(() => {});
+      }),
+    );
+    // не ждём дольше 1,5 с: без сети приложение всё равно откроется
+    return Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 1500))]);
+  }
+
   function render() {
     const h = (SCREENS[S.screen] || home)();
     root.innerHTML = h + sheet();
+    hydrateThumbs();
     if (S.sheet?.type === "rename") {
       const f = root.querySelector("#renameField");
       f?.focus();
@@ -810,6 +903,7 @@
     q = q.trim().toLowerCase();
     const found = notes.filter((n) => (n.title + " " + (n.subjectLabel || "") + " " + (n.preview || "")).toLowerCase().includes(q));
     box.innerHTML = found.length ? found.map(noteCard).join("") : emptyState("Ничего не найдено", "Попробуй другой запрос");
+    hydrateThumbs();
   }
 
   // ---------- поиск внутри открытого конспекта: подсветка совпадений в уже отрисованном тексте ----------
@@ -889,24 +983,55 @@
     if (e.key === "Escape" && S.sheet) closeSheet();
   }
 
+  // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
+  // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry]";
+  let busy = false;
   root.addEventListener("click", (e) => {
-    onClick(e).catch((err) => console.error(err));
+    const once = e.target.closest(ONCE);
+    if (once && busy) return;
+    if (once) busy = true;
+    onClick(e)
+      .catch((err) => console.error(err))
+      .finally(() => {
+        if (once) busy = false;
+      });
   });
   root.addEventListener("input", onInput);
   document.addEventListener("keydown", onKeydown);
-  // Новая версия на сервере: приложение, оставленное открытым (PWA в фоне), обновляется само,
-  // когда пользователь возвращается к нему. Не перезагружаем посреди съёмки, обработки и открытого листа.
+  // Новая версия на сервере. Приложение, оставленное открытым (PWA в фоне), не должно
+  // перезагружаться на глазах у пользователя: если он уже начал что-то делать, старый экран
+  // сменился бы новым прямо под пальцем. Поэтому:
+  //  • вернулся в приложение и ещё ничего не нажал — обновляемся сразу;
+  //  • уже работает — перезагрузка откладывается до ухода приложения в фон (незаметно);
+  //  • никогда не перезагружаемся во время съёмки, обработки и с открытым листом.
   const BUILD = ((document.querySelector('script[src*="app.js"]') || {}).src || "").match(/[?&]v=(\d+)/)?.[1];
+  let touchedSinceVisible = false;
+  let updateReady = false;
+  const safeToReload = () => !["camera", "processing"].includes(S.screen) && !S.sheet;
+
+  async function liveBuild() {
+    navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
+    const html = await (await fetch("./index.html", { cache: "no-store" })).text();
+    return html.match(/app\.js\?v=(\d+)/)?.[1];
+  }
+
   async function checkForUpdate() {
-    if (!BUILD || document.visibilityState !== "visible" || navigator.onLine === false) return;
+    if (!BUILD || navigator.onLine === false) return;
+    if (document.visibilityState === "hidden") {
+      if (updateReady && safeToReload()) location.reload();
+      return;
+    }
+    touchedSinceVisible = false;
     try {
-      navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
-      const html = await (await fetch("./index.html", { cache: "no-store" })).text();
-      const live = html.match(/app\.js\?v=(\d+)/)?.[1];
-      if (live && live !== BUILD && !["camera", "processing"].includes(S.screen) && !S.sheet) location.reload();
+      const live = await liveBuild();
+      if (!live || live === BUILD) return;
+      updateReady = true;
+      if (!touchedSinceVisible && safeToReload()) location.reload();
     } catch (e) {}
   }
   document.addEventListener("visibilitychange", checkForUpdate);
+  document.addEventListener("pointerdown", () => (touchedSinceVisible = true), true);
 
   // обложка не загрузилась — убираем картинку, под ней остаётся обложка предмета
   root.addEventListener("error", (e) => e.target.classList?.contains("thumb-img") && e.target.remove(), true);
@@ -922,5 +1047,5 @@
     gallery.value = "";
   };
 
-  store.init().then(render);
+  store.init().then(preloadThumbs).then(render);
 })();
