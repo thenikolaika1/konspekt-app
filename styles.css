@@ -703,3 +703,123 @@ button,.note-card,.bm-row,.pick-row,.sheet-action{transition:transform .16s var(
 .sheet-action>.ui-icon{color:#4b5578}
 .sheet-action[data-open-note]>.ui-icon,.sheet-action[data-sheet=add]>.ui-icon{color:var(--blue)}
 .sheet-action.danger>.ui-icon{color:var(--danger)}
+
+/* ======================================================================
+   CLASSIC NOTE — плотный учебный конспект (формат старого приложения в новом Konspekt).
+   Текст идёт прямо по белому листу; карточки только у особых блоков.
+   Тема предмета: --n1 основной цвет, --n2 второй цвет, --n1-bg / --n2-bg светлые поверхности.
+   ====================================================================== */
+.nt-physics{--n1:#6a3fbf;--n1-bg:#f1ebfd;--n2:#1f7646;--n2-bg:#e7f5ec}
+.nt-history{--n1:#8c2238;--n1-bg:#f9eaed;--n2:#7a5b10;--n2-bg:#f7efda}
+.nt-biology{--n1:#0d7549;--n1-bg:#e3f3ea;--n2:#437418;--n2-bg:#eef6e2}
+.nt-geography{--n1:#135ea6;--n1-bg:#e5effa;--n2:#0a7471;--n2-bg:#e0f3f2}
+.nt-chemistry{--n1:#2544b4;--n1-bg:#e8ecfb;--n2:#09717a;--n2-bg:#dff2f3}
+.nt-literature{--n1:#8a2342;--n1-bg:#f9e9ef;--n2:#6a4b9c;--n2-bg:#f0ebf8}
+.nt-russian{--n1:#1f3f96;--n1-bg:#e7ecf9;--n2:#ad2f3a;--n2-bg:#fbe9ea}
+.nt-math{--n1:#2459c9;--n1-bg:#e8effc;--n2:#0a7471;--n2-bg:#e0f3f2}
+.nt-social,.nt-other{--n1:#3d4a7a;--n1-bg:#eceef6;--n2:#1f7646;--n2-bg:#e7f5ec}
+.note-view{--cn-ink:#161b2e;--cn-text:#1e2438;--cn-line:#e9e6df;overflow:clip;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+
+/* поиск по конспекту: компактный, прилипает к верху при прокрутке */
+.cn-search{position:sticky;top:0;z-index:6;margin:6px -20px 0;padding:6px 20px 8px;background:rgba(251,250,246,.93);
+  -webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);display:flex;align-items:center;gap:10px}
+.cn-search-box{position:relative;flex:1;display:block;min-width:0}
+.cn-search-box .ui-icon{position:absolute;left:12px;top:50%;width:18px;height:18px;margin-top:-9px;color:var(--n1);pointer-events:none;stroke-width:2}
+.cn-search-input{width:100%;height:40px;border-radius:12px;border:1px solid #e3e1da;background:#fff;padding:0 12px 0 38px;
+  font:inherit;font-size:15px;color:var(--cn-ink);outline:none;box-shadow:0 1px 2px rgba(20,28,64,.04);-webkit-appearance:none;appearance:none}
+.cn-search-input::placeholder{color:#8a91a8}
+.cn-search-input:focus{border-color:var(--n1);box-shadow:0 0 0 3px color-mix(in srgb,var(--n1) 14%,transparent)}
+.cn-search-count{font-size:12.5px;font-weight:600;color:var(--n1);white-space:nowrap}
+.cn-search-count:empty{display:none}
+mark.cn-hit{background:#ffe790;color:inherit;border-radius:3px;box-shadow:0 0 0 1.5px #ffe790}
+mark.cn-hit.current{background:#ffc94d;box-shadow:0 0 0 1.5px #ffc94d}
+
+/* вводный блок: компактный, мягкий тон предмета */
+.cn-intro{margin:6px 0 0;padding:11px 14px 12px;border-radius:16px;
+  background:linear-gradient(135deg,var(--n1-bg) 0%,color-mix(in srgb,var(--n1-bg) 55%,var(--n2-bg)) 100%);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--n1) 12%,transparent)}
+.cn-kicker{font-size:11.5px;line-height:15px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;color:var(--n2)}
+.cn-intro .note-title{margin:3px 0 0;font-size:24px;line-height:28px;font-weight:800;letter-spacing:-.4px;color:var(--n1)}
+.cn-lead{margin:5px 0 0;font-size:14.5px;line-height:20px;color:#3a4160}
+.cn-intro .note-meta{margin-top:6px;padding:0;border:0;font-size:12.5px;line-height:17px;color:#5f6784}
+.cn-intro .note-meta .sep{margin:0 6px;color:color-mix(in srgb,var(--n1) 45%,#9aa1b5)}
+
+/* лист конспекта */
+.cn-body{margin:10px -6px 0;padding:14px 16px 6px;background:#fff;border-radius:18px;
+  box-shadow:0 0 0 1px var(--cn-line),0 1px 2px rgba(20,28,64,.03),0 8px 22px rgba(20,40,90,.05);
+  font-size:16px;line-height:1.47;color:var(--cn-text);overflow-wrap:break-word}
+.cn-body p{margin:0 0 8px}
+.cn-body strong{font-weight:700;color:var(--cn-ink)}
+.cn-sec+.cn-sec{margin-top:16px}
+.cn-h2{margin:0 0 7px;font-size:19.5px;line-height:24px;font-weight:800;letter-spacing:-.3px;color:var(--n1)}
+.cn-h3{margin:12px 0 5px;font-size:16.5px;line-height:21px;font-weight:700;color:var(--n2)}
+.cn-lbl{margin:6px 0 3px!important;font-weight:700;color:var(--cn-ink)}
+.cn-list{margin:0 0 9px;padding-left:22px}
+.cn-list li{margin:0 0 5px;padding-left:2px}
+.cn-list li::marker{color:var(--n1)}
+ol.cn-list li::marker{font-weight:700}
+.cn-list li:last-child{margin-bottom:0}
+
+/* ключевые слова в тексте */
+.kw-def,.kw-term{font-weight:700;color:var(--n1)}
+.kw-date{font-weight:700;color:var(--n1)}
+.kw-person{font-weight:700;color:var(--n2)}
+.formula-inline{font-family:"Times New Roman",Georgia,serif;font-style:italic;font-weight:700}
+
+/* особые блоки: полоса слева, метка, компактно */
+.cn-box{margin:10px 0 12px;padding:9px 13px 10px 13px;border-radius:14px;border-left:4px solid var(--n1);background:var(--n1-bg)}
+.cn-box.tone-alt{border-left-color:var(--n2);background:var(--n2-bg)}
+.cn-box.tone-plain{border-left-color:#9aa3ba;background:#f4f5f9}
+.cn-box-label{margin:0 0 4px;font-size:12px;line-height:16px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--n1)}
+.cn-box.tone-alt .cn-box-label{color:var(--n2)}
+.cn-box.tone-plain .cn-box-label{color:#56607d}
+.cn-box p{margin:0}
+.cn-box p+p{margin-top:6px}
+.cn-box .cn-list{margin:0}
+.cn-body>.cn-box.conclusion{margin-top:14px}
+.cn-box .formula{margin:2px 0 6px;padding:0;font-family:"Times New Roman",Georgia,serif;font-size:22px;line-height:28px;font-style:italic;text-align:center;color:var(--cn-ink)}
+.cn-vars{margin:6px 0 0;padding-left:20px;font-size:15px;line-height:1.4}
+.cn-vars li{margin:0 0 2px}
+.cn-vars li::marker{color:var(--n1)}
+
+/* таблица: без сетки, только строки */
+.cn-body .table-wrap{margin:4px 0 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cn-body .note-table{width:100%;border-collapse:collapse;font-size:14.5px;line-height:1.38}
+.cn-body .note-table th,.cn-body .note-table td{border:0;border-bottom:1px solid var(--cn-line);padding:7px 10px 7px 0;text-align:left;vertical-align:top;background:none}
+.cn-body .note-table th{padding-top:4px;font-size:11.5px;line-height:15px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--n2);border-bottom:1.5px solid color-mix(in srgb,var(--n2) 35%,transparent)}
+.cn-body .note-table td:first-child{font-weight:700;color:var(--cn-ink)}
+.cn-body .note-table tr:last-child td{border-bottom:0}
+.cn-body .note-table th:last-child,.cn-body .note-table td:last-child{padding-right:0}
+
+/* разделы с акцентным заголовком: глоссарий, «Что нужно запомнить», вопросы */
+.cn-part{margin-top:14px;padding-top:12px;border-top:1px solid var(--cn-line)}
+.cn-h2alt{margin:0 0 7px;font-size:17.5px;line-height:22px;font-weight:800;letter-spacing:-.2px;color:var(--n2)}
+.cn-gl{margin:0 0 7px!important}
+.cn-date{display:grid;grid-template-columns:auto 1fr;column-gap:10px}
+.cn-date .kw-date{min-width:40px}
+.cn-part.remember .cn-list li{margin-bottom:6px}
+
+/* вопросы и ответы: без карточек, тонкие линии между вопросами */
+.cn-part.qa-part{margin-top:16px}
+.cn-part.qa-part .cn-h2alt{margin-bottom:0;padding-bottom:10px}
+.cn-body .qa{display:block;padding:11px 0 12px;border-top:1px solid var(--cn-line)}
+.cn-body .qa-q{font-size:17px;line-height:22px;font-weight:700;color:var(--n1)}
+.cn-body .qa-a{margin-top:5px;font-size:16px;line-height:1.47;color:var(--cn-text)}
+.cn-body .note-warning{margin:0 0 10px}
+/* pass 2 */
+body:has(.note-view){overflow:visible;overflow-x:clip}
+.note-view{--cn-ink:#11162a;--cn-text:#1a2034}
+.nt-physics{--n1-bg:#eee6fc;--n2-bg:#e4f4ea}
+.cn-intro{background:
+  radial-gradient(160px 120px at 100% 100%,color-mix(in srgb,var(--n2-bg) 90%,transparent),transparent 75%),
+  linear-gradient(120deg,var(--n1-bg) 0%,color-mix(in srgb,var(--n1-bg) 70%,#fff) 60%,var(--n2-bg) 100%)}
+.cn-search-input::-webkit-search-cancel-button{cursor:pointer}
+/* таблица из 3+ колонок: каждая строка — компактный блок */
+.cn-body .note-table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.cn-body .note-table.stack,.cn-body .note-table.stack tbody,.cn-body .note-table.stack tr,.cn-body .note-table.stack td{display:block;width:auto}
+.cn-body .note-table.stack tr{padding:8px 0 9px;border-bottom:1px solid var(--cn-line)}
+.cn-body .note-table.stack tr:first-child{border-top:1.5px solid color-mix(in srgb,var(--n2) 35%,transparent)}
+.cn-body .note-table.stack tr:last-child{border-bottom:0;padding-bottom:2px}
+.cn-body .note-table.stack td{border:0;padding:0;font-size:15px;line-height:1.42}
+.cn-body .note-table.stack td:first-child{margin-bottom:2px;font-size:16px;color:var(--n1)}
+.cn-body .note-table.stack td[data-label]::before{content:attr(data-label) ": ";font-weight:700;color:var(--n2)}

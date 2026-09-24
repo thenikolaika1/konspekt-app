@@ -387,15 +387,18 @@
     if (!n) return home();
     const view = modes.classic.render(n.content);
     return (
-      app() +
+      app("note-view nt-" + esc(n.content.meta.subject)) +
       '<div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><div class="note-actions"><button class="circle-btn note-bookmark" data-sheet="add" aria-label="Добавить в закладку">' + icon("bookmark") +
       '</button><button class="circle-btn note-menu" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
-      "</button></div></div>" +
+      "</button></div></div></div>" +
+      '<div class="cn-search"><label class="cn-search-box">' + icon("search") +
+      '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
+      '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div>' +
+      '<div class="cn-doc" id="noteDoc">' +
       view.head +
-      "</div>" +
       view.body +
-      "</div>"
+      "</div></div>"
     );
   }
 
@@ -808,13 +811,80 @@
     box.innerHTML = found.length ? found.map(noteCard).join("") : emptyState("Ничего не найдено", "Попробуй другой запрос");
   }
 
+  // ---------- поиск внутри открытого конспекта: подсветка совпадений в уже отрисованном тексте ----------
+
+  const NOTE_FIND = { hits: [], index: -1 };
+
+  function clearNoteMarks(doc) {
+    doc.querySelectorAll("mark.cn-hit").forEach((m) => {
+      const parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function findInNote(query) {
+    const doc = root.querySelector("#noteDoc");
+    const count = root.querySelector("#inNoteCount");
+    if (!doc) return;
+    clearNoteMarks(doc);
+    NOTE_FIND.hits = [];
+    NOTE_FIND.index = -1;
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) {
+      if (count) count.textContent = "";
+      return;
+    }
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.toLowerCase().includes(q)) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let from = 0;
+      for (let at = lower.indexOf(q); at !== -1; at = lower.indexOf(q, from)) {
+        frag.appendChild(document.createTextNode(text.slice(from, at)));
+        const m = document.createElement("mark");
+        m.className = "cn-hit";
+        m.textContent = text.slice(at, at + q.length);
+        frag.appendChild(m);
+        NOTE_FIND.hits.push(m);
+        from = at + q.length;
+      }
+      frag.appendChild(document.createTextNode(text.slice(from)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    if (count) count.textContent = NOTE_FIND.hits.length ? "" : "Нет совпадений";
+    nextNoteHit();
+  }
+
+  function nextNoteHit() {
+    const hits = NOTE_FIND.hits;
+    const count = root.querySelector("#inNoteCount");
+    if (!hits.length) return;
+    hits[NOTE_FIND.index]?.classList.remove("current");
+    NOTE_FIND.index = (NOTE_FIND.index + 1) % hits.length;
+    const m = hits[NOTE_FIND.index];
+    m.classList.add("current");
+    if (count) count.textContent = NOTE_FIND.index + 1 + " из " + hits.length;
+    const bar = root.querySelector(".cn-search");
+    const y = m.getBoundingClientRect().top + window.scrollY - (bar ? bar.offsetHeight : 0) - 70;
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  }
+
   function onInput(e) {
+    if (e.target.id === "inNoteSearch") findInNote(e.target.value);
     if (e.target.id === "noteSearch") filterList("#allList", store.listNotes(), e.target.value);
     if (e.target.id === "bmSearch") filterList("#bmList", store.notesInBookmark(S.bookmarkId), e.target.value);
   }
 
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
+    if (e.key === "Enter" && e.target.id === "inNoteSearch") {
+      e.preventDefault();
+      nextNoteHit();
+    }
     if (e.key === "Escape" && S.sheet) closeSheet();
   }
 
