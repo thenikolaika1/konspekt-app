@@ -153,8 +153,7 @@
         g.formulas
           .map((f) => '<div class="formula">' + esc(f.expression) + "</div>" + (f.meaning ? "<p>" + inline(f.meaning) + "</p>" : "") + variables(f.variables))
           .join(""));
-    if (c.remember.length)
-      h += box("remember-key", "imp", "Важно · что нужно запомнить", c.remember.length === 1 ? "<p>" + inline(c.remember[0]) + "</p>" : list(c.remember));
+    if (c.remember.length) h += part("remember", "Что нужно запомнить", list(c.remember));
     if (c.selfCheck.length) {
       h += part("qa-part", "Вопросы и задания",
         c.selfCheck
