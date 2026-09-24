@@ -551,3 +551,17 @@ button,.note-card,.bm-row,.pick-row,.sheet-action{transition:transform .16s var(
    поэтому крайние плитки по-прежнему на линии заголовка и «Все ›» */
 .bookmarks{padding:2px 13px 4px;gap:8px}
 .bookmarks .bm{flex:0 0 62px;min-width:0}
+/* ===== обложки конспектов: яркая миниатюра темы в спокойной карточке ===== */
+.note-card .thumb[class],.sheet-title .thumb[class]{width:60px;height:60px;border-radius:10px;border:0;padding:0;
+  display:block;position:relative;overflow:hidden;isolation:isolate;opacity:1;filter:none;
+  background:linear-gradient(145deg,var(--cv1,#3d4a7a),var(--cv2,#8e9bc4));color:var(--cv1,#3d4a7a);
+  box-shadow:0 2px 7px rgba(20,28,64,.12)}
+.note-card .thumb[class]::before,.sheet-title .thumb[class]::before{content:"";position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),inset 0 1px 0 rgba(255,255,255,.18)}
+.note-card .thumb[class]::after,.sheet-title .thumb[class]::after{display:none}
+/* запасная обложка предмета: листок конспекта с иконкой на градиенте */
+.thumb .thumb-page{position:absolute;left:14px;top:11px;width:32px;height:40px;border-radius:5px;background:#fffdf8;
+  transform:rotate(-6deg);box-shadow:0 3px 8px rgba(10,16,40,.22),5px 3px 0 -1px rgba(255,255,255,.45);
+  display:grid;place-items:center;z-index:1}
+.thumb .thumb-page .ui-icon[class]{width:20px;height:20px;stroke-width:1.9;color:var(--cv1,#3d4a7a);position:static}
+.thumb .thumb-img[class]{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;opacity:1;filter:none;display:block}

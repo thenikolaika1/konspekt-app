@@ -52,18 +52,18 @@
       : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
   // asset: путь к фирменной миниатюре предмета (например "./assets/subjects/history.png").
-  // Пока null — показывается текущая иконка-placeholder.
+  // cover: пара цветов градиента запасной обложки, если у конспекта нет своей (note.thumbnail).
   const SUBJECTS = {
-    history: { label: "История", pill: "", badge: "", thumb: "t-history", icon: "history", asset: null },
-    biology: { label: "Биология", pill: "bio", badge: "bio", thumb: "t-biology", icon: "biology", asset: null },
-    physics: { label: "Физика", pill: "physics", badge: "physics", thumb: "t-physics", icon: "physics", asset: null },
-    chemistry: { label: "Химия", pill: "physics", badge: "physics", thumb: "t-physics", icon: "flask", asset: null },
-    geography: { label: "География", pill: "bio", badge: "bio", thumb: "t-biology", icon: "globe", asset: null },
-    literature: { label: "Литература", pill: "", badge: "", thumb: "t-history", icon: "book", asset: null },
-    russian: { label: "Русский язык", pill: "", badge: "", thumb: "t-history", icon: "edit", asset: null },
-    social: { label: "Обществознание", pill: "other", badge: "other", thumb: "t-other", icon: "user", asset: null },
-    math: { label: "Математика", pill: "physics", badge: "physics", thumb: "t-physics", icon: "doc", asset: null },
-    other: { label: "Другое", pill: "other", badge: "other", thumb: "t-other", icon: "doc", asset: null },
+    history: { label: "История", pill: "", badge: "", thumb: "t-history", icon: "history", asset: null, cover: ["#8e2c3c", "#d9a441"] },
+    biology: { label: "Биология", pill: "bio", badge: "bio", thumb: "t-biology", icon: "biology", asset: null, cover: ["#12855a", "#a9c79a"] },
+    physics: { label: "Физика", pill: "physics", badge: "physics", thumb: "t-physics", icon: "physics", asset: null, cover: ["#2f5bea", "#8a5cf6"] },
+    chemistry: { label: "Химия", pill: "physics", badge: "physics", thumb: "t-physics", icon: "flask", asset: null, cover: ["#1fb5b0", "#2e4fcf"] },
+    geography: { label: "География", pill: "bio", badge: "bio", thumb: "t-biology", icon: "globe", asset: null, cover: ["#1f6fd1", "#22b3a3"] },
+    literature: { label: "Литература", pill: "", badge: "", thumb: "t-history", icon: "book", asset: null, cover: ["#8e2c3c", "#b9a6e6"] },
+    russian: { label: "Русский язык", pill: "", badge: "", thumb: "t-history", icon: "edit", asset: null, cover: ["#23409e", "#b8545f"] },
+    social: { label: "Обществознание", pill: "other", badge: "other", thumb: "t-other", icon: "user", asset: null, cover: ["#3a4f9a", "#8fa2d8"] },
+    math: { label: "Математика", pill: "physics", badge: "physics", thumb: "t-physics", icon: "doc", asset: null, cover: ["#2f5bea", "#5fa8f5"] },
+    other: { label: "Другое", pill: "other", badge: "other", thumb: "t-other", icon: "doc", asset: null, cover: ["#3d4a7a", "#8e9bc4"] },
   };
 
   const BLOCK_TYPES = [

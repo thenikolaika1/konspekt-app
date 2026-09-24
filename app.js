@@ -197,11 +197,18 @@
     go("bookmark");
   }
 
-  function subjectThumb(subjectKey, extraCls) {
-    const sub = study.subject(subjectKey);
+  /**
+   * Обложка конспекта: note.thumbnail / note.thumbnailUrl (обложка темы) поверх запасной обложки предмета.
+   * Запасная — градиент предмета + листок с иконкой; она же остаётся видна, если картинка не загрузилась.
+   */
+  function noteThumb(n) {
+    const sub = study.subject(n.subject);
+    const src = n.thumbnail || n.thumbnailUrl || sub.asset;
+    const [c1, c2] = sub.cover;
     return (
-      '<div class="thumb ' + sub.thumb + (extraCls ? " " + extraCls : "") + '">' +
-      (sub.asset ? '<img class="thumb-img" src="' + esc(sub.asset) + '" alt="">' : icon(sub.icon)) +
+      '<div class="thumb ' + sub.thumb + '" style="--cv1:' + c1 + ";--cv2:" + c2 + '">' +
+      '<span class="thumb-page">' + icon(sub.icon) + "</span>" +
+      (src ? '<img class="thumb-img" src="' + esc(src) + '" alt="" loading="lazy" decoding="async">' : "") +
       "</div>"
     );
   }
@@ -231,7 +238,7 @@
     const sub = study.subject(n.subject);
     return (
       '<div class="note-card" data-note="' + esc(n.id) + '">' +
-      subjectThumb(n.subject) +
+      noteThumb(n) +
       "<div><h3>" + esc(n.title) + '</h3><div class="meta"><span class="pill ' + sub.pill + '">' +
       esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt)) +
       '</div><div class="preview">' + esc(n.preview) + "</div></div>" +
@@ -459,7 +466,7 @@
       if (!n) return "";
       return (
         '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><div class="sheet-title">' +
-        subjectThumb(n.subject) +
+        noteThumb(n) +
         "<div><h3>" + esc(n.title) + '</h3><span class="subject ' + study.subject(n.subject).badge + '">' + esc(n.subjectLabel) +
         '</span></div></div><button class="sheet-action" data-open-note="' + esc(n.id) +
         '">' + icon("open") + "<span>Открыть</span>" + CHEV + '</button><button class="sheet-action" data-sheet="add">' + icon("bookmark") +
@@ -816,6 +823,8 @@
   });
   root.addEventListener("input", onInput);
   document.addEventListener("keydown", onKeydown);
+  // обложка не загрузилась — убираем картинку, под ней остаётся обложка предмета
+  root.addEventListener("error", (e) => e.target.classList?.contains("thumb-img") && e.target.remove(), true);
 
   cam.onchange = () => {
     const files = cam.files;

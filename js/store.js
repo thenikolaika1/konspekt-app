@@ -42,16 +42,19 @@
     };
   }
 
-  function makeNote(id, content, source, createdAt) {
+  /** thumbnail — необязательная обложка темы (путь или URL); без неё UI показывает обложку предмета. */
+  function makeNote(id, content, source, createdAt, thumbnail) {
     const c = K.study.normalize(content);
-    return { id, ...summarize(c), createdAt, updatedAt: createdAt, openedAt: null, source, schemaVersion: c.schemaVersion, content: c };
+    const note = { id, ...summarize(c), createdAt, updatedAt: createdAt, openedAt: null, source, schemaVersion: c.schemaVersion, content: c };
+    if (thumbnail) note.thumbnail = thumbnail;
+    return note;
   }
 
   function seed() {
     const now = Date.now();
     db = {
       version: 1,
-      notes: K.mock.seedNotes().map((s) => makeNote(s.id, s.content, { kind: "demo" }, now - s.ageMs)),
+      notes: K.mock.seedNotes().map((s) => makeNote(s.id, s.content, { kind: "demo" }, now - s.ageMs, s.thumbnail)),
       bookmarks: K.mock.seedBookmarks(),
     };
   }
@@ -69,6 +72,19 @@
     }
   }
 
+  /** Демо-конспекты, сохранённые до появления обложек, получают свою обложку. */
+  function migrateThumbnails() {
+    let changed = false;
+    K.mock.seedNotes().forEach((s) => {
+      const n = db.notes.find((x) => x.id === s.id);
+      if (n && !n.thumbnail && !n.thumbnailUrl && s.thumbnail) {
+        n.thumbnail = s.thumbnail;
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
   const findNote = (id) => db.notes.find((n) => n.id === id) || null;
   const findBookmark = (id) => db.bookmarks.find((b) => b.id === id) || null;
 
@@ -76,6 +92,10 @@
     init() {
       if (!load()) {
         seed();
+        try {
+          persist();
+        } catch (e) {}
+      } else if (migrateThumbnails()) {
         try {
           persist();
         } catch (e) {}

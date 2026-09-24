@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2757"/>
+      <stop offset=".42" stop-color="#6e2437"/>
+      <stop offset=".72" stop-color="#c86a3f"/>
+      <stop offset=".84" stop-color="#e8b35a"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#27305e"/>
+      <stop offset="1" stop-color="#121a3f"/>
+    </linearGradient>
+    <radialGradient id="sun" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#fff1c4"/>
+      <stop offset=".55" stop-color="#f4c766"/>
+      <stop offset="1" stop-color="#f4c766" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fbf4e2"/>
+      <stop offset="1" stop-color="#e3cfa4"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" fill="url(#sky)"/>
+  <circle cx="84" cy="84" r="22" fill="url(#sun)"/>
+  <circle cx="84" cy="84" r="9" fill="#fbe3a0"/>
+  <!-- крепость на берегу -->
+  <path d="M0 88V74h5v-5h4v5h4v-9h3v-4h3v4h3v9h4v-5h4v5h5v14z" fill="#3a1a2a"/>
+  <path d="M17 61l1.5-5 1.5 5z" fill="#3a1a2a"/>
+  <rect y="85" width="120" height="35" fill="url(#sea)"/>
+  <!-- корабль -->
+  <g transform="translate(70 80) scale(1.14) translate(-70 -80)">
+    <path d="M58 30v50M72 24v56M85 34v46" stroke="#2b1520" stroke-width="1.6"/>
+    <path d="M46 33c5 4 7 10 7 16l12 0c0-6-2-12-7-16z" fill="url(#sail)" transform="translate(-1 0)"/>
+    <path d="M47 53c4 4 6 9 6 14h15c0-5-2-10-6-14z" fill="url(#sail)"/>
+    <path d="M62 27c5 4 7 11 7 18h13c0-7-2-14-7-18z" fill="url(#sail)"/>
+    <path d="M61 49c5 4 7 10 7 17h16c0-7-2-13-7-17z" fill="url(#sail)"/>
+    <path d="M77 37c4 3 6 8 6 13h11c0-5-2-10-6-13z" fill="url(#sail)"/>
+    <path d="M77 54c4 3 6 8 6 13h12c0-5-2-10-6-13z" fill="url(#sail)"/>
+    <path d="M72 24l8 2.5-8 2.5z" fill="#c4304a"/>
+    <path d="M38 74h63l-3 4c-1 4-5 8-10 8H50c-6 0-10-4-11-8z" fill="#3b1a22"/>
+    <path d="M42 78h56" stroke="#d9a441" stroke-width="1.4"/>
+    <path d="M86 74l11-8 1 8z" fill="#3b1a22"/>
+  </g>
+  <!-- волны -->
+  <g fill="none" stroke="#e8b35a" stroke-linecap="round">
+    <path d="M22 93c4-2 8-2 12 0" stroke-width="1.6" opacity=".9"/>
+    <path d="M70 98c5-2 10-2 15 0" stroke-width="1.6" opacity=".85"/>
+    <path d="M8 106c5-2 10-2 15 0M44 108c5-2 10-2 15 0M92 108c5-2 10-2 15 0" stroke-width="1.4" opacity=".55"/>
+  </g>
+</svg>
