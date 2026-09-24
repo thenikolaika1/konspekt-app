@@ -1,0 +1,10 @@
+=== HTTP ===
+index.html 200 last-modified=Thu, 24 Sep 2026 18:01:59 GMT v=25:YES
+service-worker.js 200 last-modified=Thu, 24 Sep 2026 18:01:59 GMT konspekt-v25:YES
+styles.css?v=25 200 last-modified=Thu, 24 Sep 2026 18:01:59 GMT --note-primary:YES nt-physics:YES cn-h2alt:YES
+js/classic-renderer.js?v=25 200 last-modified=Thu, 24 Sep 2026 18:01:59 GMT cn-card:YES qa-label:YES part("remember":YES
+js/mock-content.js?v=25 200 last-modified=Thu, 24 Sep 2026 18:01:59 GMT id: "b9", type: "IMPORTANT":YES
+physics {"app":"app scr-note note-view nt-physics","css":["styles.css?v=25"],"bodyFont":"17px","h2Font":"19.5px","h2Bg":"linear-gradient(90deg, rgb(235, 224, 253) 0%, color(srgb 0.9","qFont":"18px","important":null,"cards":1,"sw":true}
+physics caches ["konspekt-v25"]
+history {"app":"app scr-note note-view nt-history","css":["styles.css?v=25"],"bodyFont":"17.5px","h2Font":"19.5px","h2Bg":"linear-gradient(90deg, rgb(220, 233, 253) 0%, color(srgb 0.8","qFont":"18px","important":"rgb(253, 227, 219)","cards":3,"sw":false}
+history caches []
