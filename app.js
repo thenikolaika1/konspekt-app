@@ -16,8 +16,8 @@
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
-  // как цвет выглядит в палитре выбора (06-new-bookmark.png); сохраняется светлый оттенок из BM_COLORS
-  const BM_SWATCHES = ["#f6e1d2", "#c5eecc", "#bcdefc", "#d3cff5", "#facbcc", "#cad2e0"];
+  // как цвет выглядит в палитре выбора: насыщенный тон, который станет цветом иконки; сохраняется светлый оттенок из BM_COLORS
+  const BM_SWATCHES = ["#cf9164", "#34a06e", "#2f84ea", "#7d64dc", "#cc5f78", "#6f7b9c"];
   const isColor = (c) => /^#[0-9a-f]{6}$/i.test(c || "");
 
   const S = {
@@ -83,9 +83,9 @@
 
   const art = (type) => {
     if (type === "scan")
-      return '<svg class="hero-illustration" viewBox="0 0 180 180" aria-hidden="true"><defs><linearGradient id="ph" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#eaf3fc"/></linearGradient><linearGradient id="pg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff7df"/><stop offset="1" stop-color="#f0dfb7"/></linearGradient></defs><ellipse cx="92" cy="156" rx="70" ry="13" fill="#2b5f8f" opacity=".10"/><g transform="rotate(-8 85 105)"><path d="M25 75c25-12 46-8 62 5v70c-17-12-38-16-62-5z" fill="url(#pg)" stroke="#d4bc89"/><path d="M87 80c20-14 43-16 68-5v70c-25-10-47-7-68 5z" fill="#fffaf0" stroke="#d4bc89"/><path d="M87 81v69" stroke="#b99e6d"/><path d="M38 94h34M38 104h31M38 114h35M101 92h39M101 102h35M101 112h38M101 122h28" stroke="#b8a47d" opacity=".65" stroke-width="2"/></g><g transform="translate(75 16) rotate(7 43 64)"><rect width="86" height="130" rx="16" fill="#18304b"/><rect x="6" y="7" width="74" height="116" rx="11" fill="url(#ph)"/><rect x="31" y="3" width="24" height="4" rx="2" fill="#70849a"/><path d="M17 31h14v3H20v11h-3zm52 0H55v3h11v11h3zM17 98h14v-3H20V84h-3zm52 0H55v-3h11V84h3z" fill="#2789e8"/><path d="M27 52h33M27 61h29M27 70h34M27 79h25" stroke="#aab9c8" stroke-width="3" stroke-linecap="round"/></g><circle cx="155" cy="29" r="14" fill="#2789e8"/><path d="m155 21 2.2 5.8 5.8 2.2-5.8 2.2-2.2 5.8-2.2-5.8-5.8-2.2 5.8-2.2z" fill="#fff"/></svg>';
+      return '<svg class="hero-illustration" viewBox="0 0 180 180" aria-hidden="true"><defs><linearGradient id="hs-ph" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#e2eeff"/></linearGradient><linearGradient id="hs-pg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff5da"/><stop offset="1" stop-color="#eed29a"/></linearGradient><linearGradient id="hs-pf" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1d3478"/><stop offset="1" stop-color="#0d1747"/></linearGradient><linearGradient id="hs-sp" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2b95ff"/><stop offset="1" stop-color="#0a6ee6"/></linearGradient></defs><ellipse cx="92" cy="157" rx="70" ry="12" fill="#1c4fa0" opacity=".13"/><g transform="rotate(-8 85 105)"><path d="M25 75c25-12 46-8 62 5v70c-17-12-38-16-62-5z" fill="url(#hs-pg)" stroke="#cfae6a"/><path d="M87 80c20-14 43-16 68-5v70c-25-10-47-7-68 5z" fill="#fffaf0" stroke="#cfae6a"/><path d="M87 81v69" stroke="#b08a4c"/><path d="M38 94h34M38 104h31M38 114h35M101 92h39M101 102h35M101 112h38M101 122h28" stroke="#b69455" opacity=".6" stroke-width="2"/></g><g transform="translate(75 16) rotate(7 43 64)"><rect x="2" y="4" width="86" height="130" rx="16" fill="#0d1747" opacity=".16"/><rect width="86" height="130" rx="16" fill="url(#hs-pf)"/><rect x="6" y="7" width="74" height="116" rx="11" fill="url(#hs-ph)"/><rect x="31" y="3" width="24" height="4" rx="2" fill="#5a6c9a"/><path d="M17 31h14v3H20v11h-3zm52 0H55v3h11v11h3zM17 98h14v-3H20V84h-3zm52 0H55v-3h11V84h3z" fill="#0a7cf4"/><rect x="27" y="47" width="26" height="5" rx="2.5" fill="#0a7cf4" opacity=".85"/><path d="M27 60h33M27 68h29" stroke="#a9c1e4" stroke-width="3" stroke-linecap="round"/><rect x="25" y="74" width="38" height="11" rx="4" fill="#d8f1e6"/><path d="M30 79.5h26" stroke="#1f9d74" stroke-width="3" stroke-linecap="round"/></g><circle cx="155" cy="29" r="15.5" fill="#fff" opacity=".9"/><circle cx="155" cy="29" r="13" fill="url(#hs-sp)"/><path d="m155 21 2.2 5.8 5.8 2.2-5.8 2.2-2.2 5.8-2.2-5.8-5.8-2.2 5.8-2.2z" fill="#fff"/></svg>';
     if (type === "pages")
-      return '<svg class="pages-illustration" viewBox="0 0 260 220" aria-hidden="true"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#edf6ff"/><stop offset="1" stop-color="#d9ebff"/></linearGradient></defs><ellipse cx="130" cy="199" rx="90" ry="12" fill="#173d61" opacity=".08"/><g transform="translate(35 30) rotate(-9 75 80)"><rect width="145" height="165" rx="13" fill="#fff" stroke="#dfe8f1"/><rect x="18" y="20" width="46" height="8" rx="4" fill="#c9ddf2"/><path d="M18 45h105M18 58h94M18 71h104M18 84h76M18 110h105M18 123h88" stroke="#d6dee8" stroke-width="5" stroke-linecap="round"/></g><g transform="translate(83 18) rotate(8 75 80)"><rect width="145" height="165" rx="13" fill="#fff" stroke="#dfe8f1"/><rect x="18" y="20" width="62" height="9" rx="4" fill="#2789e8" opacity=".28"/><path d="M18 47h105M18 60h92M18 73h105M18 86h82" stroke="#d6dee8" stroke-width="5" stroke-linecap="round"/><rect x="18" y="105" width="109" height="39" rx="8" fill="url(#a)"/><path d="M28 117h72M28 128h84" stroke="#9fc8ee" stroke-width="4" stroke-linecap="round"/></g><circle cx="216" cy="35" r="22" fill="#eef7ff"/><path d="m216 22 3.5 9.5 9.5 3.5-9.5 3.5-3.5 9.5-3.5-9.5-9.5-3.5 9.5-3.5z" fill="#2789e8"/></svg>';
+      return '<svg class="pages-illustration" viewBox="0 0 260 220" aria-hidden="true"><defs><linearGradient id="pp-hl" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e8f2ff"/><stop offset="1" stop-color="#d1e4fd"/></linearGradient><linearGradient id="pp-sp" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2b95ff"/><stop offset="1" stop-color="#0a6ee6"/></linearGradient></defs><ellipse cx="130" cy="200" rx="92" ry="12" fill="#1c4fa0" opacity=".12"/><g transform="translate(20 40) rotate(-14 75 80)"><rect width="140" height="160" rx="13" fill="#f0ecfd" stroke="#dcd3f8"/><rect x="18" y="20" width="40" height="8" rx="4" fill="#8f74f0" opacity=".32"/><path d="M18 45h98M18 58h86M18 71h96" stroke="#d9d0f6" stroke-width="5" stroke-linecap="round"/></g><g transform="translate(38 30) rotate(-5 75 80)"><rect x="3" y="5" width="145" height="165" rx="13" fill="#123a5a" opacity=".06"/><rect width="145" height="165" rx="13" fill="#e9f7f0" stroke="#c9e9d9"/><rect x="18" y="20" width="46" height="8" rx="4" fill="#1f9d74" opacity=".38"/><path d="M18 45h105M18 58h94M18 71h104M18 84h76M18 110h105M18 123h88" stroke="#c6e4d6" stroke-width="5" stroke-linecap="round"/></g><g transform="translate(83 18) rotate(8 75 80)"><rect x="3" y="6" width="145" height="165" rx="13" fill="#123a7a" opacity=".09"/><rect width="145" height="165" rx="13" fill="#fff" stroke="#d6e4f5"/><rect x="18" y="20" width="62" height="9" rx="4.5" fill="#0a7cf4" opacity=".85"/><path d="M18 47h105M18 60h92M18 73h105" stroke="#d5deea" stroke-width="5" stroke-linecap="round"/><rect x="18" y="84" width="44" height="10" rx="4" fill="#dcf3e8"/><path d="M24 89h32" stroke="#1f9d74" stroke-width="3.5" stroke-linecap="round"/><rect x="18" y="105" width="109" height="39" rx="8" fill="url(#pp-hl)"/><rect x="18" y="105" width="4" height="39" rx="2" fill="#0a7cf4"/><path d="M30 117h72M30 128h84" stroke="#7fb0ec" stroke-width="4" stroke-linecap="round"/></g><circle cx="216" cy="35" r="25" fill="#fff" opacity=".85"/><circle cx="216" cy="35" r="21" fill="url(#pp-sp)"/><path d="m216 23 3.3 8.7 8.7 3.3-8.7 3.3-3.3 8.7-3.3-8.7-8.7-3.3 8.7-3.3z" fill="#fff"/><circle cx="36" cy="30" r="4" fill="#1f9d74" opacity=".35"/></svg>';
     return "";
   };
 
@@ -141,32 +141,27 @@
   // Классы слоёв: s — мягкая заливка, i — основной контур, a — акцентный контур, af — акцентная заливка.
   // Цвета задаёт тон плитки (.tone-*), поэтому одна иконка работает на любом цвете закладки.
   const BM_GLYPHS = {
-    plus: '<circle class="s" cx="12" cy="12" r="9.4"/><path class="i w" d="M12 7v10M7 12h10"/>',
+    plus: '<path class="i w" d="M12 6.5v11M6.5 12h11"/>',
     book:
-      '<path class="s i" d="M6.9 4.3h9.6c.8 0 1.5.7 1.5 1.5v12.7c0 .6-.4 1-1 1H7.9a2.4 2.4 0 0 1-2.4-2.4V5.7c0-.8.6-1.4 1.4-1.4Z"/>' +
-      '<path class="i" d="M5.5 17.1c0-1.2 1-2.1 2.2-2.1H18"/><path class="af" d="M13.4 4.3v6.2l1.8-1.3 1.8 1.3V4.3Z"/><path class="a" d="M8.4 8h2.4"/>',
+      '<path class="s i" d="M7 4.5h9.5c.8 0 1.5.7 1.5 1.5v12c0 .6-.4 1-1 1H8a2.5 2.5 0 0 1-2.5-2.5V6c0-.8.7-1.5 1.5-1.5Z"/>' +
+      '<path class="i" d="M5.5 16.5c0-1.1.9-2 2-2H18"/><path class="a" d="M13.5 4.7v5.6l1.5-1.1 1.5 1.1V4.7"/>',
     leaf:
-      '<path class="s i" d="M19.3 4.7C11 4.8 5.2 8.6 5.2 14.6c0 2.9 2 4.9 4.9 4.9 6.1 0 9.1-6.5 9.2-14.8Z"/>' +
-      '<path class="i" d="M4.6 20.3c3.1-5.2 7-8.7 11.7-11"/><path class="i t" d="M9.6 15l-.4-2.9M12.6 12.4l2.8-.3"/>',
+      '<path class="s i" d="M19 5C11.2 5.1 5.5 8.7 5.5 14.4c0 2.8 1.9 4.6 4.6 4.6C16 19 18.9 12.9 19 5Z"/><path class="i" d="M5 19.8c3-4.9 6.7-8.3 11.2-10.5"/>',
     atom:
-      '<circle class="s" cx="12" cy="12" r="8.6"/><ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(35 12 12)"/>' +
-      '<ellipse class="i" cx="12" cy="12" rx="9" ry="3.6" transform="rotate(-35 12 12)"/><circle class="af" cx="12" cy="12" r="2.2"/><circle class="if" cx="19.4" cy="6.8" r="1.35"/>',
+      '<ellipse class="i" cx="12" cy="12" rx="8.6" ry="3.4" transform="rotate(35 12 12)"/>' +
+      '<ellipse class="i" cx="12" cy="12" rx="8.6" ry="3.4" transform="rotate(-35 12 12)"/><circle class="if" cx="12" cy="12" r="1.9"/>',
     flask:
-      '<path class="af" d="M7.2 15.3h9.6l1.4 2.4a1.5 1.5 0 0 1-1.3 2.3H7.1a1.5 1.5 0 0 1-1.3-2.3Z"/>' +
-      '<path class="i" d="M9.3 4h5.4M10.4 4.2v5l-4.8 8.4A1.8 1.8 0 0 0 7.2 20h9.6a1.8 1.8 0 0 0 1.6-2.4l-4.8-8.4v-5"/><circle class="if" cx="12.6" cy="12.6" r=".9"/>',
+      '<path class="s i" d="M9.5 4h5M10.4 4.2v5l-4.7 8.3A1.7 1.7 0 0 0 7.2 20h9.6a1.7 1.7 0 0 0 1.5-2.5l-4.7-8.3v-5"/><path class="a" d="M7.6 15.5h8.8"/>',
     globe:
-      '<circle class="s i" cx="12" cy="12" r="8.2"/><ellipse class="i" cx="12" cy="12" rx="3.5" ry="8.2"/>' +
-      '<path class="a" d="M4.4 9.3h15.2M4.4 14.7h15.2"/>',
+      '<circle class="s i" cx="12" cy="12" r="8"/><ellipse class="i" cx="12" cy="12" rx="3.4" ry="8"/><path class="i" d="M4.4 12h15.2"/>',
     folder:
-      '<path class="s i" d="M4 7.3c0-1 .8-1.8 1.8-1.8h3.8l1.9 2h6.7c1 0 1.8.8 1.8 1.8v7.8c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8Z"/>' +
-      '<path class="a" d="M4.2 10.4h15.6"/>',
-    more:
-      '<rect class="s i" x="4.6" y="4.6" width="6.1" height="6.1" rx="2"/><rect class="s i" x="13.3" y="4.6" width="6.1" height="6.1" rx="2"/>' +
-      '<rect class="s i" x="4.6" y="13.3" width="6.1" height="6.1" rx="2"/><rect class="af" x="13.3" y="13.3" width="6.1" height="6.1" rx="2"/>',
+      '<path class="s i" d="M4 7.5c0-1 .8-1.8 1.8-1.8h3.7l1.9 2h6.8c1 0 1.8.8 1.8 1.8v7.5c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8Z"/>',
+    more: '<circle class="if" cx="6.5" cy="12" r="1.6"/><circle class="if" cx="12" cy="12" r="1.6"/><circle class="if" cx="17.5" cy="12" r="1.6"/>',
   };
   const bmGlyph = (n) => {
     if (!BM_GLYPHS[n]) console.warn("[icon] unknown bookmark icon:", n);
-    return '<svg class="kt-glyph" viewBox="0 0 24 24" aria-hidden="true">' + (BM_GLYPHS[n] || BM_GLYPHS.book) + "</svg>";
+    const key = BM_GLYPHS[n] ? n : "book";
+    return '<svg class="kt-glyph g-' + key + '" viewBox="0 0 24 24" aria-hidden="true">' + BM_GLYPHS[key] + "</svg>";
   };
 
   // плитка закладки: мягкая поверхность тона; свой цвет закладки меняет только фон
@@ -202,11 +197,18 @@
     go("bookmark");
   }
 
-  function subjectThumb(subjectKey, extraCls) {
-    const sub = study.subject(subjectKey);
+  /**
+   * Обложка конспекта: note.thumbnail / note.thumbnailUrl (обложка темы) поверх запасной обложки предмета.
+   * Запасная — градиент предмета + листок с иконкой; она же остаётся видна, если картинка не загрузилась.
+   */
+  function noteThumb(n) {
+    const sub = study.subject(n.subject);
+    const src = n.thumbnail || n.thumbnailUrl || sub.asset;
+    const [c1, c2] = sub.cover;
     return (
-      '<div class="thumb ' + sub.thumb + (extraCls ? " " + extraCls : "") + '">' +
-      (sub.asset ? '<img class="thumb-img" src="' + esc(sub.asset) + '" alt="">' : icon(sub.icon)) +
+      '<div class="thumb ' + sub.thumb + '" style="--cv1:' + c1 + ";--cv2:" + c2 + '">' +
+      '<span class="thumb-page">' + icon(sub.icon) + "</span>" +
+      (src ? '<img class="thumb-img" src="' + esc(src) + '" alt="" loading="lazy" decoding="async">' : "") +
       "</div>"
     );
   }
@@ -236,8 +238,8 @@
     const sub = study.subject(n.subject);
     return (
       '<div class="note-card" data-note="' + esc(n.id) + '">' +
-      subjectThumb(n.subject) +
-      "<div><h3>" + esc(n.title) + '</h3><div class="meta"><span class="pill ' + sub.pill + '">' +
+      noteThumb(n) +
+      "<div><h3>" + esc(n.title) + '</h3><div class="meta"><span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' +
       esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt)) +
       '</div><div class="preview">' + esc(n.preview) + "</div></div>" +
       '<button class="dots" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dotsv") + "</button></div>"
@@ -247,7 +249,12 @@
   const emptyState = (title, text) =>
     '<div class="empty"><div class="empty-icon">' + icon("doc") + "</div><strong>" + title + "</strong><p>" + text + "</p></div>";
 
-  const bmIconStyle = (b) => (isColor(b.color) ? ' style="--kt-bg:' + b.color + '"' : "");
+  // свой цвет закладки: сохранённый светлый оттенок — поверхность, иконка — приглушённый цвет той же гаммы
+  const BM_INKS = { "#f7eadc": "#95592f", "#e7f4e9": "#3a7a5a", "#e7f1fd": "#2f6db8", "#f0eafa": "#6552aa", "#f9e8ed": "#a04a62", "#edf0f3": "#4b5578" };
+  const bmIconStyle = (b) =>
+    isColor(b.color)
+      ? ' style="--kt-bg:' + b.color + (BM_INKS[b.color.toLowerCase()] ? ";--g-ink:" + BM_INKS[b.color.toLowerCase()] + ";--g-acc:" + BM_INKS[b.color.toLowerCase()] : "") + '"'
+      : "";
 
   function home() {
     const notes = store.listNotes();
@@ -380,15 +387,18 @@
     if (!n) return home();
     const view = modes.classic.render(n.content);
     return (
-      app() +
+      app("note-view nt-" + esc(n.content.meta.subject)) +
       '<div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><div class="note-actions"><button class="circle-btn note-bookmark" data-sheet="add" aria-label="Добавить в закладку">' + icon("bookmark") +
       '</button><button class="circle-btn note-menu" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
-      "</button></div></div>" +
+      "</button></div></div></div>" +
+      '<div class="cn-search"><label class="cn-search-box">' + icon("search") +
+      '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
+      '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div>' +
+      '<div class="cn-doc" id="noteDoc">' +
       view.head +
-      "</div>" +
       view.body +
-      "</div>"
+      "</div></div>"
     );
   }
 
@@ -459,8 +469,8 @@
       if (!n) return "";
       return (
         '<div class="overlay" data-backdrop><div class="sheet"><div class="grab"></div><div class="sheet-title">' +
-        subjectThumb(n.subject) +
-        "<div><h3>" + esc(n.title) + '</h3><span class="subject ' + study.subject(n.subject).badge + '">' + esc(n.subjectLabel) +
+        noteThumb(n) +
+        "<div><h3>" + esc(n.title) + '</h3><span class="subject ' + study.subject(n.subject).badge + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel) +
         '</span></div></div><button class="sheet-action" data-open-note="' + esc(n.id) +
         '">' + icon("open") + "<span>Открыть</span>" + CHEV + '</button><button class="sheet-action" data-sheet="add">' + icon("bookmark") +
         "<span>Добавить в закладку</span>" + CHEV + '</button><button class="sheet-action" data-rename="note">' + icon("edit") +
@@ -801,13 +811,80 @@
     box.innerHTML = found.length ? found.map(noteCard).join("") : emptyState("Ничего не найдено", "Попробуй другой запрос");
   }
 
+  // ---------- поиск внутри открытого конспекта: подсветка совпадений в уже отрисованном тексте ----------
+
+  const NOTE_FIND = { hits: [], index: -1 };
+
+  function clearNoteMarks(doc) {
+    doc.querySelectorAll("mark.cn-hit").forEach((m) => {
+      const parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function findInNote(query) {
+    const doc = root.querySelector("#noteDoc");
+    const count = root.querySelector("#inNoteCount");
+    if (!doc) return;
+    clearNoteMarks(doc);
+    NOTE_FIND.hits = [];
+    NOTE_FIND.index = -1;
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) {
+      if (count) count.textContent = "";
+      return;
+    }
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.toLowerCase().includes(q)) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let from = 0;
+      for (let at = lower.indexOf(q); at !== -1; at = lower.indexOf(q, from)) {
+        frag.appendChild(document.createTextNode(text.slice(from, at)));
+        const m = document.createElement("mark");
+        m.className = "cn-hit";
+        m.textContent = text.slice(at, at + q.length);
+        frag.appendChild(m);
+        NOTE_FIND.hits.push(m);
+        from = at + q.length;
+      }
+      frag.appendChild(document.createTextNode(text.slice(from)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    if (count) count.textContent = NOTE_FIND.hits.length ? "" : "Нет совпадений";
+    nextNoteHit();
+  }
+
+  function nextNoteHit() {
+    const hits = NOTE_FIND.hits;
+    const count = root.querySelector("#inNoteCount");
+    if (!hits.length) return;
+    hits[NOTE_FIND.index]?.classList.remove("current");
+    NOTE_FIND.index = (NOTE_FIND.index + 1) % hits.length;
+    const m = hits[NOTE_FIND.index];
+    m.classList.add("current");
+    if (count) count.textContent = NOTE_FIND.index + 1 + " из " + hits.length;
+    const bar = root.querySelector(".cn-search");
+    const y = m.getBoundingClientRect().top + window.scrollY - (bar ? bar.offsetHeight : 0) - 70;
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  }
+
   function onInput(e) {
+    if (e.target.id === "inNoteSearch") findInNote(e.target.value);
     if (e.target.id === "noteSearch") filterList("#allList", store.listNotes(), e.target.value);
     if (e.target.id === "bmSearch") filterList("#bmList", store.notesInBookmark(S.bookmarkId), e.target.value);
   }
 
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
+    if (e.key === "Enter" && e.target.id === "inNoteSearch") {
+      e.preventDefault();
+      nextNoteHit();
+    }
     if (e.key === "Escape" && S.sheet) closeSheet();
   }
 
@@ -816,6 +893,8 @@
   });
   root.addEventListener("input", onInput);
   document.addEventListener("keydown", onKeydown);
+  // обложка не загрузилась — убираем картинку, под ней остаётся обложка предмета
+  root.addEventListener("error", (e) => e.target.classList?.contains("thumb-img") && e.target.remove(), true);
 
   cam.onchange = () => {
     const files = cam.files;

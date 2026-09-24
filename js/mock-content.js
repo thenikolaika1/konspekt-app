@@ -214,7 +214,7 @@
       formulas: [],
     },
     remember: ["Внутреннюю энергию можно изменить двумя способами: совершением работы и теплопередачей."],
-    conclusion: "",
+    conclusion: "**Внутренняя энергия** — энергия движения и взаимодействия частиц тела → она растёт при **совершении работы** над телом или при **теплопередаче** к нему.",
     selfCheck: [
       {
         q: "От чего зависит внутренняя энергия тела?",
@@ -331,11 +331,11 @@
   K.mock = {
     /** «Результат анализа» фотографий в Phase 0. */
     analysisResult: () => JSON.parse(JSON.stringify(northernWar)),
-    /** Демо-конспекты для первого запуска. ageMs — насколько давно «созданы». */
+    /** Демо-конспекты для первого запуска. ageMs — насколько давно «созданы»; thumbnail — обложка темы. */
     seedNotes: () => [
-      { id: "demo-northern-war", ageMs: 3 * 36e5, content: JSON.parse(JSON.stringify(northernWar)) },
-      { id: "demo-internal-energy", ageMs: 26 * 36e5, content: JSON.parse(JSON.stringify(energy)) },
-      { id: "demo-leaf", ageMs: 7 * 24 * 36e5, content: JSON.parse(JSON.stringify(leaf)) },
+      { id: "demo-northern-war", ageMs: 3 * 36e5, thumbnail: "./assets/thumbs/northern-war.svg", content: JSON.parse(JSON.stringify(northernWar)) },
+      { id: "demo-internal-energy", ageMs: 26 * 36e5, thumbnail: "./assets/thumbs/internal-energy.svg", content: JSON.parse(JSON.stringify(energy)) },
+      { id: "demo-leaf", ageMs: 7 * 24 * 36e5, thumbnail: "./assets/thumbs/leaf.svg", content: JSON.parse(JSON.stringify(leaf)) },
     ],
     seedBookmarks: () => [
       { id: "bm-history", name: "История", icon: "book", cls: "history", color: "", noteIds: ["demo-northern-war"] },
