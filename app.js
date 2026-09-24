@@ -893,6 +893,20 @@
   });
   root.addEventListener("input", onInput);
   document.addEventListener("keydown", onKeydown);
+  // Новая версия на сервере: приложение, оставленное открытым (PWA в фоне), обновляется само,
+  // когда пользователь возвращается к нему. Не перезагружаем посреди съёмки, обработки и открытого листа.
+  const BUILD = ((document.querySelector('script[src*="app.js"]') || {}).src || "").match(/[?&]v=(\d+)/)?.[1];
+  async function checkForUpdate() {
+    if (!BUILD || document.visibilityState !== "visible" || navigator.onLine === false) return;
+    try {
+      navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
+      const html = await (await fetch("./index.html", { cache: "no-store" })).text();
+      const live = html.match(/app\.js\?v=(\d+)/)?.[1];
+      if (live && live !== BUILD && !["camera", "processing"].includes(S.screen) && !S.sheet) location.reload();
+    } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", checkForUpdate);
+
   // обложка не загрузилась — убираем картинку, под ней остаётся обложка предмета
   root.addEventListener("error", (e) => e.target.classList?.contains("thumb-img") && e.target.remove(), true);
 
