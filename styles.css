@@ -565,3 +565,141 @@ button,.note-card,.bm-row,.pick-row,.sheet-action{transition:transform .16s var(
   display:grid;place-items:center;z-index:1}
 .thumb .thumb-page .ui-icon[class]{width:20px;height:20px;stroke-width:1.9;color:var(--cv1,#3d4a7a);position:static}
 .thumb .thumb-img[class]{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;opacity:1;filter:none;display:block}
+
+/* ======================================================================
+   COLOR & DEPTH — иерархия цвета: 1) обложки конспектов 2) фирменный синий
+   3) светлые тона предметов, mint, lavender 4) белые/ivory поверхности и navy.
+   Структура и размеры не меняются.
+   ====================================================================== */
+:root{
+  --blue-deep:#0759c9;
+  --blue-soft:#d6e7fd;
+  --blue-grad:linear-gradient(180deg,#1a88fb 0%,#0a74ea 100%);
+  --mint:#1f9d74;--mint-pale:#e4f5ee;
+  --lav:#7a5ce6;--lav-pale:#efebfd;
+  --gold:#c8963e;
+  /* предметы: насыщенный тон (иконки, подписи) + светлая поверхность */
+  --s-history:#982c44;--s-history-bg:#f8e8eb;
+  --s-biology:#11805a;--s-biology-bg:#e2f4ea;
+  --s-physics:#3f4fd8;--s-physics-bg:#eaecfd;
+  --s-geography:#0c7fa0;--s-geography-bg:#e0f3f6;
+  --s-chemistry:#1666c8;--s-chemistry-bg:#e2f3f6;
+  --s-literature:#7d3c8e;--s-literature-bg:#f4ebf6;
+  --s-russian:#23409e;--s-russian-bg:#e9edf9;
+  --s-other:#4b5578;--s-other-bg:#eef0f5;
+  --shadow-soft:0 1px 2px rgba(20,28,64,.05),0 6px 18px rgba(20,40,90,.06);
+}
+/* фон: тёплый ivory + еле заметные цветные ореолы в верхней части крупных экранов */
+.app{background:
+  radial-gradient(420px 260px at 105% -40px,rgba(10,124,244,.07),transparent 70%) no-repeat,
+  radial-gradient(360px 240px at -60px 120px,rgba(31,157,116,.045),transparent 70%) no-repeat,
+  radial-gradient(360px 260px at 60% 420px,rgba(122,92,230,.035),transparent 70%) no-repeat,
+  var(--bg)}
+
+/* --- метки предметов: единые токены --- */
+.s-history{--s:var(--s-history);--s-bg:var(--s-history-bg)}
+.s-biology{--s:var(--s-biology);--s-bg:var(--s-biology-bg)}
+.s-physics{--s:var(--s-physics);--s-bg:var(--s-physics-bg)}
+.s-geography{--s:var(--s-geography);--s-bg:var(--s-geography-bg)}
+.s-chemistry{--s:var(--s-chemistry);--s-bg:var(--s-chemistry-bg)}
+.s-literature{--s:var(--s-literature);--s-bg:var(--s-literature-bg)}
+.s-russian{--s:var(--s-russian);--s-bg:var(--s-russian-bg)}
+.s-social,.s-math,.s-other{--s:var(--s-other);--s-bg:var(--s-other-bg)}
+.pill[class*=" s-"],.subject[class*=" s-"]{background:var(--s-bg)!important;color:var(--s)!important}
+.s-math{--s:#2459c9;--s-bg:#e8effc}
+
+/* --- кнопки: один фирменный синий с лёгкой тональной глубиной --- */
+.primary{background:var(--blue-grad);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(7,89,201,.18),0 8px 18px rgba(10,124,244,.24)}
+.primary:active{background:var(--blue-press)}
+.primary:disabled{box-shadow:none}
+.link{color:#5d6a8f}
+.fab{background:var(--blue-grad);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 10px 24px rgba(10,124,244,.32)}
+
+/* --- главная --- */
+.home-kicker{background:#e4effe;color:var(--blue-deep)}
+.brand-spark{background:linear-gradient(180deg,#fff,#f0f6ff);border-color:#d9e7fb;box-shadow:0 1px 2px rgba(20,40,90,.05),0 6px 16px rgba(10,124,244,.10)}
+.hero{background:
+  radial-gradient(180px 140px at 0% 105%,rgba(31,157,116,.10),transparent 70%),
+  radial-gradient(200px 160px at 100% 0%,rgba(122,92,230,.12),transparent 70%),
+  linear-gradient(158deg,#f4f9ff 0%,#e6f0fe 55%,#dbe9fd 100%);
+  border-color:#d3e3f9;box-shadow:inset 0 1px 0 #fff,0 1px 2px rgba(20,40,90,.05),0 12px 28px rgba(10,90,200,.09)}
+.orb-a{opacity:1;background:radial-gradient(circle at 30% 30%,rgba(122,92,230,.10),rgba(10,124,244,.08) 55%,rgba(10,124,244,.03))}
+.hero-label{background:rgba(255,255,255,.9);border-color:#cfe1fa;color:var(--blue-deep);box-shadow:0 1px 2px rgba(10,90,200,.06)}
+.hero p{color:#5f6b8f}
+.hero-illustration{filter:drop-shadow(0 10px 14px rgba(20,60,140,.10))}
+
+/* --- закладки: цвет живёт в иконке и тонкой кромке, поверхность — еле тонированная --- */
+.tone-new{--kt-bg:#ebf3fe;--kt-sh:10,124,244;--g-ink:#0a74ea;--g-soft:rgba(10,124,244,.08);--g-acc:#0a74ea}
+.tone-book{--kt-bg:#f9edee;--kt-sh:152,44,68;--g-ink:#982c44;--g-soft:rgba(152,44,68,.07);--g-acc:#c8963e}
+.tone-leaf{--kt-bg:#e9f6ef;--kt-sh:17,128,90;--g-ink:#11805a;--g-soft:rgba(17,128,90,.08);--g-acc:#11805a}
+.tone-atom{--kt-bg:#eef0fd;--kt-sh:63,79,216;--g-ink:#3f4fd8;--g-soft:rgba(63,79,216,.07);--g-acc:#7a5ce6}
+.tone-flask{--kt-bg:#e6f5f6;--kt-sh:22,102,200;--g-ink:#1666c8;--g-soft:rgba(22,160,170,.10);--g-acc:#16a0aa}
+.tone-globe{--kt-bg:#e5f3f7;--kt-sh:12,127,160;--g-ink:#0c7fa0;--g-soft:rgba(12,127,160,.08);--g-acc:#0c7fa0}
+.tone-folder{--kt-bg:#faf2e2;--kt-sh:176,122,20;--g-ink:#a2701a;--g-soft:rgba(200,150,62,.12);--g-acc:#a2701a}
+.tone-more{--kt-bg:#f0eff9;--kt-sh:70,72,150;--g-ink:#474b8f;--g-soft:rgba(122,92,230,.07);--g-acc:#474b8f}
+.kt{box-shadow:inset 0 0 0 1px rgba(var(--kt-sh,60,70,130),.12),0 1px 2px rgba(var(--kt-sh,60,70,130),.06)}
+.bookmarks .bm span{color:#333b62}
+
+/* --- карточки конспектов: белая спокойная карточка, чуть больше отделения от фона --- */
+.note-card{box-shadow:0 1px 2px rgba(20,28,64,.04),0 6px 16px rgba(20,40,90,.05)}
+.note-card .thumb[class]{box-shadow:0 2px 7px rgba(20,28,64,.13)}
+
+/* --- камера: светлая синяя поверхность сканирования --- */
+.viewfinder{background:
+  radial-gradient(220px 200px at 0% 100%,rgba(31,157,116,.12),transparent 70%),
+  radial-gradient(240px 220px at 100% 0%,rgba(122,92,230,.13),transparent 70%),
+  linear-gradient(165deg,#eef5ff 0%,#dfeafc 55%,#d2e2fa 100%)}
+.fake-page{box-shadow:0 2px 4px rgba(13,23,71,.08),0 20px 40px rgba(20,50,120,.20)}
+.guide{background:
+  linear-gradient(var(--blue),var(--blue)) left top/36px 4px no-repeat,linear-gradient(var(--blue),var(--blue)) left top/4px 36px no-repeat,
+  linear-gradient(var(--blue),var(--blue)) right top/36px 4px no-repeat,linear-gradient(var(--blue),var(--blue)) right top/4px 36px no-repeat,
+  linear-gradient(var(--blue),var(--blue)) left bottom/36px 4px no-repeat,linear-gradient(var(--blue),var(--blue)) left bottom/4px 36px no-repeat,
+  linear-gradient(var(--blue),var(--blue)) right bottom/36px 4px no-repeat,linear-gradient(var(--blue),var(--blue)) right bottom/4px 36px no-repeat;
+  border-radius:6px;filter:drop-shadow(0 1px 0 rgba(255,255,255,.7))}
+.shot-preview{border-radius:8px;box-shadow:0 0 0 1px rgba(255,255,255,.8),0 2px 4px rgba(13,23,71,.08),0 22px 44px rgba(20,50,120,.24)}
+.hint,.preview-actions button{background:rgba(13,23,71,.78);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.camera-bottom{box-shadow:0 -1px 0 rgba(20,40,90,.04),0 -8px 24px rgba(20,60,140,.07)}
+.page-shot{box-shadow:0 3px 8px rgba(20,40,90,.12)}
+.page-thumb.selected .page-shot{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.16),0 4px 10px rgba(10,124,244,.18)}
+.add-page{background:#f1f7ff;border-color:#d4e5fb}
+.add-page .ui-icon{color:var(--blue)}
+.gallery{background:#edf4fe;color:var(--blue-deep)}
+.shutter{border-color:#d9e9fd;background:radial-gradient(circle at 50% 35%,#fff 0,#fff 55%,#eef5ff 100%);box-shadow:inset 0 0 0 3.5px var(--blue),0 2px 4px rgba(10,90,200,.10),0 10px 22px rgba(10,124,244,.18)}
+
+/* --- обработка: слои страниц, насыщенный индикатор --- */
+.app.processing{background:
+  radial-gradient(260px 220px at 50% 24%,rgba(10,124,244,.10),transparent 70%),
+  radial-gradient(220px 200px at 0% 40%,rgba(31,157,116,.07),transparent 70%),
+  radial-gradient(240px 220px at 100% 18%,rgba(122,92,230,.08),transparent 70%),
+  var(--bg)}
+.pages-illustration{filter:drop-shadow(0 12px 18px rgba(20,60,140,.10))}
+.spinner{border-width:4px;border-color:#dcebfd;border-top-color:var(--blue);border-right-color:rgba(10,124,244,.45)}
+.progress-card{box-shadow:0 1px 2px rgba(20,28,64,.04),0 10px 26px rgba(20,60,140,.08);border-color:#e3eaf5}
+.progress-row.done .step-dot,.progress-row.active .step-dot{background:var(--blue-grad);border-color:var(--blue)}
+.progress-row.done .step-dot{box-shadow:0 2px 6px rgba(10,124,244,.25)}
+.progress-row.active .step-dot{box-shadow:0 0 0 5px rgba(10,124,244,.16)}
+.progress-row.done+.progress-row:before{border-left-color:var(--blue)}
+
+/* --- конспект: цвет для структуры, основной текст нейтральный --- */
+.note-body{--k-bar-bg:#e8f1fd;--k-bar-accent:var(--blue);--k-bar-text:#0b2a6b;
+  --k-green:#0d7a4f;--k-green-title:#0b6e45;--k-green-accent:#16946a;--k-green-bg:#e6f5ed;--k-green-bg2:#e5f5ec;
+  --k-brown:#8a4a14;--k-brown-title:#7f420f;--k-brown-accent:#c8963e;--k-brown-bg:#fbf3e6;
+  --k-wine:#982c44;--k-wine-title:#8d213a;--k-wine-accent:#b23a55;--k-wine-bg:#fbeaed;--k-wine-bg2:#fbe8ec}
+.note-body .special{box-shadow:0 1px 2px rgba(20,28,64,.035)}
+.note-body .special.important{background:#fdece7;border-color:#c8493d}
+.note-body .special.important h3{color:#a8322a}
+.note-body .special.formulas,.note-body .special.cause{background:#eef3fe;border-color:#4f78d8}
+.note-body .note-table th{background:#eef4fd;color:#0b2a6b}
+.note-body .qa-n{color:var(--blue)}
+.note-body .qa-title{border-bottom-color:var(--s-history)}
+
+/* --- «Новая закладка»: бледные невыбранные, насыщенный выбранный --- */
+.choice{background:#f8f9fc;border-color:#e8ebf2}
+.choice.selected{border:1.5px solid var(--blue)!important;background:#f0f6ff!important;box-shadow:0 0 0 3px rgba(10,124,244,.10),0 4px 12px rgba(10,124,244,.10)}
+.swatch{box-shadow:inset 0 1px 1px rgba(255,255,255,.35),inset 0 -2px 4px rgba(0,0,0,.08),0 1px 3px rgba(20,28,64,.12)}
+.color-choice:not(.selected) .swatch{opacity:.92}
+
+/* --- листы: нейтральные, цвет только у иконок действий --- */
+.sheet-action>.ui-icon{color:#4b5578}
+.sheet-action[data-open-note]>.ui-icon,.sheet-action[data-sheet=add]>.ui-icon{color:var(--blue)}
+.sheet-action.danger>.ui-icon{color:var(--danger)}

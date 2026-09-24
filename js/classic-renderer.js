@@ -106,7 +106,7 @@
   function head(c) {
     const subject = K.study.subject(c.meta.subject);
     return (
-      '<span class="subject ' + subject.badge + '">' + esc(c.meta.subjectLabel) + "</span>" +
+      '<span class="subject ' + subject.badge + " s-" + c.meta.subject + '">' + esc(c.meta.subjectLabel) + "</span>" +
       '<h1 class="note-title">' + esc(c.meta.title) + "</h1>" +
       '<div class="note-meta">' + c.meta.tagline.map(esc).join('<span class="sep">·</span>') + "</div>"
     );
