@@ -93,7 +93,8 @@
 
   const logo = () => '<div class="bookmark-logo logo-img"><img src="./assets/logo-mark.png" alt="Konspekt" width="84" height="84"></div>';
   const brand = () => '<div class="brand">Konspekt <span class="badge">by NK</span></div>';
-  const app = (c) => '<div class="app ' + (c || "") + '">';
+  // scr-<экран> — чтобы стили экрана не задевали другие экраны
+  const app = (c) => '<div class="app scr-' + S.screen + " " + (c || "") + '">';
 
   const plural = (n, one, few, many) => {
     const m10 = n % 10, m100 = n % 100;

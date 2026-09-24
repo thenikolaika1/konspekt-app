@@ -22,7 +22,8 @@
       .replace(/\[(d|t|p|f):([^\]\n]+?)\]/g, (_, k, v) => '<span class="' + INLINE[k] + '">' + v + "</span>");
   }
 
-  /** Особый блок: цветная полоса слева, метка, компактное содержимое. tone: main (цвет предмета) | alt (второй цвет) | plain */
+  /** Особый блок: цветная полоса слева, метка, компактное содержимое.
+   *  tone: imp (важное: ВАЖНО, ЗАПОМНИ) | alt (итог: ВЫВОД) | head (цвет заголовков: ФОРМУЛА) | plain (ПРИМЕР) */
   const box = (cls, tone, label, inner) =>
     '<div class="cn-box ' + cls + " tone-" + tone + '"><div class="cn-box-label">' + label + "</div>" + inner + "</div>";
   const list = (items, ordered) => {
@@ -50,11 +51,11 @@
       case "LIST":
         return sub(b.title) + list(b.items, b.ordered);
       case "MAIN_IDEA":
-        return box("main", "main", "Важно · главная мысль", "<p>" + inline(b.text) + "</p>");
+        return box("main", "imp", "Важно · главная мысль", "<p>" + inline(b.text) + "</p>");
       case "IMPORTANT":
-        return box("important", "main", "Важно", "<p>" + inline(b.text) + "</p>");
+        return box("important", "imp", "Важно", "<p>" + inline(b.text) + "</p>");
       case "REMEMBER":
-        return box("remember", "main", "Запомни", list(b.items));
+        return box("remember", "imp", "Запомни", list(b.items));
       case "CONCLUSION":
         return box("conclusion", "alt", "Вывод", "<p>" + inline(b.text) + "</p>");
       case "EXAMPLE":
@@ -80,7 +81,7 @@
       case "FORMULA":
         return box(
           "formulas",
-          "main",
+          "head",
           "Формула",
           '<div class="formula">' + esc(b.expression) + "</div>" +
             (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables),
@@ -123,8 +124,10 @@
     );
   }
 
-  /** Раздел с акцентным заголовком (глоссарий, «Что нужно запомнить», вопросы). */
+  /** Раздел с акцентным заголовком («Что нужно запомнить», вопросы). */
   const part = (cls, title, inner) => '<section class="cn-part ' + cls + '"><h2 class="cn-h2alt">' + title + "</h2>" + inner + "</section>";
+  /** Справочная карточка (термины, личности, даты): цветная полоса, заголовок, плотные строки. */
+  const card = (cls, title, inner) => '<section class="cn-card ' + cls + '"><h2 class="cn-card-title">' + title + "</h2>" + inner + "</section>";
 
   function body(c) {
     const g = c.glossary;
@@ -137,26 +140,29 @@
     });
     if (c.conclusion) h += box("conclusion", "alt", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
     if (g.terms.length)
-      h += part("terms", "Термины и определения",
+      h += card("terms", "Термины и определения",
         g.terms.map((t) => '<p class="cn-gl"><span class="kw-def">' + esc(t.term) + "</span> — " + inline(t.definition) + "</p>").join(""));
     if (g.people.length)
-      h += part("people", "Личности",
+      h += card("people", "Личности",
         g.people.map((p) => '<p class="cn-gl"><span class="kw-person">' + esc(p.name) + "</span> — " + inline(p.role) + "</p>").join(""));
     if (g.dates.length)
-      h += part("dates", "Даты",
+      h += card("dates", "Даты",
         g.dates.map((d) => '<p class="cn-gl cn-date"><span class="kw-date">' + esc(d.date) + "</span><span>" + inline(d.event) + "</span></p>").join(""));
     if (g.formulas.length)
       h += part("formulas", "Формулы",
         g.formulas
           .map((f) => '<div class="formula">' + esc(f.expression) + "</div>" + (f.meaning ? "<p>" + inline(f.meaning) + "</p>" : "") + variables(f.variables))
           .join(""));
-    if (c.remember.length) h += part("remember", "Что нужно запомнить", list(c.remember));
+    if (c.remember.length)
+      h += box("remember-key", "imp", "Важно · что нужно запомнить", c.remember.length === 1 ? "<p>" + inline(c.remember[0]) + "</p>" : list(c.remember));
     if (c.selfCheck.length) {
-      const answered = c.selfCheck.some((x) => x.a);
-      const title = answered ? "Ответы на вопросы" + (c.meta.paragraph ? " после " + esc(c.meta.paragraph) : "") : "Вопросы для самопроверки";
-      h += part("qa-part", title,
+      h += part("qa-part", "Вопросы и задания",
         c.selfCheck
-          .map((x, i) => '<div class="qa"><div class="qa-q">' + (i + 1) + ". " + inline(x.q) + "</div>" + (x.a ? '<div class="qa-a">' + inline(x.a) + "</div>" : "") + "</div>")
+          .map(
+            (x, i) =>
+              '<div class="qa"><div class="qa-q">' + (i + 1) + ". " + inline(x.q) + "</div>" +
+              (x.a ? '<div class="qa-a"><span class="qa-label">Ответ:</span> ' + inline(x.a) + "</div>" : "") + "</div>",
+          )
           .join(""));
     }
     return h + "</article>";
