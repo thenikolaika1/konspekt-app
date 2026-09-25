@@ -119,7 +119,7 @@
 
   const back = () => {
     if (S.history.length) {
-      navDir = "back";
+      navDir = S.screen === "camera" ? "camera-back" : "back";
       lockNav();
       S.screen = S.history.pop();
       S.sheet = null;
@@ -178,7 +178,7 @@
   const scrollMem = {};
   function go(s, push = true) {
     // направление перехода: вперёд, «появление» после обработки или мягкая смена экрана
-    navDir = S.screen === "processing" ? "rise" : push ? "forward" : "fade";
+    navDir = S.screen === "processing" ? "rise" : s === "camera" ? "camera" : push ? "forward" : "fade";
     lockNav();
     scrollMem[S.screen] = scrollY;
     if (push && S.screen !== s && !TRANSIENT.includes(S.screen)) S.history.push(S.screen);
@@ -714,7 +714,25 @@
     return g;
   }
 
+  // камера — отдельный «слой»: мягко поднимается снизу и так же уходит вниз
+  const CAMERA_MOTION = {
+    camera: {
+      in: [{ opacity: 0, transform: "translate3d(0,18px,0) scale(.985)" }, { opacity: 1, transform: "none" }], inMs: 380,
+      out: [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.985)" }], outMs: 300,
+    },
+    "camera-back": {
+      in: [{ opacity: 0, transform: "scale(.99)" }, { opacity: 1, transform: "none" }], inMs: 340,
+      out: [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translate3d(0,18px,0) scale(.985)" }], outMs: 280,
+    },
+  };
+
   function animateScreens(el, ghost, dir) {
+    const cam = CAMERA_MOTION[dir];
+    if (cam) {
+      el.animate(cam.in, { duration: cam.inMs, easing: EASE_OUT });
+      if (ghost) ghost.firstElementChild.animate(cam.out, { duration: cam.outMs, easing: EASE_STD, fill: "forwards" }).finished.catch(() => {}).then(() => ghost.remove());
+      return;
+    }
     const X = { forward: 28, back: -28 }[dir] || 0;
     const incoming =
       dir === "rise"

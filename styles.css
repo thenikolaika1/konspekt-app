@@ -1123,3 +1123,27 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 /* системная подсветка нажатия не нужна: у элементов свой отклик; иначе при смене экрана
    она на кадр «перескакивает» на новый элемент под пальцем */
 *{-webkit-tap-highlight-color:transparent}
+
+/* наведение: только там, где оно есть (мышь, трекпад). На iPhone остаётся отклик на нажатие,
+   подсветка не «залипает» после касания. Меняются только цвет, тень и лёгкий подъём. */
+@media (hover:hover) and (pointer:fine){
+  .primary:not(:disabled):hover,.create-bm:hover,.fab:hover{filter:brightness(1.06);transform:translateY(-1px);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 2px 4px rgba(7,89,201,.2),0 12px 24px rgba(10,124,244,.30)}
+  .secondary:hover,.add-row:hover{background-color:#e6effd;border-color:#c8dcf8}
+  .danger-btn:hover{filter:brightness(1.06)}
+  .back:hover,.more:hover,.circle-btn:hover,.brand-spark:hover,.dots:hover,.gallery:hover,.add-page:hover,.field-clear:hover{background-color:rgba(10,124,244,.08)}
+  .brand-spark:hover,.gallery:hover,.add-page:hover{background-color:#e8f1fe}
+  .link:hover,.text-action:hover{color:var(--blue-deep)}
+  .note-card:hover,.bm-row:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgba(20,28,64,.05),0 12px 26px rgba(20,40,90,.09)}
+  .sheet-action:hover,.pick-row:hover{background-color:#f5f7fb}
+  .sheet-action:hover>.chev{transform:translateX(2px)}
+  .bm:hover .bm-icon{transform:translateY(-1px)}
+  .choice:not(.selected):hover{border-color:#c9d8f3;background-color:#f7faff}
+  .camera .shutter:not(:disabled):hover{box-shadow:inset 0 0 0 4px var(--blue),0 0 0 7px rgba(10,124,244,.12),0 12px 26px rgba(10,124,244,.26)}
+  .page-thumb:hover .page-shot{box-shadow:0 0 0 2px rgba(10,124,244,.25),0 4px 10px rgba(20,40,90,.14)}
+  .preview-actions button:hover{background:rgba(13,23,71,.9)}
+  /* нажатие поверх наведения: сжатие важнее подъёма */
+  .primary:active,.create-bm:active,.fab:active{transform:scale(.975)}
+  .note-card:active,.bm-row:active{transform:scale(.99)}
+  .bm:active .bm-icon{transform:scale(.95)}
+}
