@@ -1038,3 +1038,8 @@ body:has(.overlay){overflow:hidden!important}
     9px 10px 0 -2px #efe7d6,9px 10px 0 -1px rgba(120,100,60,.14),
     0 3px 6px rgba(13,23,71,.10),0 30px 54px rgba(20,50,120,.26)}
 .camera .fake-page .demo-page{display:block;width:100%;height:100%}
+/* камера: большой просмотр фото целиком внутри видимой области.
+   Процентный max-height у элемента сетки Safari не применяет — фото растягивалось и уходило
+   под нижнюю панель. Явная рамка: сверху место под подсказку, снизу — под наезд панели. */
+.camera .shot-preview{position:absolute;top:58px;bottom:36px;left:0;right:0;margin:auto;
+  width:auto;height:auto;max-width:86%;max-height:calc(100% - 94px);object-fit:contain}
