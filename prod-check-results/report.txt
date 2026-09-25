@@ -1,0 +1,122 @@
+== files
+v=31
+konspekt-v31
+4
+4
+== motion QA (Chromium, touch)
+PASS A backdrop tap closes
+PASS B small drag snaps back
+PASS drag follows finger + scrim fades
+   _drag sample → {"t":"translate3d(0px, 48px, 0px)","bg":"rgba(16, 24, 52, 0.282)"}
+PASS C long drag closes
+PASS D fast flick closes
+PASS E upward drag stays
+PASS horizontal gesture ignored
+PASS F tap action works
+PASS G 10x open/close clean
+PASS rename: single scrim during swap
+   _rename overlays mid → ["overlay closing bg=rgba(0, 0, 0, 0)","overlay modal-wrap swap bg=rgba(16, 24, 52, 0.32)"]
+PASS forward: new from right, old to left
+   _fwd → {"a":"matrix(1, 0, 0, 1, 28, 0)","g":"matrix(1, 0, 0, 1, 0, 0)"}
+PASS back: new from left, old to right
+   _back → {"a":"matrix(1, 0, 0, 1, -28, 0)","g":"matrix(1, 0, 0, 1, 0, 0)"}
+PASS no ghost left after transitions
+PASS rapid navigation ends clean on home
+PASS double tap card → single history entry
+PASS home scroll restored
+   _scroll → [32,32]
+PASS new page thumb animates in
+   _camera page count → "Страницы · 1"
+PASS JS errors
+PASS reduced motion: no slide, instant close
+== sheet (WebKit, pointer)
+PASS webkit small drag → snap back
+PASS webkit long drag → close
+PASS webkit fast flick → close
+PASS webkit backdrop tap → close
+PASS webkit body scroll restored
+PASS webkit JS errors
+== hover
+PASS hover on desktop (mouse)
+PASS no sticky hover on phone (touch)
+== icon swaps
+[webkit] Home → + (New Bookmark) → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] New Bookmark → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → + again → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] pick icon → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] pick color → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] back → Home → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → Camera → scr-camera: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Camera → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → Camera again → scr-camera: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Camera → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → All Bookmarks → scr-bookmarks: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] All Bookmarks → История → scr-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] История → back → scr-bookmarks: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] All Bookmarks → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → История → scr-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] История → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → All Notes → scr-all-notes: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] All Notes → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 1: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 1: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 2: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 2: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 3: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 3: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 4: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 4: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 5: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 5: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 6: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 6: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 7: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 7: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 8: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 8: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 9: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 9: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 10: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] loop 10: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] Home → note menu → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[webkit] JS errors: []
+[chromium] Home → + (New Bookmark) → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] New Bookmark → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → + again → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] pick icon → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] pick color → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] back → Home → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → Camera → scr-camera: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Camera → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → Camera again → scr-camera: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Camera → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → All Bookmarks → scr-bookmarks: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] All Bookmarks → История → scr-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] История → back → scr-bookmarks: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] All Bookmarks → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → История → scr-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] История → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → All Notes → scr-all-notes: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] All Notes → back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 1: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 1: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 2: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 2: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 3: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 3: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 4: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 4: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 5: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 5: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 6: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 6: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 7: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 7: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 8: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 8: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 9: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 9: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 10: Home → + → scr-new-bookmark: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] loop 10: back → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] Home → note menu → scr-home: icon swaps after first frame: 0 | frames with unloaded covers: 0
+[chromium] JS errors: []
