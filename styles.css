@@ -1030,3 +1030,11 @@ body:has(.overlay){overflow:hidden!important}
 .deco-cam-a{width:22px;height:22px}
 .deco-cam-b{width:15px;height:15px}
 .deco-foot{left:50%;transform:translateX(-50%);top:560px;width:180px;height:90px;opacity:.85}
+/* камера: демо-страница учебника (SVG из js/demo-page.js) вместо заголовка и повторяющихся линий */
+.camera .fake-page:before,.camera .fake-page:after{content:none}
+.camera .fake-page{overflow:hidden;border-radius:7px;
+  background:linear-gradient(172deg,#fffdf7 0%,#fbf7ec 60%,#f6efdf 100%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(150,120,70,.10),
+    9px 10px 0 -2px #efe7d6,9px 10px 0 -1px rgba(120,100,60,.14),
+    0 3px 6px rgba(13,23,71,.10),0 30px 54px rgba(20,50,120,.26)}
+.camera .fake-page .demo-page{display:block;width:100%;height:100%}
