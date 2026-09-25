@@ -1,0 +1,9 @@
+styles.css?v=28 has fix: true | index v=28: true
+webkit 390x844 {"imgTop":126,"imgBottom":500,"hintBottom":116,"sheetTop":516,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+webkit 393x852 {"imgTop":126,"imgBottom":508,"hintBottom":116,"sheetTop":524,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+webkit 430x932 {"imgTop":126,"imgBottom":588,"hintBottom":116,"sheetTop":604,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+webkit 375x667 {"imgTop":126,"imgBottom":362,"hintBottom":116,"sheetTop":378,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+chromium 390x844 {"imgTop":126,"imgBottom":500,"hintBottom":116,"sheetTop":516,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+chromium 393x852 {"imgTop":126,"imgBottom":508,"hintBottom":116,"sheetTop":524,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+chromium 430x932 {"imgTop":126,"imgBottom":588,"hintBottom":116,"sheetTop":604,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
+chromium 375x667 {"imgTop":126,"imgBottom":362,"hintBottom":116,"sheetTop":378,"ratio":0.75} FULLY VISIBLE: true aspect 3:4: true
