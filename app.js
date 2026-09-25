@@ -381,7 +381,7 @@
       ? '<img class="shot-preview" src="' + sel.url + '" alt="Страница ' + (S.selectedPage + 1) + '"><div class="hint">Страница ' +
         (S.selectedPage + 1) + " из " + n + '</div><div class="preview-actions"><button data-retake="' + S.selectedPage +
         '">Переснять</button><button data-remove-page="' + S.selectedPage + '">Удалить</button></div>'
-      : '<div class="fake-page"></div><div class="guide"></div><div class="hint">Помести страницу в кадр</div>';
+      : '<div class="fake-page">' + window.K.demoPage.render("history") + '</div><div class="guide"></div><div class="hint">Помести страницу в кадр</div>';
     return (
       app("camera") +
       '<div class="screen-head"><button class="back" data-back aria-label="Закрыть">' + icon("close") +
