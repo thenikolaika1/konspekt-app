@@ -1,8 +1,0 @@
-index.html 200 v=27:YES demo-page.js:YES
-service-worker.js 200 konspekt-v27:YES
-js/demo-page.js?v=27 200 Первые годы войны:YES PAGES:YES
-app.js?v=27 200 demoPage.render:YES
-styles.css?v=27 200 .demo-page:YES fake-page:after{content:none:YES
-webkit 390x844 camera frames: 1 first frame: {"svg":true,"after":"none"} all frames new page: true
-webkit 430x932 camera frames: 25 first frame: {"svg":true,"after":"none"} all frames new page: true
-chromium 390x844 camera frames: 25 first frame: {"svg":true,"after":"none"} all frames new page: true
