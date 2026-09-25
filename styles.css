@@ -1043,3 +1043,83 @@ body:has(.overlay){overflow:hidden!important}
    под нижнюю панель. Явная рамка: сверху место под подсказку, снизу — под наезд панели. */
 .camera .shot-preview{position:absolute;top:58px;bottom:36px;left:0;right:0;margin:auto;
   width:auto;height:auto;max-width:86%;max-height:calc(100% - 94px);object-fit:contain}
+
+/* ======================================================================
+   MOTION — единая система движения. Только transform / opacity / цвет.
+   ====================================================================== */
+:root{
+  --motion-fast:110ms;      /* нажатие: реакция сразу */
+  --motion-button:160ms;    /* возврат кнопки */
+  --motion-normal:200ms;    /* смена состояния: выбор, цвет */
+  --motion-screen:260ms;    /* переход экрана */
+  --motion-sheet:300ms;     /* лист снизу */
+  --ease-standard:cubic-bezier(.2,0,0,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --ease-spring:cubic-bezier(.34,1.26,.64,1);
+}
+/* экраны: новый — поверх уходящего (уходящий в неподвижном слое .screen-ghost) */
+.app{z-index:1}
+.screen-ghost{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.screen-ghost>.app{min-height:100vh}
+.fab-layer{position:relative;z-index:15}
+
+/* нажатия: сразу чуть меньше, отпустил — плавно назад. Размеры не меняются. */
+button,.note-card,.bm-row,.pick-row,.sheet-action,.choice,.bm .bm-icon,.page-thumb{
+  transition:transform var(--motion-button) var(--ease-out),background-color var(--motion-normal) var(--ease-standard),
+    box-shadow var(--motion-normal) var(--ease-standard),border-color var(--motion-normal) var(--ease-standard),opacity var(--motion-normal) var(--ease-standard),filter var(--motion-normal) var(--ease-standard)}
+button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:active,.choice:active,.bm:active .bm-icon{transition-duration:var(--motion-fast)}
+.primary:active,.create-bm:active,.fab:active{transform:scale(.975);filter:brightness(.96);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 1px 2px rgba(7,89,201,.2),0 3px 8px rgba(10,124,244,.18)}
+.secondary:active,.add-row:active,.danger-btn:active,.text-action:active,.link:active{transform:scale(.985)}
+.back:active,.more:active,.circle-btn:active,.gallery:active,.brand-spark:active,.dots:active,.field-clear:active,.page-remove:active,.add-page:active,.preview-actions button:active{transform:scale(.92)}
+.note-card:active,.bm-row:active{transform:scale(.99);background-color:#f7f8fb}
+.sheet-action:active,.pick-row:active{background-color:#f2f4f9}
+.sheet-action:active>.chev{transform:translateX(2px)}
+.sheet-action .chev{transition:transform var(--motion-button) var(--ease-out)}
+.bm:active .bm-icon{transform:scale(.95)}
+.choice:active{transform:scale(.95)}
+.camera .shutter:active{transform:scale(.92);box-shadow:inset 0 0 0 5px var(--blue),0 0 0 4px rgba(10,124,244,.1),0 4px 10px rgba(10,124,244,.2)}
+.page-thumb:active{transform:scale(.96)}
+
+/* листы и окна: появление; при смене содержимого — без повторной анимации */
+.overlay{background:rgba(16,24,52,.32);animation:scrim-in var(--motion-sheet) var(--ease-standard) both}
+.overlay .sheet{animation:sheet-in var(--motion-sheet) var(--ease-out) both;touch-action:none;will-change:auto}
+.overlay .sheet.dragging{transition:none}
+.overlay .modal{animation:modal-in 220ms var(--ease-out) both}
+.overlay.static,.overlay.static .sheet,.overlay.static .modal,.overlay.swap{animation:none}
+.overlay.closing{pointer-events:none}
+@keyframes scrim-in{from{background-color:rgba(16,24,52,0)}}
+@keyframes sheet-in{from{transform:translate3d(0,100%,0)}}
+@keyframes modal-in{from{opacity:0;transform:scale(.97)}}
+.grab{cursor:grab}
+/* окно ввода выше центра — клавиатура iPhone его не закрывает */
+.overlay.modal-wrap{align-items:flex-start;padding-top:max(16vh,calc(env(safe-area-inset-top) + 24px))}
+
+/* камера: новая страница мягко появляется, короткая вспышка внутри области съёмки */
+.page-thumb.enter{animation:thumb-in 220ms var(--ease-out) both}
+@keyframes thumb-in{from{opacity:0;transform:scale(.94)}}
+.viewfinder.flash::after{content:"";position:absolute;inset:0;background:#fff;pointer-events:none;z-index:4;animation:vf-flash 280ms var(--ease-standard) both}
+@keyframes vf-flash{from{opacity:.38}to{opacity:0}}
+
+/* обработка: сменившийся шаг — мягко; спокойное «дыхание» иллюстрации */
+.progress-row.just-active{animation:row-in 280ms var(--ease-out) both}
+.progress-row.just-active .step-dot{animation:dot-in 320ms var(--ease-spring) both}
+.progress-row.just-done .step-dot .ui-icon{animation:check-in 260ms var(--ease-spring) both}
+@keyframes row-in{from{opacity:.4;transform:translate3d(6px,0,0)}}
+@keyframes dot-in{from{transform:scale(.5)}}
+@keyframes check-in{from{opacity:0;transform:scale(.4)}}
+.processing .pages-illustration{animation:float 5.2s ease-in-out infinite}
+@keyframes float{50%{transform:translate3d(0,-3px,0)}}
+.deco-proc-a,.deco-proc-d,.deco-hero-a,.deco-cam-a{animation:breathe 3.6s ease-in-out infinite;transform-origin:center}
+.deco-proc-d{animation-delay:-1.8s}
+@keyframes breathe{50%{opacity:.55;transform:scale(.9)}}
+
+/* уменьшенное движение: без перемещений и фоновой анимации, функциональность та же */
+@media (prefers-reduced-motion:reduce){
+  .overlay,.overlay .sheet,.overlay .modal,.page-thumb.enter,.progress-row.just-active,.progress-row.just-active .step-dot,
+  .progress-row.just-done .step-dot .ui-icon,.processing .pages-illustration,.deco,.viewfinder.flash::after{animation:none!important}
+  button:active,.note-card:active,.bm-row:active,.choice:active,.bm:active .bm-icon{transform:none!important}
+}
+.overlay .sheet .pick-list{touch-action:pan-y}
+/* системная подсветка нажатия не нужна: у элементов свой отклик; иначе при смене экрана
+   она на кадр «перескакивает» на новый элемент под пальцем */
+*{-webkit-tap-highlight-color:transparent}
