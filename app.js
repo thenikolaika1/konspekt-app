@@ -119,6 +119,8 @@
 
   const back = () => {
     if (S.history.length) {
+      navDir = "back";
+      lockNav();
       S.screen = S.history.pop();
       S.sheet = null;
       render();
@@ -175,6 +177,9 @@
   // запоминаем прокрутку экрана, с которого уходим, чтобы «назад» вернул на то же место
   const scrollMem = {};
   function go(s, push = true) {
+    // направление перехода: вперёд, «появление» после обработки или мягкая смена экрана
+    navDir = S.screen === "processing" ? "rise" : push ? "forward" : "fade";
+    lockNav();
     scrollMem[S.screen] = scrollY;
     if (push && S.screen !== s && !TRANSIENT.includes(S.screen)) S.history.push(S.screen);
     S.screen = s;
@@ -391,7 +396,7 @@
       S.pages
         .map(
           (p, i) =>
-            '<div class="page-thumb' + (i === S.selectedPage ? " selected" : "") + '"><img class="page-shot" src="' + p.url +
+            '<div class="page-thumb' + (i === S.selectedPage ? " selected" : "") + (seenPages.has(p) ? "" : " enter") + '"><img class="page-shot" src="' + p.url +
             '" data-select-page="' + i + '" alt="Страница ' + (i + 1) + '"><button class="page-remove" data-remove-page="' + i +
             '" aria-label="Удалить страницу ' + (i + 1) + '">' + icon("close") + "</button></div>",
         )
@@ -408,10 +413,14 @@
     );
   }
 
+  let shownStep = -1; // какой шаг уже показан — анимируем только новый
   function progressRows() {
+    const changed = shownStep !== S.gen.step && shownStep >= 0;
+    shownStep = S.gen.step;
     return STEPS.map((t, i) => {
       const st = i < S.gen.step ? "done" : i === S.gen.step ? "active" : "";
-      return '<div class="progress-row ' + st + '"><span class="step-dot">' + (st === "done" ? icon("check") : "") + "</span>" + t + "</div>";
+      const just = changed ? (i === S.gen.step - 1 ? " just-done" : i === S.gen.step ? " just-active" : "") : "";
+      return '<div class="progress-row ' + st + just + '"><span class="step-dot">' + (st === "done" ? icon("check") : "") + "</span>" + t + "</div>";
     }).join("");
   }
 
@@ -609,8 +618,8 @@
     return pool.find((img) => !img.isConnected && img.complete && img.naturalWidth > 0) || null;
   }
 
-  function hydrateThumbs() {
-    root.querySelectorAll("img.thumb-img").forEach((fresh) => {
+  function hydrateThumbs(scope = root) {
+    scope.querySelectorAll("img.thumb-img").forEach((fresh) => {
       const src = fresh.getAttribute("src");
       const ready = pooledThumb(src);
       if (ready) {
@@ -627,7 +636,7 @@
   function preloadThumbs() {
     const srcs = [...new Set(store.listNotes().map((n) => n.thumbnail || n.thumbnailUrl).filter(Boolean))];
     const jobs = srcs.flatMap((src) =>
-      [0, 1, 2].map(() => {
+      [0, 1, 2, 3].map(() => {
         const img = new Image();
         img.className = "thumb-img";
         img.alt = "";
@@ -643,16 +652,264 @@
     return Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 1500))]);
   }
 
+  // ---------- движение: переходы экранов, листы, перестройка списков ----------
+  // Длительности и кривые — те же, что в CSS (--motion-*, --ease-*).
+  const MOTION = { screen: 260, screenOut: 220, sheet: 300, sheetOut: 220, modalOut: 160 };
+  const EASE_OUT = "cubic-bezier(.16,1,.3,1)";
+  const EASE_STD = "cubic-bezier(.2,0,0,1)";
+  const SCRIM = 0.32; // непрозрачность затемнения под листом
+  const reduceMotion = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+  const calm = () => reduceMotion.matches;
+  let navDir = null; // "forward" | "back" | "rise" | "fade" — задают go() и back()
+  let firstPaint = true;
+  let lastScreenHtml = "";
+  let navLockUntil = 0;
+  let closeFromY = null; // лист закрывается жестом: продолжаем движение с этого места
+  const seenPages = new WeakSet();
+
+  // короткая защита от двойной навигации (два быстрых нажатия не открывают два экрана)
+  function lockNav() {
+    navLockUntil = performance.now() + 200;
+  }
+
+  const fadeOut = (el, ms) =>
+    calm()
+      ? Promise.resolve()
+      : el.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.95)" }], { duration: ms, easing: EASE_STD, fill: "forwards" }).finished.catch(() => {});
+
+  // FLIP: элементы плавно переезжают со старых мест на новые, без анимации размеров
+  const listKey = (e) => e.dataset.note || e.dataset.bookmark || e.dataset.go || "";
+  const pageKey = (e) => e.querySelector("img")?.getAttribute("src") || (e.classList.contains("add-page") ? "add" : "");
+  function rects(sel, key) {
+    const m = new Map();
+    root.querySelectorAll(sel).forEach((e) => m.set(key(e), e.getBoundingClientRect()));
+    return m;
+  }
+  function flip(before, sel, key) {
+    if (calm()) return;
+    root.querySelectorAll(sel).forEach((e) => {
+      const b = before.get(key(e));
+      if (!b) return;
+      const r = e.getBoundingClientRect();
+      const dx = b.left - r.left, dy = b.top - r.top;
+      if (dx || dy) e.animate([{ transform: "translate(" + dx + "px," + dy + "px)" }, { transform: "none" }], { duration: 260, easing: EASE_OUT });
+    });
+  }
+
+  const sheetKey = () => (S.sheet ? [S.sheet.type, S.sheet.id || "", S.sheet.kind || ""].join(":") : "");
+  const fromHtml = (html) => {
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    return t.content.firstElementChild;
+  };
+
+  // уходящий экран остаётся видимым в неподвижном слое под новым, пока идёт переход
+  function ghostOf(el) {
+    const g = document.createElement("div");
+    g.className = "screen-ghost";
+    el.getAnimations().forEach((a) => a.cancel());
+    el.style.marginTop = -scrollY + "px";
+    g.append(el);
+    document.body.append(g);
+    return g;
+  }
+
+  function animateScreens(el, ghost, dir) {
+    const X = { forward: 28, back: -28 }[dir] || 0;
+    const incoming =
+      dir === "rise"
+        ? [{ opacity: 0, transform: "translate3d(0,10px,0)" }, { opacity: 1, transform: "none" }]
+        : dir === "fade"
+          ? [{ opacity: 0 }, { opacity: 1 }]
+          : [{ opacity: 0, transform: "translate3d(" + X + "px,0,0)" }, { opacity: 1, transform: "none" }];
+    el.animate(incoming, { duration: dir === "rise" ? 320 : MOTION.screen, easing: EASE_OUT });
+    if (!ghost) return;
+    const out = dir === "rise" ? [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.99)" }] : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translate3d(" + -X / 2 + "px,0,0)" }];
+    const a = ghost.firstElementChild.animate(out, { duration: MOTION.screenOut, easing: EASE_STD, fill: "forwards" });
+    a.finished.catch(() => {}).then(() => ghost.remove());
+  }
+
+  // первое открытие приложения: три крупные группы главной мягко появляются
+  function homeEntrance(el) {
+    [[".top", ".home-kicker"], [".section-row", ".bookmarks", ".hero"], [".hero + .section-row", ".note-list", ".empty"]].forEach((group, i) =>
+      group.forEach((sel) => {
+        const e = el.querySelector(sel);
+        e?.animate([{ opacity: 0, transform: "translate3d(0,8px,0)" }, { opacity: 1, transform: "none" }], { duration: 320, delay: i * 40, easing: EASE_OUT, fill: "backwards" });
+      }),
+    );
+  }
+
+  function closeOverlay(ov) {
+    ov.classList.add("closing");
+    ov.inert = true; // уходящий лист уже не принимает касаний и не читается экранным чтецом
+    ov.setAttribute("aria-hidden", "true");
+    ov.removeAttribute("data-backdrop");
+    const panel = ov.querySelector(".sheet, .modal");
+    const isModal = !!ov.querySelector(".modal");
+    const done = () => ov.remove();
+    if (calm() || !panel) return done();
+    const fromY = closeFromY ?? 0;
+    closeFromY = null;
+    const scrim = getComputedStyle(ov).backgroundColor;
+    ov.animate([{ backgroundColor: scrim }, { backgroundColor: "rgba(16,24,52,0)" }], { duration: MOTION.sheetOut, easing: EASE_STD, fill: "forwards" });
+    const a = isModal
+      ? panel.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.97)" }], { duration: MOTION.modalOut, easing: EASE_STD, fill: "forwards" })
+      : panel.animate([{ transform: "translate3d(0," + fromY + "px,0)" }, { transform: "translate3d(0,100%,0)" }], { duration: MOTION.sheetOut, easing: "cubic-bezier(.3,0,.8,.15)", fill: "forwards" });
+    a.finished.catch(() => {}).then(done);
+  }
+
   function render() {
-    const h = (SCREENS[S.screen] || home)();
-    root.innerHTML = h + sheet();
-    hydrateThumbs();
+    const dir = calm() ? null : navDir;
+    navDir = null;
+    document.querySelectorAll(".screen-ghost").forEach((g) => g.remove());
+    const html = (SCREENS[S.screen] || home)();
+    const oldScreen = root.querySelector(":scope > .app");
+
+    // экран: пересоздаём только если он изменился
+    if (dir || html !== lastScreenHtml || !oldScreen) {
+      const el = fromHtml(html);
+      const ghost = dir && oldScreen && S.screen !== "splash" ? ghostOf(oldScreen) : null;
+      if (oldScreen && !ghost) oldScreen.remove();
+      root.querySelector(":scope > .fab-layer")?.remove();
+      root.prepend(el);
+      // фиксированные кнопки выносим из экрана, чтобы переход (transform) не сдвигал их
+      const fab = el.querySelector(".fab");
+      if (fab) {
+        const layer = document.createElement("div");
+        layer.className = "fab-layer";
+        layer.append(fab);
+        root.append(layer);
+        if (dir) layer.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.screen, easing: EASE_OUT });
+      }
+      hydrateThumbs(el);
+      el.querySelectorAll(".page-thumb.enter").length && el.querySelector(".viewfinder")?.classList.add("flash");
+      if (dir) animateScreens(el, ghost, dir);
+      else if (firstPaint && S.screen === "home" && !calm()) homeEntrance(el);
+      lastScreenHtml = html;
+    }
+    firstPaint = false;
+    S.pages.forEach((p) => seenPages.add(p));
+
+    // лист / окно: открытие, смена содержимого без повторной анимации, закрытие
+    const key = sheetKey();
+    const oldOv = [...root.querySelectorAll(":scope > .overlay")].find((o) => !o.classList.contains("closing"));
+    const sheetHtml = sheet();
+    if (sheetHtml) {
+      const ov = fromHtml(sheetHtml);
+      ov.dataset.key = key;
+      if (oldOv && oldOv.dataset.key === key) {
+        ov.classList.add("static"); // то же содержимое обновилось — без анимации
+        oldOv.replaceWith(ov);
+      } else {
+        if (oldOv) {
+          ov.classList.add("swap"); // один лист сменяет другой: затемнение остаётся на месте
+          oldOv.style.backgroundColor = "transparent";
+          closeOverlay(oldOv);
+        }
+        root.append(ov);
+      }
+      hydrateThumbs(ov);
+    } else if (oldOv) {
+      closeOverlay(oldOv);
+    }
+
     if (S.sheet?.type === "rename") {
       const f = root.querySelector("#renameField");
-      f?.focus();
+      f?.focus({ preventScroll: true });
       f?.select();
     }
   }
+
+  // ---------- жест листа: тянуть вниз, чтобы закрыть ----------
+  // Касание (Touch Events на iPhone) и мышь (Pointer Events). Лист идёт за пальцем,
+  // затемнение слабеет; отпустил далеко или быстро — закрылся, рано — вернулся на место.
+  const drag = { tracking: false, active: false, sx: 0, sy: 0, dy: 0, h: 0, el: null, ov: null, scroller: null, samples: [], raf: 0 };
+  let suppressClickUntil = 0;
+
+  function scrollParent(target, sheetEl) {
+    for (let e = target; e && e !== sheetEl; e = e.parentElement) {
+      if (e.scrollHeight > e.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(e).overflowY)) return e;
+    }
+    return sheetEl.scrollHeight > sheetEl.clientHeight + 1 ? sheetEl : null;
+  }
+
+  function dragStart(x, y, target) {
+    const sheetEl = target.closest?.(".overlay:not(.closing) .sheet");
+    if (!sheetEl || target.closest("input, textarea")) return;
+    Object.assign(drag, { tracking: true, active: false, sx: x, sy: y, dy: 0, el: sheetEl, ov: sheetEl.closest(".overlay"), h: sheetEl.offsetHeight, scroller: scrollParent(target, sheetEl), samples: [{ t: performance.now(), y }] });
+  }
+
+  function paintDrag() {
+    drag.raf = 0;
+    if (!drag.active) return;
+    const d = drag.dy >= 0 ? drag.dy : -Math.min(18, Math.sqrt(-drag.dy) * 2.2); // вверх — лёгкое сопротивление
+    drag.el.style.transform = "translate3d(0," + d + "px,0)";
+    const p = Math.max(0, Math.min(1, d / drag.h));
+    drag.ov.style.backgroundColor = "rgba(16,24,52," + (SCRIM * (1 - p * 0.85)).toFixed(3) + ")";
+  }
+
+  function dragMove(x, y, e) {
+    if (!drag.tracking) return;
+    const dx = x - drag.sx, dy = y - drag.sy;
+    if (!drag.active) {
+      if (Math.abs(dx) < 7 && Math.abs(dy) < 7) return; // ещё касание, не жест
+      if (Math.abs(dx) > Math.abs(dy)) return void (drag.tracking = false); // горизонтальный жест — не наш
+      if (drag.scroller && (dy < 0 || drag.scroller.scrollTop > 0)) return void (drag.tracking = false); // прокрутка содержимого листа
+      drag.active = true;
+      drag.sy = y; // без рывка: лист начинает двигаться от текущей точки
+      drag.el.getAnimations().forEach((a) => a.cancel());
+      drag.ov.getAnimations().forEach((a) => a.cancel());
+      drag.el.classList.add("dragging");
+    }
+    if (e && e.cancelable) e.preventDefault();
+    drag.dy = y - drag.sy;
+    const now = performance.now();
+    drag.samples.push({ t: now, y });
+    while (drag.samples.length > 2 && now - drag.samples[0].t > 100) drag.samples.shift();
+    if (!drag.raf) drag.raf = requestAnimationFrame(paintDrag);
+  }
+
+  function dragEnd() {
+    if (!drag.tracking) return;
+    drag.tracking = false;
+    if (!drag.active) return;
+    drag.active = false;
+    suppressClickUntil = performance.now() + 350; // отпускание после жеста — не нажатие строки
+    const a = drag.samples[0], b = drag.samples[drag.samples.length - 1];
+    const v = b.t > a.t ? (b.y - a.y) / (b.t - a.t) : 0; // px/мс, вниз > 0
+    const threshold = Math.min(110, drag.h * 0.25);
+    const el = drag.el, ov = drag.ov;
+    el.classList.remove("dragging");
+    if (drag.dy > threshold || (v > 0.5 && drag.dy > 12)) {
+      closeFromY = Math.max(0, drag.dy);
+      el.style.transform = "";
+      ov.style.backgroundColor = "";
+      return closeSheet();
+    }
+    const from = el.style.transform || "none";
+    el.style.transform = "";
+    const scrim = ov.style.backgroundColor;
+    ov.style.backgroundColor = "";
+    if (calm()) return;
+    el.animate([{ transform: from }, { transform: "none" }], { duration: 280, easing: EASE_OUT });
+    if (scrim) ov.animate([{ backgroundColor: scrim }, { backgroundColor: "rgba(16,24,52," + SCRIM + ")" }], { duration: 280, easing: EASE_OUT });
+  }
+
+  root.addEventListener("touchstart", (e) => e.touches.length === 1 && dragStart(e.touches[0].clientX, e.touches[0].clientY, e.target), { passive: true });
+  root.addEventListener(
+    "touchmove",
+    (e) => {
+      if (drag.tracking) dragMove(e.touches[0].clientX, e.touches[0].clientY, e);
+      // затемнение под листом не прокручивает страницу
+      else if (e.target.classList?.contains("overlay") && e.cancelable) e.preventDefault();
+    },
+    { passive: false },
+  );
+  root.addEventListener("touchend", dragEnd);
+  root.addEventListener("touchcancel", dragEnd);
+  root.addEventListener("pointerdown", (e) => e.pointerType === "mouse" && dragStart(e.clientX, e.clientY, e.target));
+  window.addEventListener("pointermove", (e) => e.pointerType === "mouse" && drag.tracking && dragMove(e.clientX, e.clientY, e));
+  window.addEventListener("pointerup", (e) => e.pointerType === "mouse" && dragEnd());
 
   // ---------- camera ----------
 
@@ -697,13 +954,18 @@
     }
   }
 
-  function removePage(i) {
+  async function removePage(i) {
+    // миниатюра мягко исчезает, остальные плавно сдвигаются на её место
+    const thumb = root.querySelectorAll(".page-strip .page-thumb")[i];
+    if (thumb) await fadeOut(thumb, 160);
+    const before = rects(".page-strip .page-thumb, .page-strip .add-page", pageKey);
     const [p] = S.pages.splice(i, 1);
     images.releasePage(p);
     S.pagesMessage = "";
     if (!S.pages.length) S.selectedPage = -1;
     else if (S.selectedPage >= i) S.selectedPage = Math.max(0, S.selectedPage - 1);
     render();
+    flip(before, ".page-strip .page-thumb, .page-strip .add-page", pageKey);
   }
 
   function clearPages() {
@@ -724,6 +986,7 @@
     if (!S.pages.length || S.pagesLoading) return;
     const run = ++S.gen.run;
     S.gen.step = 0;
+    shownStep = -1;
     stopProgress();
     go("processing");
     // шаги сменяются по времени, последний держится, пока результат не готов
@@ -776,6 +1039,7 @@
           // заменяем экран формы на список закладок
           const prev = S.history.pop() || "home";
           S.screen = prev;
+          navDir = "back";
           if (prev === "bookmarks") render();
           else go("bookmarks");
         }
@@ -823,14 +1087,22 @@
     if ((x = el("[data-delete]"))) return openSheet({ type: "delete", kind: x.dataset.delete, id: S.sheet.id });
     if (el("[data-confirm-delete]")) {
       const { kind, id } = S.sheet;
+      const onDeleted = kind === "note" ? S.screen === "note" && S.noteId === id : S.screen === "bookmark" && S.bookmarkId === id;
+      const LIST = ".note-list .note-card, .bm-list .bm-row, .bookmarks .bm";
+      const item = onDeleted ? null : root.querySelector(kind === "note" ? '.note-card[data-note="' + id + '"]' : '[data-bookmark="' + id + '"]');
+      // сначала закрываем окно, затем карточка мягко исчезает
+      S.sheet = null;
+      render();
+      if (item) await fadeOut(item, 180);
+      const before = rects(LIST, listKey);
       try {
         await (kind === "note" ? store.deleteNote(id) : store.deleteBookmark(id));
       } catch (err) {
         console.error("[delete] failed", err);
       }
-      S.sheet = null;
-      const onDeleted = kind === "note" ? S.screen === "note" && S.noteId === id : S.screen === "bookmark" && S.bookmarkId === id;
-      return onDeleted ? back() : render();
+      if (onDeleted) return back();
+      render();
+      return flip(before, LIST, listKey);
     }
 
     // закладки
@@ -987,7 +1259,11 @@
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
   const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry]";
   let busy = false;
+  const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],.fab";
   root.addEventListener("click", (e) => {
+    const now = performance.now();
+    if (now < suppressClickUntil) return;
+    if (now < navLockUntil && e.target.closest(NAV) && !e.target.closest("[data-note-menu]")) return;
     const once = e.target.closest(ONCE);
     if (once && busy) return;
     if (once) busy = true;

@@ -13,7 +13,7 @@ function inPageAudit(){
   const L=c=>{const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c.r)+.7152*f(c.g)+.0722*f(c.b)};
   const CR=(a,b)=>{const x=L(a),y=L(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
   const bgOf=el=>{for(let e=el;e;e=e.parentElement){const s=getComputedStyle(e);if(s.backgroundImage&&s.backgroundImage!=='none'){const m=s.backgroundImage.match(/rgba?\([^)]+\)/);const c=m&&rgb(m[0]);if(c&&c.a>.5)return c}const c=rgb(s.backgroundColor);if(c&&c.a>.5)return c;if(e.tagName==='IMG')return null}return {r:255,g:255,b:255,a:1}};
-  const hidden=el=>{for(let e=el;e&&e!==document.documentElement;e=e.parentElement){const s=getComputedStyle(e);if(s.display==='none'||s.visibility==='hidden'||parseFloat(s.opacity)<.1)return (e===el?'':'ancestor ')+(s.display==='none'?'display:none':s.visibility==='hidden'?'visibility:hidden':'opacity:'+s.opacity)}return ''};
+  const hidden=el=>{if(el.closest('[inert]'))return 'inert (закрывающийся слой)';for(let e=el;e&&e!==document.documentElement;e=e.parentElement){const s=getComputedStyle(e);if(s.display==='none'||s.visibility==='hidden'||parseFloat(s.opacity)<.1)return (e===el?'':'ancestor ')+(s.display==='none'?'display:none':s.visibility==='hidden'?'visibility:hidden':'opacity:'+s.opacity)}return ''};
   const inHScroll=el=>{for(let e=el.parentElement;e;e=e.parentElement){const o=getComputedStyle(e).overflowX;if(o==='auto'||o==='scroll')return true}return false};
   const name=el=>{let n=el.tagName.toLowerCase();if(el.id)n+='#'+el.id;const cls=(el.getAttribute('class')||'').trim().split(/\s+/).slice(0,2).join('.');if(cls)n+='.'+cls;const d=[...el.attributes].find(a=>a.name.startsWith('data-'));if(d)n+='['+d.name+(d.value?'='+d.value.slice(0,20):'')+']';const t=(el.innerText||el.getAttribute('aria-label')||'').trim().replace(/\s+/g,' ').slice(0,24);return n+(t?' "'+t+'"':'')};
   const INTER='button,input,[data-go],[data-back],[data-note],[data-bookmark],[data-note-menu],[data-bookmark-menu],[data-sheet],[data-camera],[data-gallery],[data-process],[data-retry],[data-start],[data-close],[data-confirm-delete],[data-save-rename],[data-toggle-bm],[data-new-bm-for-note],[data-rename],[data-delete],[data-edit-bm],[data-open-note],[data-icon],[data-color],[data-create-bm],[data-select-page],[data-remove-page],[data-retake],[data-clear-field]';
@@ -23,6 +23,7 @@ function inPageAudit(){
   document.querySelectorAll('#app '+INTER.split(',').join(',#app ')).forEach(el=>{
     if(el.type==='file')return; if(layer&&!layer.contains(el))return; stats.interactive++;
     const h=hidden(el); const r=el.getBoundingClientRect();
+    if(el.closest('[inert]'))return; // закрывающийся лист: не интерактивен по определению
     if(h){ if(el.matches('[data-clear-field]'))return; issues.push({kind:'hidden-control',el:name(el),why:h});return }
     if(r.width<1||r.height<1){issues.push({kind:'zero-size',el:name(el)});return}
     const af=getComputedStyle(el,'::after');let ex=0;if(af.content!=='none'&&af.position==='absolute')ex=Math.max(0,-parseFloat(af.top)||0);
