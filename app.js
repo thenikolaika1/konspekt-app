@@ -880,7 +880,8 @@
     const threshold = Math.min(110, drag.h * 0.25);
     const el = drag.el, ov = drag.ov;
     el.classList.remove("dragging");
-    if (drag.dy > threshold || (v > 0.5 && drag.dy > 12)) {
+    // быстрый взмах вниз (≈ от 800 px/с) закрывает и на коротком расстоянии; обычное потягивание — нет
+    if (drag.dy > threshold || (v > 0.8 && drag.dy > 24)) {
       closeFromY = Math.max(0, drag.dy);
       el.style.transform = "";
       ov.style.backgroundColor = "";
