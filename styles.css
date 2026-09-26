@@ -1147,3 +1147,10 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
   .note-card:active,.bm-row:active{transform:scale(.99)}
   .bm:active .bm-icon{transform:scale(.95)}
 }
+
+/* облачный конспект, который ещё создаётся или не получился: статус вместо предмета */
+.note-card .note-status{font-weight:700;color:var(--blue)}
+.note-card .note-status.failed{color:#d64e59}
+.note-card.is-processing .thumb{animation:note-pending 1.6s ease-in-out infinite}
+@keyframes note-pending{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.note-card.is-processing .thumb{animation:none}}

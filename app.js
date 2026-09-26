@@ -1,7 +1,7 @@
 /*
  * Konspekt by NK — frontend.
- * Phase 0: полностью локальный flow на mock-данных
- * (камера → фото → processing → Classic Note → сохранение → Недавние).
+ * Flow: камера → фото → processing → Classic Note → сохранение → Недавние.
+ * Генерация — K.generator: Supabase + Edge Function analyze-pages (Z.AI) или mock без сети.
  *
  * Данные: K.store (js/store.js). Конспект: StudyContent (js/study-content.js),
  * отрисовка — K.modes.classic (js/classic-renderer.js). Генерация — K.generator.
@@ -34,7 +34,8 @@
     pagesMessage: "",
     replacePage: null,
     // генерация
-    gen: { run: 0, step: 0, timer: null },
+    // mode: "pages" — генерация из фото камеры, "note" — повтор/ожидание конспекта из списка
+    gen: { run: 0, step: 0, timer: null, mode: "pages", noteId: null, error: "" },
     // форма закладки
     draftBookmark: { icon: "book", color: BM_COLORS[0] },
     editBookmarkId: null,
@@ -195,7 +196,14 @@
   const closeSheet = () => openSheet(null);
 
   function openNote(id) {
-    if (!store.getNote(id)) return;
+    const n = store.getNote(id);
+    if (!n) return;
+    // облачный конспект без готового содержимого: ждём его или предлагаем повторить
+    if (!n.content) {
+      if (n.status === "processing") return resumeGeneration(id);
+      S.gen = { ...S.gen, mode: "note", noteId: id, error: n.errorCode || "" };
+      return go("error");
+    }
     S.noteId = id;
     store.markOpened(id);
     go("note");
@@ -246,12 +254,17 @@
 
   function noteCard(n) {
     const sub = study.subject(n.subject);
+    // облачный конспект, который ещё создаётся или не получился: статус вместо предмета
+    const pending = !n.content;
+    const meta = pending
+      ? '<span class="note-status' + (n.status === "processing" ? "" : " failed") + '">' + (n.status === "processing" ? "Создаётся…" : "Не удалось") + "</span> · " + esc(formatTime(n.createdAt))
+      : '<span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt));
+    const preview = pending ? (n.status === "processing" ? "Конспект появится здесь, когда будет готов" : "Нажми, чтобы попробовать снова") : n.preview;
     return (
-      '<div class="note-card" data-note="' + esc(n.id) + '">' +
+      '<div class="note-card' + (pending ? " is-" + (n.status === "processing" ? "processing" : "failed") : "") + '" data-note="' + esc(n.id) + '">' +
       noteThumb(n) +
-      "<div><h3>" + esc(n.title) + '</h3><div class="meta"><span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' +
-      esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt)) +
-      '</div><div class="preview">' + esc(n.preview) + "</div></div>" +
+      "<div><h3>" + esc(n.title) + '</h3><div class="meta">' + meta +
+      '</div><div class="preview">' + esc(preview) + "</div></div>" +
       '<button class="dots" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dotsv") + "</button></div>"
     );
   }
@@ -439,7 +452,7 @@
 
   function note() {
     const n = store.getNote(S.noteId);
-    if (!n) return home();
+    if (!n || !n.content) return home();
     const view = modes.classic.render(n.content);
     return (
       app("note-view nt-" + esc(n.content.meta.subject)) +
@@ -502,14 +515,41 @@
     );
   }
 
+  // понятный текст по коду ошибки генерации: [что случилось, что делать]
+  const GEN_ERRORS = {
+    NETWORK: ["Нет подключения к интернету.", "Проверь подключение к интернету и попробуй ещё раз."],
+    AUTH_FAILED: ["Не удалось подключиться к серверу.", "Проверь подключение к интернету и попробуй ещё раз."],
+    UPLOAD_FAILED: ["Не удалось загрузить фотографии.", "Проверь подключение к интернету и попробуй ещё раз."],
+    UNREADABLE_PAGES: ["Не получилось прочитать текст на фотографиях.", "Сфотографируй страницы целиком, ровно и при хорошем свете."],
+    AI_TIMEOUT: ["ИИ отвечал слишком долго.", "Попробуй ещё раз или отправь меньше страниц."],
+    AI_RATE_LIMITED: ["Сервис ИИ сейчас перегружен.", "Подожди минуту и попробуй ещё раз."],
+    RATE_LIMITED: ["Слишком много конспектов за короткое время.", "Попробуй немного позже."],
+    STILL_PROCESSING: ["Конспект ещё создаётся.", "Он появится в «Недавних», когда будет готов."],
+    PAGES_MISSING: ["Фотографии этого конспекта не сохранились.", "Сфотографируй страницы ещё раз."],
+  };
+  GEN_ERRORS.UPLOAD_INTERRUPTED = GEN_ERRORS.PAGES_MISSING;
+
   function error() {
+    const code = S.gen.error;
+    const [what, hint] = GEN_ERRORS[code] || ["Что-то пошло не так.", "Проверь подключение к интернету и попробуй ещё раз."];
+    const fromPages = S.gen.mode === "pages" && S.pages.length > 0;
+    const canRetry = code !== "PAGES_MISSING" && code !== "UPLOAD_INTERRUPTED";
+    const waiting = code === "STILL_PROCESSING";
     return (
       app("processing") +
       '<div class="top">' +
       brand() +
       '</div><div class="visual-stage">' +
       art("pages") +
-      '</div><div class="error-icon">' + icon("alert") + '</div><h1>Не удалось создать конспект</h1><p>Что-то пошло не так. Твои фотографии сохранены.</p><div class="error-actions"><button class="primary wide" data-retry>Попробовать снова</button><button class="text-action" data-go="camera">Вернуться к страницам</button><p class="error-hint">Проверь подключение к интернету и попробуй ещё раз.</p></div></div>'
+      '</div><div class="error-icon">' + icon("alert") + "</div><h1>" + (waiting ? "Конспект ещё не готов" : "Не удалось создать конспект") + "</h1><p>" +
+      esc(what) + (fromPages ? " Твои фотографии сохранены." : "") + '</p><div class="error-actions">' +
+      (canRetry
+        ? '<button class="primary wide" data-retry>' + (waiting ? "Проверить снова" : "Попробовать снова") + "</button>"
+        : '<button class="primary wide" data-go="camera">Сфотографировать заново</button>') +
+      (fromPages
+        ? '<button class="text-action" data-go="camera">Вернуться к страницам</button>'
+        : '<button class="text-action" data-go="home">На главную</button>') +
+      '<p class="error-hint">' + esc(hint) + "</p></div></div>"
     );
   }
 
@@ -1001,26 +1041,41 @@
     S.gen.timer = null;
   }
 
-  async function startGeneration() {
-    if (!S.pages.length || S.pagesLoading) return;
+  function setStep(step) {
+    if (step <= S.gen.step) return;
+    S.gen.step = Math.min(step, STEPS.length - 1);
+    const el = root.querySelector("#progress");
+    if (el) el.innerHTML = progressRows();
+  }
+
+  /**
+   * Общий ход генерации: экран processing → готовый конспект или экран ошибки.
+   * task({ onStage, isCancelled }) → Promise<note>. Повторное нажатие не создаёт вторую
+   * генерацию: generator возвращает уже идущую (и сервер не запускает второй AI-запрос).
+   */
+  async function runGeneration(task, fromPages) {
     const run = ++S.gen.run;
     S.gen.step = 0;
+    S.gen.error = "";
     shownStep = -1;
     stopProgress();
     go("processing");
-    // шаги сменяются по времени, последний держится, пока результат не готов
-    S.gen.timer = setInterval(() => {
-      if (S.gen.step >= STEPS.length - 1) return stopProgress();
-      S.gen.step++;
-      const el = root.querySelector("#progress");
-      if (el) el.innerHTML = progressRows();
-    }, 1100);
-    try {
-      const content = await generator.analyzePages(S.pages);
-      if (run !== S.gen.run) return;
-      const n = await store.createNote(content, { kind: generator.kind, pageCount: S.pages.length });
+    // шаги сменяются по времени, последний держится, пока результат не готов;
+    // настоящий AI отвечает десятки секунд — шаги после загрузки фото идут медленнее
+    const tick = () => (S.gen.step >= STEPS.length - 1 ? stopProgress() : setStep(S.gen.step + 1));
+    const slow = generator.kind === "cloud";
+    if (!slow) S.gen.timer = setInterval(tick, 1100);
+    const onStage = (stage) => {
+      if (run !== S.gen.run || !slow || stage !== "analyze") return;
+      setStep(1);
       stopProgress();
-      clearPages();
+      S.gen.timer = setInterval(tick, 14000);
+    };
+    try {
+      const n = await task({ onStage, isCancelled: () => run !== S.gen.run });
+      if (run !== S.gen.run) return;
+      stopProgress();
+      if (fromPages) clearPages();
       S.noteId = n.id;
       store.markOpened(n.id);
       S.history = ["home"];
@@ -1029,9 +1084,41 @@
       if (run !== S.gen.run) return;
       console.error("[generation] failed", e);
       stopProgress();
+      S.gen.error = e.message || "";
       S.history = ["home"];
       go("error", false);
     }
+  }
+
+  function startGeneration() {
+    if (!S.pages.length || S.pagesLoading) return;
+    const pages = [...S.pages];
+    S.gen.mode = "pages";
+    S.gen.noteId = null;
+    return runGeneration((o) => generator.generate(pages, o), true);
+  }
+
+  function resumeGeneration(id) {
+    S.gen.mode = "note";
+    S.gen.noteId = id;
+    return runGeneration((o) => generator.resume(id, o), false);
+  }
+
+  // ---------- облачные конспекты: загрузка и слежение за теми, что ещё создаются ----------
+
+  const LIST_SCREENS = ["home", "all-notes", "bookmark", "bookmarks", "profile"];
+  let pendingTimer = null;
+
+  async function syncCloud() {
+    clearTimeout(pendingTimer);
+    try {
+      const changed = await store.sync();
+      // список обновляется, только если пользователь сейчас не вводит текст и не держит открытый лист
+      if (changed && LIST_SCREENS.includes(S.screen) && !S.sheet && !document.activeElement?.matches?.("input")) render();
+    } catch (e) {
+      console.warn("[sync] failed", e.message);
+    }
+    if (store.listPending().length && document.visibilityState !== "hidden") pendingTimer = setTimeout(syncCloud, 5000);
   }
 
   // ---------- events ----------
@@ -1174,7 +1261,8 @@
     }
     if (el("[data-camera]")) return openPicker(cam);
     if (el("[data-gallery]")) return openPicker(gallery);
-    if (el("[data-process]") || el("[data-retry]")) return startGeneration();
+    if (el("[data-process]")) return startGeneration();
+    if (el("[data-retry]")) return S.gen.mode === "note" && S.gen.noteId ? resumeGeneration(S.gen.noteId) : startGeneration();
 
     // навигация
     if ((x = el("[data-go]"))) {
@@ -1342,5 +1430,8 @@
     gallery.value = "";
   };
 
-  store.init().then(preloadThumbs).then(render);
+  // вернулись в приложение — обновляем облачные конспекты (в том числе те, что создавались без нас)
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && syncCloud());
+
+  store.init().then(preloadThumbs).then(render).then(syncCloud);
 })();
