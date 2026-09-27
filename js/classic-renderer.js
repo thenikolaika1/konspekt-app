@@ -124,11 +124,16 @@
     );
   }
 
-  /** Раздел с акцентным заголовком («Что нужно запомнить», вопросы). */
+  /** Раздел с акцентным заголовком (формулы, вопросы). */
   const part = (cls, title, inner) => '<section class="cn-part ' + cls + '"><h2 class="cn-h2alt">' + title + "</h2>" + inner + "</section>";
   /** Справочная карточка (термины, личности, даты): цветная полоса, заголовок, плотные строки. */
   const card = (cls, title, inner) => '<section class="cn-card ' + cls + '"><h2 class="cn-card-title">' + title + "</h2>" + inner + "</section>";
 
+  /**
+   * Утверждённый формат Classic Note (одинаковый для всех предметов):
+   * основная часть по разделам → Термины → Личности → Даты → Формулы → Важно → Вывод → Вопросы и ответы.
+   * Пустые справочные блоки не выводятся.
+   */
   function body(c) {
     const g = c.glossary;
     let h = '<article class="cn-body">';
@@ -138,9 +143,8 @@
       if (s.heading) h += '<h2 class="cn-h2">' + (i + 1) + ". " + inline(s.heading) + "</h2>";
       h += s.blocks.map(block).join("") + "</section>";
     });
-    if (c.conclusion) h += box("conclusion", "alt", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
     if (g.terms.length)
-      h += card("terms", "Термины и определения",
+      h += card("terms", "Термины",
         g.terms.map((t) => '<p class="cn-gl"><span class="kw-def">' + esc(t.term) + "</span> — " + inline(t.definition) + "</p>").join(""));
     if (g.people.length)
       h += card("people", "Личности",
@@ -153,9 +157,12 @@
         g.formulas
           .map((f) => '<div class="formula">' + esc(f.expression) + "</div>" + (f.meaning ? "<p>" + inline(f.meaning) + "</p>" : "") + variables(f.variables))
           .join(""));
-    if (c.remember.length) h += part("remember", "Что нужно запомнить", list(c.remember));
+    // «Важно» — несколько ключевых акцентов (StudyContent.remember), тем же блоком, что и IMPORTANT
+    if (c.remember.length)
+      h += box("important key-points", "imp", "Важно", c.remember.length === 1 ? "<p>" + inline(c.remember[0]) + "</p>" : list(c.remember));
+    if (c.conclusion) h += box("conclusion", "alt", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
     if (c.selfCheck.length) {
-      h += part("qa-part", "Вопросы и задания",
+      h += part("qa-part", "Вопросы и ответы",
         c.selfCheck
           .map(
             (x, i) =>

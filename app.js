@@ -74,6 +74,7 @@
       sparkle: '<path d="M12 3c.6 4.2 2.4 6.3 7 7-4.6.7-6.4 2.8-7 7-.6-4.2-2.4-6.3-7-7 4.6-.7 6.4-2.8 7-7Z" fill="currentColor" stroke="none"/>',
       check: '<path d="m5 12.5 4.2 4.2L19 7"/>',
       open: '<path d="M3 5.5c3-1.3 6-1.3 9 .8 3-2.1 6-2.1 9-.8V19c-3-1.3-6-1.3-9 .8-3-2.1-6-2.1-9-.8V5.5ZM12 6.3v13.5"/>',
+      arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
     };
     if (!p[n]) console.warn("[icon] unknown icon:", n);
     return (
@@ -456,19 +457,34 @@
     const view = modes.classic.render(n.content);
     return (
       app("note-view nt-" + esc(n.content.meta.subject)) +
-      '<div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
-      '</button><div class="note-actions"><button class="circle-btn note-bookmark" data-sheet="add" aria-label="Добавить в закладку">' + icon("bookmark") +
-      '</button><button class="circle-btn note-menu" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
+      // закреплённая панель: ← назад, меню и поиск всегда доступны при прокрутке
+      '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
+      '</button><div class="note-actions"><button class="circle-btn note-menu" data-note-menu="' + esc(n.id) + '" aria-label="Действия">' + icon("dots") +
       "</button></div></div></div>" +
       '<div class="cn-search"><label class="cn-search-box">' + icon("search") +
       '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
-      '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div>' +
+      '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div>' +
       '<div class="cn-doc" id="noteDoc">' +
       view.head +
       view.body +
-      "</div></div>"
+      "</div>" +
+      '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
   }
+
+  // кнопка «наверх» на экране конспекта: видна только после заметной прокрутки вниз (прокручивается window)
+  let topTick = 0;
+  function updateToTop() {
+    topTick = 0;
+    const btn = S.screen === "note" && root.querySelector(".to-top");
+    if (!btn) return;
+    const show = scrollY > Math.max(600, innerHeight * 1.2);
+    if (btn.classList.contains("show") !== show) {
+      btn.classList.toggle("show", show);
+      btn.tabIndex = show ? 0 : -1;
+    }
+  }
+  addEventListener("scroll", () => topTick || (topTick = requestAnimationFrame(updateToTop)), { passive: true });
 
   function newBookmark() {
     const editing = store.getBookmark(S.editBookmarkId);
@@ -1174,6 +1190,10 @@
     if ((x = el("[data-note-menu]"))) return openSheet({ type: "note", id: x.dataset.noteMenu });
     if ((x = el("[data-open-note]"))) return openNote(x.dataset.openNote);
     if ((x = el("[data-note]"))) return openNote(x.dataset.note);
+    if (el("[data-top]")) {
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      return scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+    }
     if ((x = el("[data-sheet]"))) {
       if (x.dataset.sheet === "add") return openSheet({ type: "add", id: S.sheet?.id || S.noteId });
       if (x.dataset.sheet === "bookmark") return openSheet({ type: "bookmark", id: S.bookmarkId });
