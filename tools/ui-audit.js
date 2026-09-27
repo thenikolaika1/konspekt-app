@@ -24,7 +24,8 @@ function inPageAudit(){
     if(el.type==='file')return; if(layer&&!layer.contains(el))return; stats.interactive++;
     const h=hidden(el); const r=el.getBoundingClientRect();
     if(el.closest('[inert]'))return; // закрывающийся лист: не интерактивен по определению
-    if(h){ if(el.matches('[data-clear-field]'))return; issues.push({kind:'hidden-control',el:name(el),why:h});return }
+    if(h){ if(el.matches('[data-clear-field]'))return; if(el.matches('.to-top:not(.show)'))return; // «наверх» скрыта до прокрутки намеренно
+      issues.push({kind:'hidden-control',el:name(el),why:h});return }
     if(r.width<1||r.height<1){issues.push({kind:'zero-size',el:name(el)});return}
     const af=getComputedStyle(el,'::after');let ex=0;if(af.content!=='none'&&af.position==='absolute')ex=Math.max(0,-parseFloat(af.top)||0);
     if(!el.matches('input')&&(r.width+2*ex<24||r.height+2*ex<24))issues.push({kind:'small-target',el:name(el),size:Math.round(r.width)+'x'+Math.round(r.height)});
@@ -92,7 +93,7 @@ function inPageAudit(){
     'rename-note':async()=>{await fresh();await p.locator('.note-card [data-note-menu]').first().click();await p.click('[data-rename=note]')},
     'delete-note':async()=>{await p.click('.modal [data-close]');await p.locator('.note-card [data-note-menu]').first().click();await p.click('[data-delete=note]')},
     'note-from-card':async()=>{await fresh();await p.locator('.note-card').first().click();await p.waitForSelector('.note-title')},
-    'sheet-add-from-note':async()=>{await p.click('.note-bookmark')},
+    'sheet-add-from-note':async()=>{await p.click('.note-bar [data-note-menu]');await p.waitForTimeout(350);await p.click('.sheet [data-sheet=add]')},
   };
   const only=process.env.ONLY?process.env.ONLY.split(','):null;
   const summary={};

@@ -283,3 +283,241 @@ export function extractJson(text: string): Json | null {
     return null;
   }
 }
+
+// ---------- качество конспекта ----------
+//
+// qualityIssues() находит нарушения утверждённого формата Classic Note: пересказ вместо конспекта,
+// дубли, лишние повторяющие блоки и явные артефакты распознавания. По этому списку делается
+// повторный запрос к модели. sanitize() после финальной попытки только убирает явно лишнее
+// и повреждённое — текст никогда не «исправляется» и буквы не заменяются.
+
+/** Слово, в котором в одном сплошном наборе букв смешаны кириллица и латиница («кисlorод», «Orgаны»). */
+const LETTER_RUN = /[A-Za-zА-Яа-яЁё]+/g;
+const HAS_CYR = /[А-Яа-яЁё]/;
+const HAS_LAT = /[A-Za-z]/;
+
+export function mixedScriptWords(text: string): string[] {
+  const out: string[] = [];
+  for (const run of String(text || "").match(LETTER_RUN) || []) {
+    if (HAS_CYR.test(run) && HAS_LAT.test(run)) out.push(run);
+  }
+  return out;
+}
+
+const normTerm = (s: string) =>
+  s.toLowerCase().replace(/ё/g, "е").replace(/\[[a-z]:|\]|\*\*/g, "").replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+
+// ориентиры утверждённого формата (не жёсткие лимиты символов: превышение — повод для повтора)
+const LIMITS = {
+  paragraph: 450,
+  definition: 220,
+  termDefinition: 220,
+  remember: 3,
+  rememberItem: 200,
+  conclusion: 500,
+  selfCheck: 6,
+  answer: 260,
+  accents: 2, // IMPORTANT/MAIN_IDEA на весь конспект
+  mainPerPage: 900, // символов основного текста на страницу (≈30–45% учебной страницы)
+  mainBase: 500,
+};
+
+const FORBIDDEN_IN_SECTIONS = ["REMEMBER", "CONCLUSION"];
+
+/** Все текстовые значения блока (для подсчёта длины и поиска артефактов). */
+function blockTexts(b: Obj): string[] {
+  const out: string[] = [];
+  const add = (v: Json) => {
+    if (typeof v === "string") out.push(v);
+    else if (Array.isArray(v)) v.forEach(add);
+    else if (v && typeof v === "object") Object.entries(v as Obj).forEach(([k, x]) => k !== "id" && k !== "type" && add(x));
+  };
+  add(b);
+  return out;
+}
+
+function allTexts(c: StudyContent): string[] {
+  const t: string[] = [c.meta.title, c.meta.topic, c.meta.summary, ...c.meta.tagline];
+  c.sections.forEach((s) => {
+    t.push(s.heading);
+    s.blocks.forEach((b) => t.push(...blockTexts(b)));
+  });
+  c.glossary.terms.forEach((x) => t.push(x.term, x.definition));
+  c.glossary.people.forEach((x) => t.push(x.name, x.role));
+  c.glossary.dates.forEach((x) => t.push(x.date, x.event));
+  c.glossary.formulas.forEach((x) => t.push(x.meaning));
+  t.push(...c.remember, c.conclusion);
+  c.selfCheck.forEach((x) => t.push(x.q, x.a));
+  return t.filter(Boolean);
+}
+
+/** Нарушения формата — короткие фразы по-русски, их же получает модель при повторе. */
+export function qualityIssues(c: StudyContent, pageCount: number): string[] {
+  const issues: string[] = [];
+
+  const broken = [...new Set(allTexts(c).flatMap(mixedScriptWords))];
+  if (broken.length)
+    issues.push("слова со смесью латиницы и кириллицы (ошибка чтения): " + broken.slice(0, 8).map((w) => "«" + w + "»").join(", ") +
+      " — перечитай эти места; если нельзя прочитать надёжно, не включай их");
+
+  const blocks = c.sections.flatMap((s) => s.blocks);
+  const mainChars = c.sections.reduce((n, s) => n + s.heading.length + s.blocks.reduce((m, b) => m + blockTexts(b).join(" ").length, 0), 0);
+  const budget = LIMITS.mainBase + LIMITS.mainPerPage * Math.max(1, pageCount);
+  if (mainChars > budget)
+    issues.push("основная часть слишком длинная (" + mainChars + " символов, ориентир до ~" + budget + "): это пересказ, а нужен конспект — сократи вдвое, оставь главное");
+
+  const longPar = blocks.filter((b) => ["PARAGRAPH", "IMPORTANT", "MAIN_IDEA", "EXAMPLE"].includes(b.type as string) && String(b.text).length > LIMITS.paragraph).length;
+  if (longPar) issues.push("длинные абзацы (" + longPar + "): абзац — 1–3 коротких предложения своими словами, без переписывания учебника");
+
+  const longDef = blocks.filter((b) => b.type === "DEFINITION" && String(b.text).length > LIMITS.definition).length;
+  if (longDef) issues.push("определения внутри текста слишком длинные (" + longDef + "): определение — одно предложение; термины описывай в glossary.terms");
+  const manyDef = c.sections.filter((s) => s.blocks.filter((b) => b.type === "DEFINITION").length > 1).length;
+  if (manyDef) issues.push("в разделе больше одного DEFINITION: в тексте отмечай термины [t:…], а определения давай в glossary.terms");
+
+  const forbidden = blocks.filter((b) => FORBIDDEN_IN_SECTIONS.includes(b.type as string)).length;
+  if (forbidden) issues.push("в основной части есть блоки REMEMBER/CONCLUSION — они запрещены; «Важно» — только в remember, вывод — только в conclusion");
+
+  const accents = blocks.filter((b) => b.type === "IMPORTANT" || b.type === "MAIN_IDEA").length;
+  if (accents > LIMITS.accents) issues.push("слишком много блоков IMPORTANT/MAIN_IDEA (" + accents + "), допустимо не больше одного");
+
+  const seen = new Set<string>();
+  const dupTerms: string[] = [];
+  c.glossary.terms.forEach((t) => {
+    const k = normTerm(t.term);
+    if (seen.has(k)) dupTerms.push(t.term);
+    seen.add(k);
+  });
+  const defSeen = new Set<string>();
+  blocks.filter((b) => b.type === "DEFINITION").forEach((b) => {
+    const k = normTerm(String(b.term));
+    if (defSeen.has(k)) dupTerms.push(String(b.term));
+    defSeen.add(k);
+  });
+  if (dupTerms.length) issues.push("термины повторяются: " + [...new Set(dupTerms)].map((t) => "«" + t + "»").join(", ") + " — каждый термин один раз");
+
+  const longTermDef = c.glossary.terms.filter((t) => t.definition.length > LIMITS.termDefinition).length;
+  if (longTermDef) issues.push("определения в glossary.terms слишком длинные (" + longTermDef + "): одно короткое точное предложение");
+
+  if (c.remember.length > LIMITS.remember || c.remember.some((r) => r.length > LIMITS.rememberItem))
+    issues.push("remember («Важно») — только 1–3 коротких акцента по одному предложению, без пересказа материала");
+  if (c.conclusion.length > LIMITS.conclusion) issues.push("вывод слишком длинный: 1–3 предложения");
+  if (c.selfCheck.length > LIMITS.selfCheck || c.selfCheck.some((x) => x.a.length > LIMITS.answer))
+    issues.push("вопросы и ответы: 3–5 вопросов, ответы короткие (1–2 предложения)");
+
+  return issues;
+}
+
+// предложения внутри текста; разметка [t:…] не разрывается
+const splitSentences = (s: string) => s.split(/(?<=[.!?…])\s+(?=[«"(\[*A-ZА-ЯЁ0-9])/u);
+const isBroken = (s: string) => mixedScriptWords(s).length > 0;
+
+/** Удаляет из текста только предложения с явно повреждёнными словами. Пустая строка — если не осталось ничего. */
+function dropBrokenSentences(text: string): string {
+  if (!isBroken(text)) return text;
+  return splitSentences(text).filter((s) => !isBroken(s)).join(" ").trim();
+}
+
+/**
+ * Консервативная чистка после финальной попытки: убирает дубли терминов, лишние пункты «Важно»,
+ * запрещённые блоки и фрагменты с явно повреждёнными словами (минимальной единицей: предложение,
+ * пункт списка, термин, вопрос). Ничего не переписывает и не угадывает.
+ * Возвращает очищенный content и технический отчёт для лога (в конспект он не попадает).
+ */
+export function sanitize(c: StudyContent): { content: StudyContent; report: string[] } {
+  const report: string[] = [];
+  const out: StudyContent = JSON.parse(JSON.stringify(c));
+  const brokenBefore = allTexts(out).flatMap(mixedScriptWords);
+
+  // основная часть
+  const defSeen = new Set<string>();
+  out.sections = out.sections
+    .map((s) => {
+      const blocks = s.blocks
+        .filter((b) => {
+          if (FORBIDDEN_IN_SECTIONS.includes(b.type as string)) {
+            report.push("убран блок " + b.type);
+            return false;
+          }
+          if (b.type === "DEFINITION") {
+            const k = normTerm(String(b.term));
+            if (defSeen.has(k) || isBroken(String(b.term))) return report.push("убран DEFINITION «" + b.term + "»"), false;
+            defSeen.add(k);
+          }
+          return true;
+        })
+        .map((b) => cleanBlock(b))
+        .filter((b): b is Obj => !!b);
+      return { ...s, heading: isBroken(s.heading) ? "" : s.heading, blocks };
+    })
+    .filter((s) => s.heading || s.blocks.length);
+
+  // справочные блоки: минимальная единица — один пункт
+  const termSeen = new Set<string>();
+  out.glossary.terms = out.glossary.terms.filter((t) => {
+    const k = normTerm(t.term);
+    if (termSeen.has(k)) return report.push("дубль термина «" + t.term + "»"), false;
+    termSeen.add(k);
+    return !isBroken(t.term + " " + t.definition);
+  });
+  out.glossary.people = out.glossary.people.filter((p) => !isBroken(p.name + " " + p.role));
+  out.glossary.dates = out.glossary.dates.filter((d) => !isBroken(d.date + " " + d.event));
+  out.remember = out.remember.filter((r) => !isBroken(r) && r.length <= LIMITS.rememberItem * 1.5).slice(0, LIMITS.remember);
+  if (out.remember.length < c.remember.length) report.push("«Важно»: " + c.remember.length + " → " + out.remember.length);
+  out.conclusion = dropBrokenSentences(out.conclusion);
+  out.selfCheck = out.selfCheck.filter((x) => !isBroken(x.q + " " + x.a)).slice(0, LIMITS.selfCheck);
+  out.warnings = out.warnings.filter((w) => !isBroken(w));
+
+  // заголовок и метаданные: повреждённое не показываем
+  if (isBroken(out.meta.title)) out.meta.title = out.meta.paragraph && !isBroken(out.meta.paragraph) ? out.meta.paragraph : "Конспект";
+  if (isBroken(out.meta.topic)) out.meta.topic = "";
+  if (isBroken(out.meta.summary)) out.meta.summary = "";
+  out.meta.tagline = out.meta.tagline.filter((t) => !isBroken(t));
+
+  if (brokenBefore.length) report.push("убраны фрагменты с повреждёнными словами: " + [...new Set(brokenBefore)].join(", "));
+  return { content: out, report };
+}
+
+/** Чистит текстовые поля блока от повреждённых предложений/пунктов; null — если блок опустел. */
+function cleanBlock(b: Obj): Obj | null {
+  const s = (v: Json) => dropBrokenSentences(String(v ?? ""));
+  const items = (v: Json) => (Array.isArray(v) ? (v as string[]).filter((x) => !isBroken(String(x))) : []);
+  const out: Obj = { ...b };
+  switch (b.type) {
+    case "PARAGRAPH":
+    case "MAIN_IDEA":
+    case "IMPORTANT":
+    case "EXAMPLE":
+      out.text = s(b.text);
+      return out.text ? out : null;
+    case "DEFINITION":
+      out.text = s(b.text);
+      return out.text ? out : null;
+    case "DATE":
+    case "PERSON":
+    case "EVENT":
+      if (isBroken(blockTexts(b).join(" "))) return null;
+      return out;
+    case "CAUSE_EFFECT":
+      out.causes = items(b.causes);
+      out.effects = items(b.effects);
+      return (out.causes as string[]).length || (out.effects as string[]).length ? out : null;
+    case "FORMULA":
+      out.text = s(b.text);
+      return out;
+    case "PROCESS":
+      out.steps = items(b.steps);
+      if (isBroken(String(b.title ?? ""))) out.title = "";
+      return (out.steps as string[]).length ? out : null;
+    case "LIST":
+      out.items = items(b.items);
+      if (isBroken(String(b.title ?? ""))) out.title = "";
+      return (out.items as string[]).length ? out : null;
+    case "SEQUENCE":
+      out.items = (b.items as Obj[]).filter((x) => !isBroken(String(x.label) + " " + String(x.text)));
+      return (out.items as Obj[]).length ? out : null;
+    case "TABLE":
+      out.rows = (b.rows as string[][]).filter((r) => !isBroken(r.join(" ")));
+      return (out.rows as string[][]).length && !isBroken((b.headers as string[]).join(" ")) ? out : null;
+  }
+  return out;
+}

@@ -15,7 +15,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
-import { extractJson, previewOf, SCHEMA_VERSION, validateStudyContent } from "./study-content.ts";
+import { extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
 
 const MODEL = "glm-4.6v-flash";
 const ZAI_URL = "https://api.z.ai/api/paas/v4/chat/completions";
@@ -213,7 +213,7 @@ async function processNote(job: Job) {
       images.push("data:" + mime + ";base64," + encodeBase64(new Uint8Array(await data.arrayBuffer())));
     }
 
-    // 7–10. все страницы одним запросом; строгий JSON; при неудаче — один повтор
+    // 7–10. все страницы одним запросом; строгий JSON; при нарушении формата — один повтор с перечнем проблем
     const messages: ZaiMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -225,7 +225,8 @@ async function processNote(job: Job) {
       },
     ];
 
-    let result: ReturnType<typeof validateStudyContent> | null = null;
+    let best: { content: StudyContent; issues: string[] } | null = null;
+    let last: ReturnType<typeof validateStudyContent> | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0 && deadline - Date.now() < MIN_RETRY_MS) break;
       aiCalled = true;
@@ -233,20 +234,38 @@ async function processNote(job: Job) {
       usage.input += reply.inputTokens;
       usage.output += reply.outputTokens;
       const parsed = extractJson(reply.text);
-      result = parsed
+      const result: ReturnType<typeof validateStudyContent> = parsed
         ? validateStudyContent(parsed, images.length)
         : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : "not json" };
-      // 11. валидный результат, или страницы действительно не читаются — повтор не поможет
-      if (result.ok || result.code === "UNREADABLE_PAGES") break;
-      console.warn("[analyze-pages] attempt", attempt + 1, "rejected:", result.code, result.reason);
+      last = result;
+      let problems: string[];
+      if (result.ok) {
+        // 11. формат Classic Note: пересказ, дубли, лишние блоки, артефакты распознавания
+        const issues = qualityIssues(result.content, images.length);
+        if (!best || issues.length <= best.issues.length) best = { content: result.content, issues };
+        if (!issues.length) break;
+        problems = issues;
+      } else {
+        // страницы действительно не читаются — повтор не поможет
+        if (result.code === "UNREADABLE_PAGES" && !best) break;
+        problems = [result.code === "AI_BAD_JSON" ? "ответ не является корректным JSON по схеме (" + result.reason + ")" : "в ответе нет ни разделов, ни терминов"];
+      }
+      console.warn("[analyze-pages] attempt", attempt + 1, "issues:", problems.join(" | "));
       messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
-      messages.push({ role: "user", content: retryPrompt(result.reason) });
+      messages.push({ role: "user", content: retryPrompt(problems) });
     }
-    if (!result) throw new StepError("AI_TIMEOUT");
-    if (!result.ok) throw new StepError(result.code, result.reason);
+    if (!best) {
+      if (!last) throw new StepError("AI_TIMEOUT");
+      throw new StepError(last.ok ? "EMPTY_CONTENT" : last.code, last.ok ? "" : last.reason);
+    }
+    if (best.issues.length) console.warn("[analyze-pages] accepted with issues:", best.issues.join(" | "));
+
+    // консервативная чистка: только удаление лишнего и явно повреждённого, без правки текста
+    const { content, report } = sanitize(best.content);
+    if (report.length) console.warn("[analyze-pages] sanitize:", report.join(" | "));
+    if (!content.sections.length && !content.glossary.terms.length) throw new StepError("EMPTY_CONTENT", "empty after sanitize");
 
     // 15. успех: content, статус, данные для списков
-    const content = result.content;
     const { error: saveError } = await admin
       .from("notes")
       .update({
