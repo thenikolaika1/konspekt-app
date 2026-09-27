@@ -1190,6 +1190,7 @@
     if ((x = el("[data-note-menu]"))) return openSheet({ type: "note", id: x.dataset.noteMenu });
     if ((x = el("[data-open-note]"))) return openNote(x.dataset.openNote);
     if ((x = el("[data-note]"))) return openNote(x.dataset.note);
+    if ((x = el("[data-ref]"))) return toggleRef(x.closest(".cn-ref"));
     if (el("[data-top]")) {
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
       return scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
@@ -1305,6 +1306,15 @@
     hydrateThumbs();
   }
 
+  // ---------- сворачиваемые справочные блоки конспекта classic-2 (Термины, Личности, … Вопросы и ответы) ----------
+
+  function toggleRef(ref, open) {
+    if (!ref) return;
+    const show = open ?? !ref.classList.contains("open");
+    ref.classList.toggle("open", show);
+    ref.querySelector("[data-ref]")?.setAttribute("aria-expanded", String(show));
+  }
+
   // ---------- поиск внутри открытого конспекта: подсветка совпадений в уже отрисованном тексте ----------
 
   const NOTE_FIND = { hits: [], index: -1 };
@@ -1361,6 +1371,15 @@
     NOTE_FIND.index = (NOTE_FIND.index + 1) % hits.length;
     const m = hits[NOTE_FIND.index];
     m.classList.add("current");
+    // совпадение в свёрнутом справочном блоке — раскрываем его, иначе подсветка не видна
+    const ref = m.closest(".cn-ref");
+    if (ref && !ref.classList.contains("open")) {
+      // без анимации: позиция совпадения нужна сразу, после раскрытия
+      ref.classList.add("instant");
+      toggleRef(ref, true);
+      void ref.offsetHeight;
+      requestAnimationFrame(() => ref.classList.remove("instant"));
+    }
     if (count) count.textContent = NOTE_FIND.index + 1 + " из " + hits.length;
     const bar = root.querySelector(".cn-search");
     const y = m.getBoundingClientRect().top + window.scrollY - (bar ? bar.offsetHeight : 0) - 70;

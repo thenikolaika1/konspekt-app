@@ -17,6 +17,10 @@
  * @property {string} meta.summary        1–3 предложения, используется как preview в списках
  * @property {{hex:string, confidence:number}|null} meta.accent
  * @property {{index:number, readable:'ok'|'partial'|'unreadable'}[]} meta.pages
+ * @property {''|'classic-2'} [meta.format]  'classic-2' — новый формат (структура по пунктам учебника,
+ *                                         сворачиваемые справочные блоки); у старых конспектов поля нет
+ * @property {string[]} [meta.sourceOutline] заголовки основных пунктов учебника (classic-2)
+ * @property {string} [lead]               «Главное» перед первым разделом (classic-2)
  * @property {{id:string, heading:string, blocks:Block[]}[]} sections
  * @property {Object} glossary
  * @property {{id:string, term:string, definition:string}[]} glossary.terms
@@ -29,7 +33,7 @@
  * @property {string[]} warnings          например «часть страницы 3 не читается»
  *
  * Block = { id, type, sourcePage?, ...поля типа }:
- *   PARAGRAPH{text} MAIN_IDEA{text} IMPORTANT{text} EXAMPLE{text} CONCLUSION{text}
+ *   PARAGRAPH{text} MAIN_IDEA{text,title?} IMPORTANT{text,title?} EXAMPLE{text,title?} CONCLUSION{text,title?}
  *   DEFINITION{term,text} DATE{date,text} PERSON{name,text} EVENT{title,date?,text}
  *   CAUSE_EFFECT{causes[],effects[]} FORMULA{expression,text,variables[]}
  *   PROCESS{title?,steps[]} SEQUENCE{items[{label,text}]} LIST{title?,items[],ordered}
@@ -66,6 +70,10 @@
     other: { label: "Другое", pill: "other", badge: "other", thumb: "t-other", icon: "doc", asset: null, cover: ["#3d4a7a", "#8e9bc4"] },
   };
 
+  const FORMATS = ["classic-2"];
+  // блоки-карточки со своим заголовком («От чего зависит…», «Результат реформы»)
+  const TITLED = ["IMPORTANT", "MAIN_IDEA", "EXAMPLE", "CONCLUSION"];
+
   const BLOCK_TYPES = [
     "PARAGRAPH", "MAIN_IDEA", "DEFINITION", "IMPORTANT", "DATE", "PERSON", "EVENT",
     "CAUSE_EFFECT", "FORMULA", "PROCESS", "SEQUENCE", "LIST", "EXAMPLE", "TABLE",
@@ -87,6 +95,7 @@
     if (!b || typeof b !== "object") return null;
     const type = BLOCK_TYPES.includes(b.type) ? b.type : "PARAGRAPH";
     const out = { id: str(b.id) || "b" + i, type };
+    if (TITLED.includes(type) && str(b.title)) out.title = str(b.title);
     if (Number.isFinite(+b.sourcePage) && b.sourcePage !== null && b.sourcePage !== "") out.sourcePage = +b.sourcePage;
     switch (type) {
       case "PARAGRAPH":
@@ -180,7 +189,10 @@
           index: Number.isFinite(+p?.index) ? +p.index : i,
           readable: ["ok", "partial", "unreadable"].includes(p?.readable) ? p.readable : "ok",
         })),
+        format: FORMATS.includes(m.format) ? m.format : "",
+        sourceOutline: strs(m.sourceOutline),
       },
+      lead: str(r.lead),
       sections,
       glossary: {
         terms: arr(g.terms)

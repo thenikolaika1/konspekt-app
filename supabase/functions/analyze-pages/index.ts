@@ -1,13 +1,13 @@
 /**
- * Edge Function analyze-pages: фотографии страниц (private bucket temp-pages) → Z.AI GLM-4.6V-Flash
- * → StudyContent v1 → public.notes.content.
+ * Edge Function analyze-pages: фотографии страниц (private bucket temp-pages) → AI-провайдер
+ * (основной OpenRouter, резервный Z.AI — см. providers.ts) → StudyContent v1 → public.notes.content.
  *
  * Запрос: POST { note_id, paths[] } с заголовком Authorization: Bearer <JWT пользователя>.
  * Ответ сразу 202 { status: "processing" }; сама генерация идёт в фоне (EdgeRuntime.waitUntil),
  * поэтому закрытие PWA её не прерывает. Клиент узнаёт результат по notes.status.
  *
  * Секреты только из окружения функции:
- *   ZAI_API_KEY               — Edge Function Secrets (задан вручную);
+ *   OPENROUTER_API_KEY, ZAI_API_KEY — Edge Function Secrets (заданы вручную);
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY — Supabase передаёт сам.
  * Ключи и фотографии в лог не пишутся.
  */
@@ -15,10 +15,9 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
+import { type ChatMessage, configuredProviders, generate, ProviderError, type ProviderId } from "./providers.ts";
 import { extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
 
-const MODEL = "glm-4.6v-flash";
-const ZAI_URL = "https://api.z.ai/api/paas/v4/chat/completions";
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -28,7 +27,7 @@ const STALE_MS = 5 * 60_000;
 const BUDGET_MS = 140_000;
 // повторный запрос к модели делаем, только если на него остаётся не меньше этого времени
 const MIN_RETRY_MS = 45_000;
-// GLM-4.6V-Flash бесплатна; при смене модели здесь указывается цена за 1M токенов
+// qwen/qwen3.8-27b:free и GLM-4.6V-Flash бесплатны; при смене модели здесь указывается цена за 1M токенов
 const PRICE_PER_M = { input: 0, output: 0 };
 
 const ALLOWED_ORIGINS = ["https://thenikolaika1.github.io"];
@@ -91,9 +90,9 @@ Deno.serve(async (req) => {
 
   const url = Deno.env.get("SUPABASE_URL") || "";
   const adminKey = serviceKey();
-  const zaiKey = Deno.env.get("ZAI_API_KEY") || "";
-  if (!url || !adminKey || !zaiKey) {
-    console.error("[analyze-pages] server misconfigured:", { url: !!url, serviceKey: !!adminKey, zaiKey: !!zaiKey });
+  const providers = configuredProviders();
+  if (!url || !adminKey || !providers.length) {
+    console.error("[analyze-pages] server misconfigured:", { url: !!url, serviceKey: !!adminKey, providers: providers.length });
     return json(500, { error: "SERVER_MISCONFIGURED" }, cors);
   }
 
@@ -172,7 +171,7 @@ Deno.serve(async (req) => {
     })
     : admin;
 
-  const task = processNote({ admin, storage: storageClient, zaiKey, userId: user.id, noteId, paths });
+  const task = processNote({ admin, storage: storageClient, userId: user.id, noteId, paths });
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(task);
   else await task;
   return json(202, { status: "processing", note_id: noteId }, cors);
@@ -189,7 +188,6 @@ function checkQuota(_admin: SupabaseClient, _userId: string): Promise<string | n
 type Job = {
   admin: SupabaseClient;
   storage: SupabaseClient;
-  zaiKey: string;
   userId: string;
   noteId: string;
   paths: string[];
@@ -199,7 +197,7 @@ async function processNote(job: Job) {
   const { admin, storage, noteId, userId, paths } = job;
   const started = Date.now();
   const deadline = started + BUDGET_MS;
-  const usage = { input: 0, output: 0 };
+  const usage = { input: 0, output: 0, model: "" };
   let aiCalled = false;
 
   try {
@@ -214,7 +212,7 @@ async function processNote(job: Job) {
     }
 
     // 7–10. все страницы одним запросом; строгий JSON; при нарушении формата — один повтор с перечнем проблем
-    const messages: ZaiMessage[] = [
+    const messages: ChatMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
@@ -227,10 +225,24 @@ async function processNote(job: Job) {
 
     let best: { content: StudyContent; issues: string[] } | null = null;
     let last: ReturnType<typeof validateStudyContent> | null = null;
+    // повтор по качеству идёт к тому же провайдеру; резервный подключается только при ошибке провайдера
+    let used: ProviderId | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0 && deadline - Date.now() < MIN_RETRY_MS) break;
       aiCalled = true;
-      const reply = await callZai(job.zaiKey, messages, deadline);
+      let reply;
+      try {
+        reply = await generate(messages, deadline, used);
+      } catch (e) {
+        // повтор не удался из-за провайдеров — сохраняем уже полученный первый вариант
+        if (best && e instanceof ProviderError) {
+          console.warn("[analyze-pages] retry failed:", e.code, "— keeping first result");
+          break;
+        }
+        throw e;
+      }
+      used = reply.provider;
+      usage.model = reply.model;
       usage.input += reply.inputTokens;
       usage.output += reply.outputTokens;
       const parsed = extractJson(reply.text);
@@ -293,8 +305,9 @@ async function processNote(job: Job) {
     if (removeError) console.warn("[analyze-pages] cleanup failed:", removeError.message);
   } catch (e) {
     // 16. ошибка: сначала записываем failed, фотографии остаются для повтора
-    const code = e instanceof StepError ? e.code : "INTERNAL";
-    console.error("[analyze-pages] failed:", code, e instanceof StepError ? e.detail : String(e));
+    const known = e instanceof StepError || e instanceof ProviderError;
+    const code = known ? e.code : "INTERNAL";
+    console.error("[analyze-pages] failed:", code, known ? e.detail : String(e));
     const { error: failError } = await admin
       .from("notes")
       .update({ status: "failed", stage: "failed", error_code: code, updated_at: new Date().toISOString() })
@@ -309,13 +322,13 @@ async function logGeneration(
   admin: SupabaseClient,
   job: Job,
   status: "success" | "failed",
-  usage: { input: number; output: number },
+  usage: { input: number; output: number; model: string },
   latency: number,
 ) {
   const { error } = await admin.from("ai_generations").insert({
     user_id: job.userId,
     note_id: job.noteId,
-    model: MODEL,
+    model: usage.model || configuredProviders().join("/"),
     page_count: job.paths.length,
     input_tokens: usage.input,
     output_tokens: usage.output,
@@ -324,56 +337,4 @@ async function logGeneration(
     status,
   });
   if (error) console.warn("[analyze-pages] ai_generations insert failed:", error.message);
-}
-
-// ---------- Z.AI ----------
-
-type ZaiPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
-type ZaiMessage = { role: "system" | "user" | "assistant"; content: string | ZaiPart[] };
-
-async function callZai(key: string, messages: ZaiMessage[], deadline: number) {
-  const timeout = deadline - Date.now();
-  if (timeout < 5_000) throw new StepError("AI_TIMEOUT");
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeout);
-  let res: Response;
-  try {
-    res = await fetch(ZAI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        temperature: 0.2,
-        max_tokens: 12000,
-        // без режима рассуждений ответ приходит быстрее и укладывается в лимит времени функции
-        thinking: { type: "disabled" },
-        stream: false,
-      }),
-      signal: ctrl.signal,
-    });
-  } catch (e) {
-    throw new StepError(ctrl.signal.aborted ? "AI_TIMEOUT" : "AI_NETWORK", String(e));
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    // тело ошибки может содержать подробности запроса — в лог только статус и начало текста
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
-    const code = res.status === 429 ? "AI_RATE_LIMITED" : res.status === 401 || res.status === 403 ? "AI_AUTH" : res.status >= 500 ? "AI_ERROR" : "AI_BAD_REQUEST";
-    throw new StepError(code, res.status + " " + detail);
-  }
-
-  const data = await res.json().catch(() => null);
-  const choice = data?.choices?.[0];
-  const raw = choice?.message?.content;
-  const text = Array.isArray(raw) ? raw.map((p: { text?: string }) => p?.text || "").join("") : String(raw || "");
-  if (choice?.finish_reason === "sensitive") throw new StepError("AI_REFUSED");
-  return {
-    text,
-    truncated: choice?.finish_reason === "length",
-    inputTokens: Number(data?.usage?.prompt_tokens) || 0,
-    outputTokens: Number(data?.usage?.completion_tokens) || 0,
-  };
 }
