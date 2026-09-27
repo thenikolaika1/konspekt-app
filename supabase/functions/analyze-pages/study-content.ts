@@ -8,10 +8,14 @@
  * Дополнительно к клиенту:
  *  - из всех строк удаляются HTML-теги (HTML от модели не принимается);
  *  - длины строк и массивов ограничены;
- *  - meta.pages приводится к фактическому числу загруженных страниц.
+ *  - meta.pages приводится к фактическому числу загруженных страниц;
+ *  - незакрытая разметка ([t:… без «]», непарные **) удаляется, чтобы renderer не показал её как текст;
+ *  - meta.format = "classic-2": конспект создан по правилам нового формата (структура по пунктам учебника,
+ *    см. prompt.ts). Старые конспекты без этого поля отображаются как раньше.
  */
 
 export const SCHEMA_VERSION = 1;
+export const NOTE_FORMAT = "classic-2";
 
 export const SUBJECT_KEYS = [
   "history",
@@ -46,6 +50,7 @@ export const BLOCK_TYPES = [
 ];
 
 const MAX_STR = 1500;
+const TITLED = ["IMPORTANT", "MAIN_IDEA", "EXAMPLE", "CONCLUSION"];
 const MAX_ITEMS = 60;
 const MAX_SECTIONS = 30;
 const MAX_BLOCKS = 60;
@@ -55,12 +60,23 @@ type Obj = Record<string, Json>;
 
 // HTML-теги и управляющие символы убираются; разметка **…** и [d:…] остаётся — её понимает renderer
 const clean = (s: string) =>
-  s
-    .replace(/<\/?[a-zA-Z][^>]*>/g, "")
-    // deno-lint-ignore no-control-regex
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
-    .trim()
-    .slice(0, MAX_STR);
+  fixMarkup(
+    s
+      .replace(/<\/?[a-zA-Z][^>]*>/g, "")
+      // deno-lint-ignore no-control-regex
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+      .trim()
+      .slice(0, MAX_STR),
+  ).trim();
+
+/** Убирает только сломанную разметку: пустые и незакрытые метки [t:…], непарные **. Текст не меняется. */
+export function fixMarkup(s: string): string {
+  let out = s.replace(/\[(?:t|d|p|f):\s*\]/g, "").replace(/\*\*\s*\*\*/g, "");
+  // «[t:» без закрывающей «]» до конца строки
+  out = out.replace(/\[(?:t|d|p|f):(?![^\]\n]*\])/g, "");
+  if ((out.match(/\*\*/g) || []).length % 2) out = out.replace(/\*\*/g, "");
+  return out;
+}
 
 const str = (v: Json): string => (typeof v === "string" ? clean(v) : typeof v === "number" ? String(v) : "");
 const arr = (v: Json): Json[] => (Array.isArray(v) ? v.slice(0, MAX_ITEMS) : []);
@@ -78,6 +94,8 @@ function normBlock(raw: Json, i: string): Obj | null {
   if (!Object.keys(b).length) return null;
   const type = BLOCK_TYPES.includes(b.type as string) ? (b.type as string) : "PARAGRAPH";
   const out: Obj = { id: str(b.id) || "b" + i, type };
+  // заголовок смысловой карточки («От чего зависит…», «Результат реформы»); необязателен
+  if (TITLED.includes(type) && str(b.title)) out.title = str(b.title).slice(0, 120);
   if (b.sourcePage !== null && b.sourcePage !== "" && Number.isFinite(Number(b.sourcePage))) out.sourcePage = Number(b.sourcePage);
   switch (type) {
     case "PARAGRAPH":
@@ -152,7 +170,12 @@ export type StudyContent = {
     summary: string;
     accent: null;
     pages: { index: number; readable: "ok" | "partial" | "unreadable" }[];
+    format: typeof NOTE_FORMAT;
+    /** заголовки основных пунктов учебника, как их выписала модель (для проверки структуры) */
+    sourceOutline: string[];
   };
+  /** «Главное» перед первым разделом (classic-2); пустая строка — карточки нет */
+  lead: string;
   sections: { id: string; heading: string; blocks: Obj[] }[];
   glossary: {
     terms: { id: string; term: string; definition: string }[];
@@ -220,7 +243,10 @@ export function validateStudyContent(raw: Json, pageCount: number): ValidationRe
       summary: str(m.summary),
       accent: null,
       pages,
+      format: NOTE_FORMAT,
+      sourceOutline: strs(m.sourceOutline).slice(0, MAX_SECTIONS),
     },
+    lead: str(r.lead),
     sections,
     glossary: {
       terms: arr(g.terms)
@@ -286,10 +312,12 @@ export function extractJson(text: string): Json | null {
 
 // ---------- качество конспекта ----------
 //
-// qualityIssues() находит нарушения утверждённого формата Classic Note: пересказ вместо конспекта,
-// дубли, лишние повторяющие блоки и явные артефакты распознавания. По этому списку делается
-// повторный запрос к модели. sanitize() после финальной попытки только убирает явно лишнее
-// и повреждённое — текст никогда не «исправляется» и буквы не заменяются.
+// qualityIssues() находит нарушения формата Classic Note (classic-2): разделы не совпадают с пунктами учебника,
+// слишком короткий или почти дословный текст, нет смысловых выделений или их перебор, дубли, лишние блоки,
+// личности и даты, которых нет в тексте, артефакты распознавания. По этому списку делается один повторный
+// запрос к модели. Пороги длины — мягкие ориентиры: превышение не делает ответ невалидным.
+// sanitize() после финальной попытки только убирает явно лишнее и повреждённое — текст никогда не
+// «исправляется» и буквы не заменяются.
 
 /** Слово, в котором в одном сплошном наборе букв смешаны кириллица и латиница («кисlorод», «Orgаны»). */
 const LETTER_RUN = /[A-Za-zА-Яа-яЁё]+/g;
@@ -307,19 +335,26 @@ export function mixedScriptWords(text: string): string[] {
 const normTerm = (s: string) =>
   s.toLowerCase().replace(/ё/g, "е").replace(/\[[a-z]:|\]|\*\*/g, "").replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
 
-// ориентиры утверждённого формата (не жёсткие лимиты символов: превышение — повод для повтора)
+/** Текст без разметки: «[t:диффузия]» → «диффузия», «**газы**» → «газы». */
+export const plain = (s: string) => String(s || "").replace(/\*\*/g, "").replace(/\[(?:t|d|p|f):([^\]\n]+?)\]/g, "$1");
+const MARKER = /\[(?:t|d|p|f):[^\]\n]+?\]|\*\*[^*\n]+?\*\*/g;
+const BOLD = /\*\*([^*\n]+?)\*\*/g;
+
+// Мягкие ориентиры формата (по старым PWA «Физика 8» / «История 8»), не жёсткие лимиты
 const LIMITS = {
-  paragraph: 450,
-  definition: 220,
-  termDefinition: 220,
-  remember: 3,
-  rememberItem: 200,
-  conclusion: 500,
-  selfCheck: 6,
-  answer: 260,
-  accents: 2, // IMPORTANT/MAIN_IDEA на весь конспект
-  mainPerPage: 900, // символов основного текста на страницу (≈30–45% учебной страницы)
-  mainBase: 500,
+  minPerPage: 300, // знаков основного текста на читаемую страницу — ниже почти наверняка выброшено важное
+  maxPerPage: 3000, // выше — похоже на дословное переписывание учебника
+  maxBase: 800,
+  paragraph: 1100,
+  highlightFrom: 500, // с какого объёма текста отсутствие выделений считается проблемой
+  boldShare: 0.3, // доля жирного в основном тексте
+  boldPhrase: 160, // одна жирная «фраза» длиннее — выделено целое предложение
+  termDefinition: 300,
+  remember: 7,
+  rememberItem: 260,
+  conclusion: 600,
+  selfCheck: 12,
+  answer: 500,
 };
 
 const FORBIDDEN_IN_SECTIONS = ["REMEMBER", "CONCLUSION"];
@@ -337,7 +372,7 @@ function blockTexts(b: Obj): string[] {
 }
 
 function allTexts(c: StudyContent): string[] {
-  const t: string[] = [c.meta.title, c.meta.topic, c.meta.summary, ...c.meta.tagline];
+  const t: string[] = [c.meta.title, c.meta.topic, c.meta.summary, ...c.meta.tagline, c.lead];
   c.sections.forEach((s) => {
     t.push(s.heading);
     s.blocks.forEach((b) => t.push(...blockTexts(b)));
@@ -351,6 +386,34 @@ function allTexts(c: StudyContent): string[] {
   return t.filter(Boolean);
 }
 
+/** Тексты основной части (разделы; заголовки разделов не считаются). */
+const mainTexts = (c: StudyContent) => c.sections.flatMap((s) => s.blocks.flatMap(blockTexts));
+
+/** Заголовок пункта для сравнения: без номера «1.», «§ 2», регистра и знаков. */
+const normHeading = (s: string) =>
+  normTerm(plain(s)).replace(/^(?:§\s*)?\d+(?:[.)]\d*)*\s*/, "").replace(/^(?:пункт|п)\s+\d+\s*/, "").trim();
+
+const stem = (w: string) => w.slice(0, Math.min(6, Math.max(4, w.length - 2)));
+const words = (s: string) => normTerm(plain(s)).split(" ").filter((w) => w.length >= 4);
+
+/** Встречается ли имя/термин в тексте (по основам слов — падежи не мешают). */
+function mentioned(name: string, haystack: string): boolean {
+  const ws = words(name);
+  if (!ws.length) return true; // короткие обозначения (I, XV, pH) не проверяем
+  return ws.some((w) => haystack.includes(stem(w)));
+}
+
+/** Встречается ли дата в тексте: по числам из неё («1709 г.», «1770–1774 гг.», «XVIII в.»). */
+function dateMentioned(date: string, haystack: string): boolean {
+  const nums = plain(date).match(/\d{2,}/g);
+  if (nums?.length) return nums.some((n) => haystack.includes(n));
+  return mentioned(date, haystack);
+}
+
+/** Текст, в котором ищем упоминания личностей, дат и терминов: основная часть и «Главное». */
+const referenceText = (c: StudyContent) => normTerm(plain([c.lead, ...c.sections.map((s) => s.heading), ...mainTexts(c)].join(" "))) +
+  " " + plain([c.lead, ...mainTexts(c)].join(" "));
+
 /** Нарушения формата — короткие фразы по-русски, их же получает модель при повторе. */
 export function qualityIssues(c: StudyContent, pageCount: number): string[] {
   const issues: string[] = [];
@@ -360,25 +423,53 @@ export function qualityIssues(c: StudyContent, pageCount: number): string[] {
     issues.push("слова со смесью латиницы и кириллицы (ошибка чтения): " + broken.slice(0, 8).map((w) => "«" + w + "»").join(", ") +
       " — перечитай эти места; если нельзя прочитать надёжно, не включай их");
 
+  // структура: разделы = пункты учебника, в том же порядке
+  const outline = c.meta.sourceOutline;
+  if (outline.length) {
+    if (c.sections.length !== outline.length)
+      issues.push("разделов " + c.sections.length + ", а пунктов учебника в meta.sourceOutline " + outline.length +
+        ": разделы должны точно совпадать с пунктами учебника — не дроби, не объединяй и не добавляй разделы");
+    else {
+      const wrong = c.sections.map((s, i) => [s.heading, outline[i]]).filter(([h, o]) => normHeading(h) !== normHeading(o));
+      if (wrong.length)
+        issues.push("заголовки или порядок разделов не совпадают с пунктами учебника: " +
+          wrong.slice(0, 3).map(([h, o]) => "«" + plain(h) + "» вместо «" + plain(o) + "»").join(", ") + " — заголовок раздела пиши дословно, как в учебнике");
+    }
+  } else if (c.sections.length > 1) {
+    issues.push("не заполнен meta.sourceOutline — выпиши дословно заголовки основных пунктов учебника с фотографий, разделы должны им соответствовать");
+  }
+
+  // объём — мягкие ориентиры по числу читаемых страниц
+  const main = mainTexts(c);
+  const mainPlain = plain(main.join(" "));
+  const mainChars = mainPlain.length;
+  const readable = Math.max(1, c.meta.pages.filter((p) => p.readable !== "unreadable").length || pageCount);
+  if (mainChars < LIMITS.minPerPage * readable)
+    issues.push("основной текст очень короткий (" + mainChars + " знаков на " + readable + " стр.): сохрани все существенные мысли каждого пункта учебника — определения, объяснения, причины, перечисления, примеры; убирай только воду и повторы");
+  else if (mainChars > LIMITS.maxBase + LIMITS.maxPerPage * readable)
+    issues.push("основной текст слишком длинный (" + mainChars + " знаков): похоже на дословную копию учебника — пиши своими словами, убери воду и повторы, но сохрани все существенные мысли");
+
   const blocks = c.sections.flatMap((s) => s.blocks);
-  const mainChars = c.sections.reduce((n, s) => n + s.heading.length + s.blocks.reduce((m, b) => m + blockTexts(b).join(" ").length, 0), 0);
-  const budget = LIMITS.mainBase + LIMITS.mainPerPage * Math.max(1, pageCount);
-  if (mainChars > budget)
-    issues.push("основная часть слишком длинная (" + mainChars + " символов, ориентир до ~" + budget + "): это пересказ, а нужен конспект — сократи вдвое, оставь главное");
+  const longPar = blocks.filter((b) => ["PARAGRAPH", "IMPORTANT", "MAIN_IDEA", "EXAMPLE"].includes(b.type as string) && plain(String(b.text)).length > LIMITS.paragraph).length;
+  if (longPar) issues.push("очень длинные абзацы (" + longPar + "): раздели их по смыслу, не переписывай учебник подряд");
 
-  const longPar = blocks.filter((b) => ["PARAGRAPH", "IMPORTANT", "MAIN_IDEA", "EXAMPLE"].includes(b.type as string) && String(b.text).length > LIMITS.paragraph).length;
-  if (longPar) issues.push("длинные абзацы (" + longPar + "): абзац — 1–3 коротких предложения своими словами, без переписывания учебника");
-
-  const longDef = blocks.filter((b) => b.type === "DEFINITION" && String(b.text).length > LIMITS.definition).length;
-  if (longDef) issues.push("определения внутри текста слишком длинные (" + longDef + "): определение — одно предложение; термины описывай в glossary.terms");
-  const manyDef = c.sections.filter((s) => s.blocks.filter((b) => b.type === "DEFINITION").length > 1).length;
-  if (manyDef) issues.push("в разделе больше одного DEFINITION: в тексте отмечай термины [t:…], а определения давай в glossary.terms");
+  // смысловые выделения: их полное отсутствие в большом тексте и явный перебор
+  const markers = main.join(" ").match(MARKER) || [];
+  if (mainChars >= LIMITS.highlightFrom && !markers.length)
+    issues.push("в основном тексте нет смысловых выделений: отметь настоящие термины [t:…], даты [d:…], личности [p:…], формулы [f:…] и **ключевые мысли** — только там, где это действительно важно");
+  const bold = [...main.join(" ").matchAll(BOLD)].map((m) => m[1]);
+  const boldChars = bold.reduce((n, b) => n + b.length, 0);
+  if (mainChars >= 300 && boldChars > LIMITS.boldShare * mainChars)
+    issues.push("слишком много жирного текста (" + Math.round((100 * boldChars) / mainChars) + "% основного текста): выделяй только ключевые слова и короткие фразы");
+  else if (bold.some((b) => b.length > LIMITS.boldPhrase))
+    issues.push("жирным выделены целые предложения: выделяй только ключевые слова и короткие фразы");
 
   const forbidden = blocks.filter((b) => FORBIDDEN_IN_SECTIONS.includes(b.type as string)).length;
   if (forbidden) issues.push("в основной части есть блоки REMEMBER/CONCLUSION — они запрещены; «Важно» — только в remember, вывод — только в conclusion");
 
   const accents = blocks.filter((b) => b.type === "IMPORTANT" || b.type === "MAIN_IDEA").length;
-  if (accents > LIMITS.accents) issues.push("слишком много блоков IMPORTANT/MAIN_IDEA (" + accents + "), допустимо не больше одного");
+  if (accents > 2 * c.sections.length + 2)
+    issues.push("слишком много карточек IMPORTANT (" + accents + "): карточка — для главного в пункте, остальное пиши связным текстом");
 
   const seen = new Set<string>();
   const dupTerms: string[] = [];
@@ -396,13 +487,23 @@ export function qualityIssues(c: StudyContent, pageCount: number): string[] {
   if (dupTerms.length) issues.push("термины повторяются: " + [...new Set(dupTerms)].map((t) => "«" + t + "»").join(", ") + " — каждый термин один раз");
 
   const longTermDef = c.glossary.terms.filter((t) => t.definition.length > LIMITS.termDefinition).length;
-  if (longTermDef) issues.push("определения в glossary.terms слишком длинные (" + longTermDef + "): одно короткое точное предложение");
+  if (longTermDef) issues.push("определения в glossary.terms слишком длинные (" + longTermDef + "): одно точное предложение по учебнику");
+
+  // справочные блоки не должны содержать того, чего нет в основном тексте
+  const ref = referenceText(c);
+  const strayPeople = c.glossary.people.filter((p) => !mentioned(p.name, ref)).map((p) => p.name);
+  const strayDates = c.glossary.dates.filter((d) => !dateMentioned(d.date, ref)).map((d) => d.date);
+  if (strayPeople.length || strayDates.length)
+    issues.push("в «Личностях»/«Датах» есть то, чего нет в тексте конспекта: " + [...strayPeople, ...strayDates].slice(0, 5).map((x) => "«" + x + "»").join(", ") +
+      " — справочные блоки только по материалу страниц; если личностей или дат нет, оставь пустые массивы");
 
   if (c.remember.length > LIMITS.remember || c.remember.some((r) => r.length > LIMITS.rememberItem))
-    issues.push("remember («Важно») — только 1–3 коротких акцента по одному предложению, без пересказа материала");
-  if (c.conclusion.length > LIMITS.conclusion) issues.push("вывод слишком длинный: 1–3 предложения");
+    issues.push("remember («Важно») — несколько коротких ключевых фактов, без пересказа всего материала");
+  if (c.conclusion.length > LIMITS.conclusion) issues.push("вывод слишком длинный: короткий итог в 1–3 предложениях");
+  const qs = c.selfCheck.map((x) => normTerm(x.q));
   if (c.selfCheck.length > LIMITS.selfCheck || c.selfCheck.some((x) => x.a.length > LIMITS.answer))
-    issues.push("вопросы и ответы: 3–5 вопросов, ответы короткие (1–2 предложения)");
+    issues.push("вопросы и ответы: только основное по материалу страниц, ответы по тексту учебника без лишнего");
+  else if (new Set(qs).size < qs.length) issues.push("вопросы повторяются — каждый вопрос один раз");
 
   return issues;
 }
@@ -418,9 +519,9 @@ function dropBrokenSentences(text: string): string {
 }
 
 /**
- * Консервативная чистка после финальной попытки: убирает дубли терминов, лишние пункты «Важно»,
- * запрещённые блоки и фрагменты с явно повреждёнными словами (минимальной единицей: предложение,
- * пункт списка, термин, вопрос). Ничего не переписывает и не угадывает.
+ * Консервативная чистка после финальной попытки: убирает дубли терминов и вопросов, лишние пункты «Важно»,
+ * запрещённые блоки, личности/даты/термины, которых нет в тексте конспекта, и фрагменты с явно повреждёнными
+ * словами (минимальной единицей: предложение, пункт списка, термин, вопрос). Ничего не переписывает и не угадывает.
  * Возвращает очищенный content и технический отчёт для лога (в конспект он не попадает).
  */
 export function sanitize(c: StudyContent): { content: StudyContent; report: string[] } {
@@ -450,21 +551,38 @@ export function sanitize(c: StudyContent): { content: StudyContent; report: stri
       return { ...s, heading: isBroken(s.heading) ? "" : s.heading, blocks };
     })
     .filter((s) => s.heading || s.blocks.length);
+  out.lead = dropBrokenSentences(out.lead);
 
-  // справочные блоки: минимальная единица — один пункт
+  // справочные блоки: минимальная единица — один пункт; только то, что есть в тексте конспекта
+  const ref = referenceText(out);
   const termSeen = new Set<string>();
   out.glossary.terms = out.glossary.terms.filter((t) => {
     const k = normTerm(t.term);
     if (termSeen.has(k)) return report.push("дубль термина «" + t.term + "»"), false;
     termSeen.add(k);
+    if (!mentioned(t.term, ref)) return report.push("термина «" + t.term + "» нет в тексте"), false;
     return !isBroken(t.term + " " + t.definition);
   });
-  out.glossary.people = out.glossary.people.filter((p) => !isBroken(p.name + " " + p.role));
-  out.glossary.dates = out.glossary.dates.filter((d) => !isBroken(d.date + " " + d.event));
+  out.glossary.people = out.glossary.people.filter((p) => {
+    if (!mentioned(p.name, ref)) return report.push("личности «" + p.name + "» нет в тексте"), false;
+    return !isBroken(p.name + " " + p.role);
+  });
+  out.glossary.dates = out.glossary.dates.filter((d) => {
+    if (!dateMentioned(d.date, ref)) return report.push("даты «" + d.date + "» нет в тексте"), false;
+    return !isBroken(d.date + " " + d.event);
+  });
   out.remember = out.remember.filter((r) => !isBroken(r) && r.length <= LIMITS.rememberItem * 1.5).slice(0, LIMITS.remember);
   if (out.remember.length < c.remember.length) report.push("«Важно»: " + c.remember.length + " → " + out.remember.length);
   out.conclusion = dropBrokenSentences(out.conclusion);
-  out.selfCheck = out.selfCheck.filter((x) => !isBroken(x.q + " " + x.a)).slice(0, LIMITS.selfCheck);
+  const qSeen = new Set<string>();
+  out.selfCheck = out.selfCheck
+    .filter((x) => {
+      const k = normTerm(x.q);
+      if (qSeen.has(k)) return report.push("дубль вопроса"), false;
+      qSeen.add(k);
+      return !isBroken(x.q + " " + x.a);
+    })
+    .slice(0, LIMITS.selfCheck);
   out.warnings = out.warnings.filter((w) => !isBroken(w));
 
   // заголовок и метаданные: повреждённое не показываем
@@ -482,6 +600,7 @@ function cleanBlock(b: Obj): Obj | null {
   const s = (v: Json) => dropBrokenSentences(String(v ?? ""));
   const items = (v: Json) => (Array.isArray(v) ? (v as string[]).filter((x) => !isBroken(String(x))) : []);
   const out: Obj = { ...b };
+  if (typeof b.title === "string" && isBroken(b.title)) delete out.title;
   switch (b.type) {
     case "PARAGRAPH":
     case "MAIN_IDEA":

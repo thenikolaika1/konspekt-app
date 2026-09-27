@@ -1171,3 +1171,51 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 @media (prefers-reduced-motion:reduce){.to-top,.to-top.show{transition:none}}
 /* место под кнопкой «наверх», чтобы она не закрывала последний блок */
 .note-view{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+
+/* ======================================================================
+   CLASSIC-2 (новые AI-конспекты; эталон — PWA «Физика 8» / «История 8»).
+   Только для .cn-v2: старые конспекты выглядят как раньше.
+   ====================================================================== */
+/* «Главное» перед первым разделом и карточки внутри разделов — мягко, в ритме текста */
+.cn-v2 .cn-box.lead{margin:0 0 14px}
+.cn-v2 .cn-sec+.cn-sec{margin-top:16px}
+.cn-v2 .cn-sec>p+.cn-box,.cn-v2 .cn-sec>.cn-list+.cn-box{margin-top:12px}
+.cn-v2 .cn-box.cause .cn-lbl{margin:4px 0 2px!important}
+.cn-v2 .cn-box.cause .cn-list{margin-bottom:4px}
+.cn-v2 .cn-box .cn-list li{margin-bottom:4px}
+.cn-v2 .table-wrap{margin:6px 0 12px}
+
+/* сворачиваемые справочные блоки: [ Термины ⌄ ] */
+.cn-ref{--ref:var(--note-secondary);--ref-soft:var(--note-secondary-soft);--ref-ink:var(--note-secondary-ink);
+  margin:10px 0;border-radius:16px;border-left:5px solid var(--ref);background:var(--ref-soft)}
+.cn-ref.people{--ref:var(--note-person);--ref-soft:var(--note-person-soft);--ref-ink:var(--note-person-ink)}
+.cn-ref.dates{--ref:var(--note-date);--ref-soft:var(--note-date-soft);--ref-ink:var(--note-date-ink)}
+.cn-ref.formulas,.cn-ref.qa-part{--ref:var(--note-primary);--ref-soft:var(--note-primary-soft);--ref-ink:var(--note-primary-ink)}
+.cn-ref.important{--ref:var(--note-important);--ref-soft:var(--note-important-soft);--ref-ink:var(--note-important-ink)}
+.cn-body>.cn-sec+.cn-ref{margin-top:18px}
+.cn-ref-h{margin:0;font-size:inherit}
+.cn-ref-btn{width:100%;min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;
+  border:0;background:none;text-align:left;font-size:17.5px;line-height:22px;font-weight:800;color:var(--ref-ink);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;border-radius:16px}
+.cn-ref-btn:focus-visible{outline:2px solid var(--ref);outline-offset:2px}
+.cn-ref-chev{flex:none;width:22px;height:22px;transition:transform .28s ease}
+.cn-ref.open .cn-ref-chev{transform:rotate(180deg)}
+.cn-ref-panel{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s ease}
+.cn-ref.open .cn-ref-panel{grid-template-rows:1fr}
+.cn-ref-inner{min-height:0;overflow:hidden;visibility:hidden;padding:0 14px;transition:visibility 0s linear .28s,padding .28s ease}
+.cn-ref.open .cn-ref-inner{visibility:visible;padding-bottom:12px;transition-delay:0s}
+.cn-ref.instant .cn-ref-panel,.cn-ref.instant .cn-ref-inner,.cn-ref.instant .cn-ref-chev{transition:none}
+.cn-ref .cn-gl{margin:0 0 6px;font-size:16.5px;line-height:1.42}
+.cn-ref .cn-gl:last-child{margin-bottom:0}
+.cn-ref.terms .kw-def{color:var(--note-secondary-ink)}
+.cn-ref.people .kw-person{color:var(--note-person-ink)}
+.cn-ref.dates .kw-date{color:var(--note-date-ink)}
+.cn-ref .cn-list{margin:0}
+.cn-ref.important .cn-list li::marker{color:var(--note-important)}
+.cn-ref .formula{margin:2px 0 6px;font-family:"Times New Roman",Georgia,serif;font-size:24px;line-height:30px;font-style:italic;text-align:center;color:var(--note-ink)}
+.cn-ref.qa-part{background:color-mix(in srgb,var(--note-primary-soft) 55%,#fff)}
+.cn-ref.qa-part .qa{padding:10px 0 11px}
+.cn-ref.qa-part .qa:first-child{padding-top:2px}
+.cn-ref.qa-part .qa:last-child{padding-bottom:0}
+@media (prefers-reduced-motion:reduce){.cn-ref-panel,.cn-ref-inner,.cn-ref-chev{transition:none}}
+.cn-v2 .kw-date{white-space:nowrap}
