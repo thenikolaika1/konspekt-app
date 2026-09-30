@@ -1157,7 +1157,8 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 /* ===== экран конспекта: закреплённая панель ← ⋯ + поиск, кнопка «наверх» ===== */
 /* панель прилипает к верху окна; отрицательный отступ и padding компенсируют safe-area — высота не меняется */
 .note-bar{position:sticky;top:0;z-index:7;margin:calc(-1 * env(safe-area-inset-top)) -20px 0;padding:env(safe-area-inset-top) 20px 0;
-  background:rgba(251,250,246,.94);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px)}
+  /* без backdrop-filter: размытие под липкой шапкой пересчитывалось при каждом изменении высоты конспекта (раскрытие блоков) */
+  background:rgba(250,249,245,.985)}
 .note-bar .cn-search{position:static;background:none;-webkit-backdrop-filter:none;backdrop-filter:none}
 /* «наверх»: небольшая кнопка справа снизу, появляется только после прокрутки */
 .to-top{position:fixed;right:max(16px,calc((100vw - 430px)/2 + 16px));bottom:calc(20px + env(safe-area-inset-bottom));z-index:8;
@@ -1175,47 +1176,163 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 /* ======================================================================
    CLASSIC-2 (новые AI-конспекты; эталон — PWA «Физика 8» / «История 8»).
    Только для .cn-v2: старые конспекты выглядят как раньше.
+   Принцип эталонов: нейтральная светлая основа, тонкие рамки, 2 предметных акцента и тёплая карточка «Важно».
+   Здесь: предмет (--s*) задаёт только акцент страницы — шапку, номера разделов, маркеры списков;
+   смысловые цвета (определение, важно, вывод, состав/функции, причины, пример, формула, личности, даты)
+   одинаковы для всех предметов, поэтому Биология не становится «вся зелёная».
    ====================================================================== */
-/* «Главное» перед первым разделом и карточки внутри разделов — мягко, в ритме текста */
-.cn-v2 .cn-box.lead{margin:0 0 14px}
-.cn-v2 .cn-sec+.cn-sec{margin-top:16px}
-.cn-v2 .cn-sec>p+.cn-box,.cn-v2 .cn-sec>.cn-list+.cn-box{margin-top:12px}
-.cn-v2 .cn-box.cause .cn-lbl{margin:4px 0 2px!important}
-.cn-v2 .cn-box.cause .cn-list{margin-bottom:4px}
-.cn-v2 .cn-box .cn-list li{margin-bottom:4px}
-.cn-v2 .table-wrap{margin:6px 0 12px}
+.cn-v2,.cn-intro.cn-v2i{
+  --c2-ink:#22252b;--c2-text:#2c3039;--c2-muted:#6c717a;--c2-line:#e6e7eb;
+  /* предмет */
+  --s:color-mix(in srgb,var(--note-primary) 74%,#5b6070);
+  --s-ink:color-mix(in srgb,var(--note-primary-ink) 72%,#23272f);
+  --s-soft:color-mix(in srgb,var(--note-primary) 7%,#fff);
+  --s-line:color-mix(in srgb,var(--note-primary) 20%,#e6e7eb);
+  /* смысл */
+  --def:#3a6ea8;--def-ink:#265487;--def-soft:#f0f5fb;--def-line:#d3e1f1;
+  --imp:#c27b1c;--imp-ink:#855210;--imp-soft:#fdf7e8;--imp-line:#efdcae;
+  --concl:#6b56a8;--concl-ink:#4f3d88;--concl-soft:#f5f2fb;--concl-line:#ddd6ef;
+  --info:#2f8595;--info-ink:#235f6b;--info-soft:#eff7f9;--info-line:#cde3e8;
+  --cause:#b0573e;--cause-ink:#8b3f2a;--cause-soft:#fcf3ef;--cause-line:#efd5ca;
+  --ex:#7b8494;--ex-ink:#4b5363;--ex-soft:#f6f7f9;--ex-line:#e2e5ea;
+  --formula:#5457b0;--formula-ink:#3b3e8f;--formula-soft:#f3f3fc;--formula-line:#dadbf2;
+  --person:#a8662f;--person-ink:#7c4719;--person-soft:#fbf4ec;--person-line:#eedcc6;
+  --date:#a8425a;--date-ink:#852b41;--date-soft:#fcf1f3;--date-line:#efd3da;
+  /* раскрытие: одна кривая для высоты и стрелки — мягкий старт (без прыжка в первом кадре), шаг за кадр не больше,
+     чем у v34, короткий хвост без «дотягивания»; одинаково для раскрытия и сворачивания */
+  --acc-t:.28s;--acc-e:cubic-bezier(.35,.1,.25,1)}
 
-/* сворачиваемые справочные блоки: [ Термины ⌄ ] */
-.cn-ref{--ref:var(--note-secondary);--ref-soft:var(--note-secondary-soft);--ref-ink:var(--note-secondary-ink);
-  margin:10px 0;border-radius:16px;border-left:5px solid var(--ref);background:var(--ref-soft)}
-.cn-ref.people{--ref:var(--note-person);--ref-soft:var(--note-person-soft);--ref-ink:var(--note-person-ink)}
-.cn-ref.dates{--ref:var(--note-date);--ref-soft:var(--note-date-soft);--ref-ink:var(--note-date-ink)}
-.cn-ref.formulas,.cn-ref.qa-part{--ref:var(--note-primary);--ref-soft:var(--note-primary-soft);--ref-ink:var(--note-primary-ink)}
-.cn-ref.important{--ref:var(--note-important);--ref-soft:var(--note-important-soft);--ref-ink:var(--note-important-ink)}
-.cn-body>.cn-sec+.cn-ref{margin-top:18px}
-.cn-ref-h{margin:0;font-size:inherit}
-.cn-ref-btn{width:100%;min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;
-  border:0;background:none;text-align:left;font-size:17.5px;line-height:22px;font-weight:800;color:var(--ref-ink);cursor:pointer;
-  -webkit-tap-highlight-color:transparent;border-radius:16px}
-.cn-ref-btn:focus-visible{outline:2px solid var(--ref);outline-offset:2px}
-.cn-ref-chev{flex:none;width:22px;height:22px;transition:transform .28s ease}
+/* шапка конспекта: компактнее, предметный акцент (класс ставит renderer — без :has, он дорог при каждом переключении) */
+.cn-intro.cn-v2i{padding:10px 14px 11px;
+  background:linear-gradient(120deg,var(--s-soft) 0%,color-mix(in srgb,var(--s-soft) 55%,#fff) 100%);box-shadow:inset 0 0 0 1px var(--s-line)}
+.cn-v2i .cn-kicker{font-size:12px;line-height:16px;letter-spacing:.08em;color:var(--s-ink)}
+.cn-intro.cn-v2i .note-title{margin-top:2px;font-size:23px;line-height:27px;font-weight:800;letter-spacing:-.3px;color:var(--c2-ink)}
+.cn-v2i .cn-lead{margin-top:3px;font-size:15px;line-height:20px;color:#454b57}
+.cn-intro.cn-v2i .note-meta{margin-top:4px;font-size:13.5px;line-height:18px;color:var(--c2-muted)}
+.cn-intro.cn-v2i .note-meta .sep{color:var(--s)}
+
+/* лист: тонкая рамка вместо большой размытой тени (тень перерисовывалась при каждом изменении высоты) */
+.cn-body.cn-v2{padding:14px 14px 10px;box-shadow:0 0 0 1px var(--c2-line);font-size:16.5px;line-height:1.52;color:var(--c2-text)}
+.cn-v2 p{margin:0 0 9px}
+.cn-v2 strong{font-weight:700;color:#14171d}
+.cn-v2 .kw-def,.cn-v2 .kw-term{font-weight:700;color:var(--def-ink)}
+.cn-v2 .kw-date{font-weight:700;color:var(--date-ink);white-space:nowrap}
+.cn-v2 .kw-person{font-weight:700;color:var(--person-ink)}
+.cn-v2 .cn-list{margin:0 0 10px;padding-left:22px}
+.cn-v2 .cn-list li{margin:0 0 5px}
+.cn-v2 .cn-list li::marker{color:var(--s)}
+.cn-v2 ol.cn-list li::marker{color:var(--s-ink);font-weight:700}
+.cn-v2 .cn-h3{margin:12px 0 5px;font-size:16.5px;line-height:22px;font-weight:700;color:var(--c2-ink)}
+
+/* разделы: номер + заголовок, заметное разделение пунктов */
+.cn-v2 .cn-sec+.cn-sec{margin-top:18px;padding-top:16px;border-top:1px solid var(--c2-line)}
+.cn-v2 .cn-sec+.cn-sec.cn-fig{margin-top:4px;padding-top:0;border-top:0}
+.cn-v2 .cn-h2{display:flex;align-items:flex-start;gap:10px;margin:0 0 9px;padding:0;border:0;border-radius:0;background:none;
+  font-size:18.5px;line-height:24px;font-weight:700;letter-spacing:-.2px;color:var(--c2-ink)}
+.cn-v2 .cn-num{flex:none;display:inline-grid;place-items:center;min-width:26px;height:26px;margin-top:-1px;padding:0 6px;border-radius:8px;
+  background:var(--s-soft);box-shadow:inset 0 0 0 1px var(--s-line);color:var(--s-ink);font-size:14.5px;line-height:1;font-weight:750;font-variant-numeric:tabular-nums}
+.cn-v2 .cn-h2-t{min-width:0}
+/* подпись к рисунку — скромно, без номера */
+.cn-v2 .cn-cap{margin:2px 0 8px!important;font-size:13.5px;line-height:18px;font-style:italic;color:var(--c2-muted)}
+
+/* смысловые карточки: светлый оттенок, тонкая рамка, акцентная полоска слева */
+.cn-v2 .cn-box{--k:var(--ex);--k-ink:var(--ex-ink);--k-soft:var(--ex-soft);--k-line:var(--ex-line);
+  margin:12px 0 14px;padding:10px 13px 11px;border-radius:12px;border:1px solid var(--k-line);border-left:3px solid var(--k);background:var(--k-soft);
+  font-size:15.5px;line-height:1.47;color:var(--c2-text)}
+.cn-v2 .k-main{--k:var(--s);--k-ink:var(--s-ink);--k-soft:var(--s-soft);--k-line:var(--s-line)}
+.cn-v2 .k-def{--k:var(--def);--k-ink:var(--def-ink);--k-soft:var(--def-soft);--k-line:var(--def-line)}
+.cn-v2 .k-imp{--k:var(--imp);--k-ink:var(--imp-ink);--k-soft:var(--imp-soft);--k-line:var(--imp-line)}
+.cn-v2 .k-concl{--k:var(--concl);--k-ink:var(--concl-ink);--k-soft:var(--concl-soft);--k-line:var(--concl-line)}
+.cn-v2 .k-info{--k:var(--info);--k-ink:var(--info-ink);--k-soft:var(--info-soft);--k-line:var(--info-line)}
+.cn-v2 .k-cause{--k:var(--cause);--k-ink:var(--cause-ink);--k-soft:var(--cause-soft);--k-line:var(--cause-line)}
+.cn-v2 .k-ex{--k:var(--ex);--k-ink:var(--ex-ink);--k-soft:var(--ex-soft);--k-line:var(--ex-line)}
+.cn-v2 .k-formula{--k:var(--formula);--k-ink:var(--formula-ink);--k-soft:var(--formula-soft);--k-line:var(--formula-line)}
+.cn-v2 .cn-box .cn-box-label{margin:0 0 4px;font-size:11.5px;line-height:15px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--k-ink)}
+.cn-v2 .cn-box.titled>.cn-box-label{font-size:14.5px;line-height:19px;font-weight:700;letter-spacing:0;text-transform:none}
+.cn-v2 .cn-box p{margin:0}
+.cn-v2 .cn-box p+p{margin-top:6px}
+.cn-v2 .cn-box .cn-list{margin:0}
+.cn-v2 .cn-box .cn-list li{margin-bottom:4px}
+.cn-v2 .cn-box .cn-list li:last-child{margin-bottom:0}
+.cn-v2 .cn-box .cn-list li::marker,.cn-v2 .cn-box ol.cn-list li::marker{color:var(--k)}
+.cn-v2 .cn-box .kw-def{color:var(--k-ink)}
+.cn-v2 .cn-box.lead{margin:0 0 16px;padding:9px 12px 10px}
+.cn-v2 .cn-box .cn-lbl{margin:6px 0 2px!important;font-size:13px;line-height:17px;font-weight:700;color:var(--k-ink)}
+.cn-v2 .cn-box .cn-lbl:first-of-type{margin-top:0!important}
+.cn-v2 .cn-box .formula{margin:2px 0 6px;font-family:"Times New Roman",Georgia,serif;font-size:22px;line-height:28px;font-style:italic;text-align:center;color:var(--c2-ink);overflow-wrap:anywhere}
+.cn-v2 .cn-vars{margin:6px 0 0;padding-left:20px;font-size:15px}
+.cn-v2 .cn-vars li::marker{color:var(--k)}
+
+/* таблица: свой горизонтальный скролл, страница не расширяется */
+.cn-v2 .table-wrap{margin:10px 0 14px;max-width:100%;padding:6px 12px;border:1px solid var(--info-line);border-radius:12px;background:color-mix(in srgb,var(--info-soft) 60%,#fff)}
+.cn-v2 .note-table{font-size:15px}
+.cn-v2 .note-table th,.cn-v2 .note-table td{border-bottom-color:var(--c2-line)}
+.cn-v2 .note-table th{color:var(--info-ink);border-bottom:1.5px solid var(--info-line)}
+.cn-v2 .note-table.stack tr{border-bottom-color:var(--c2-line)}
+.cn-v2 .note-table.stack td{font-size:15.5px}
+.cn-v2 .note-table.stack td:first-child{font-size:16.5px;color:var(--c2-ink)}
+.cn-v2 .note-table.stack td[data-label]::before{color:var(--info-ink)}
+
+/* сворачиваемые справочные блоки и вопросы: [ Термины ⌄ ]
+   Анимируются только высота (grid-template-rows 0fr → 1fr) и поворот стрелки: содержимое открывается самой высотой,
+   без анимации прозрачности; отступы — у внутреннего .cn-ref-body и не анимируются; высота не измеряется из JS.
+   contain: layout paint — блок перерисовывается и раскладывается независимо: при раскрытии соседние блоки только
+   сдвигаются, их отрисовка не записывается заново (paint/prepaint в кадре ≈ как в v34 и ниже). */
+.cn-ref{--k:var(--def);--k-ink:var(--def-ink);--k-soft:var(--def-soft);--k-line:var(--def-line);
+  margin:8px 0;border-radius:12px;border:1px solid var(--k-line);background:var(--k-soft);contain:layout paint}
+.cn-ref.terms{--k:var(--def);--k-ink:var(--def-ink);--k-soft:var(--def-soft);--k-line:var(--def-line)}
+.cn-ref.people{--k:var(--person);--k-ink:var(--person-ink);--k-soft:var(--person-soft);--k-line:var(--person-line)}
+.cn-ref.dates{--k:var(--date);--k-ink:var(--date-ink);--k-soft:var(--date-soft);--k-line:var(--date-line)}
+.cn-ref.formulas{--k:var(--formula);--k-ink:var(--formula-ink);--k-soft:var(--formula-soft);--k-line:var(--formula-line)}
+.cn-body>.cn-sec+.cn-ref,.cn-body>.cn-sec+.cn-end,.cn-body>.cn-sec+.cn-qa{margin-top:22px}
+.cn-ref-h{margin:0;font-size:inherit;font-weight:inherit}
+.cn-ref-btn{width:100%;min-height:46px;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border:0;border-radius:11px;background:none;
+  font:inherit;font-size:16px;line-height:21px;font-weight:700;text-align:left;color:var(--k-ink);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.cn-ref-t,.cn-q-t{flex:1;min-width:0;overflow-wrap:anywhere}
+@media (hover:hover){.cn-ref-btn:hover{background:color-mix(in srgb,var(--k) 6%,transparent)}}
+.cn-ref-btn:focus-visible{outline:2px solid var(--k);outline-offset:-2px}
+.cn-ref-chev{flex:none;width:20px;height:20px;color:var(--k);transition:transform var(--acc-t) var(--acc-e)}
 .cn-ref.open .cn-ref-chev{transform:rotate(180deg)}
-.cn-ref-panel{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s ease}
+.cn-ref-panel{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--acc-t) var(--acc-e)}
 .cn-ref.open .cn-ref-panel{grid-template-rows:1fr}
-.cn-ref-inner{min-height:0;overflow:hidden;visibility:hidden;padding:0 14px;transition:visibility 0s linear .28s,padding .28s ease}
-.cn-ref.open .cn-ref-inner{visibility:visible;padding-bottom:12px;transition-delay:0s}
+.cn-ref-inner{min-height:0;overflow:hidden;visibility:hidden;transition:visibility 0s linear var(--acc-t)}
+.cn-ref.open .cn-ref-inner{visibility:visible;transition-delay:0s}
+.cn-ref-body{padding:0 14px 12px}
 .cn-ref.instant .cn-ref-panel,.cn-ref.instant .cn-ref-inner,.cn-ref.instant .cn-ref-chev{transition:none}
-.cn-ref .cn-gl{margin:0 0 6px;font-size:16.5px;line-height:1.42}
-.cn-ref .cn-gl:last-child{margin-bottom:0}
-.cn-ref.terms .kw-def{color:var(--note-secondary-ink)}
-.cn-ref.people .kw-person{color:var(--note-person-ink)}
-.cn-ref.dates .kw-date{color:var(--note-date-ink)}
-.cn-ref .cn-list{margin:0}
-.cn-ref.important .cn-list li::marker{color:var(--note-important)}
-.cn-ref .formula{margin:2px 0 6px;font-family:"Times New Roman",Georgia,serif;font-size:24px;line-height:30px;font-style:italic;text-align:center;color:var(--note-ink)}
-.cn-ref.qa-part{background:color-mix(in srgb,var(--note-primary-soft) 55%,#fff)}
-.cn-ref.qa-part .qa{padding:10px 0 11px}
-.cn-ref.qa-part .qa:first-child{padding-top:2px}
-.cn-ref.qa-part .qa:last-child{padding-bottom:0}
-@media (prefers-reduced-motion:reduce){.cn-ref-panel,.cn-ref-inner,.cn-ref-chev{transition:none}}
-.cn-v2 .kw-date{white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.cn-ref-panel,.cn-ref-inner,.cn-ref-chev{transition:none!important}}
+/* пары «термин — определение», «дата — событие», «имя — кто это» */
+.cn-pair{padding:8px 0}
+.cn-pair+.cn-pair{border-top:1px solid var(--k-line)}
+.cn-pair:first-child{padding-top:0}
+.cn-pair:last-child{padding-bottom:0}
+.cn-pair-k{font-size:15.5px;line-height:20px;font-weight:700;color:var(--k-ink)}
+.cn-pair-k .kw-def,.cn-pair-k .kw-person,.cn-pair-k .kw-date{color:inherit}
+.cn-pair-v{margin-top:2px;font-size:15px;line-height:1.45;color:var(--c2-text)}
+.cn-ref .formula{margin:2px 0 6px;font-family:"Times New Roman",Georgia,serif;font-size:22px;line-height:28px;font-style:italic;text-align:center;color:var(--c2-ink);overflow-wrap:anywhere}
+.cn-ref .cn-ref-body>p{font-size:15px;line-height:1.45}
+
+/* «Важно» и «Вывод» — открытые карточки, разные смысловые цвета */
+.cn-end{--k:var(--imp);--k-ink:var(--imp-ink);--k-soft:var(--imp-soft);--k-line:var(--imp-line);
+  margin:12px 0;padding:10px 14px 12px;border-radius:12px;border:1px solid var(--k-line);border-left:3px solid var(--k);background:var(--k-soft);
+  font-size:15.5px;line-height:1.47;color:var(--c2-text);contain:layout paint}
+.cn-end.k-imp{--k:var(--imp);--k-ink:var(--imp-ink);--k-soft:var(--imp-soft);--k-line:var(--imp-line)}
+.cn-end.k-concl{--k:var(--concl);--k-ink:var(--concl-ink);--k-soft:var(--concl-soft);--k-line:var(--concl-line)}
+.cn-end-h{margin:0 0 5px;font-size:11.5px;line-height:15px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--k-ink)}
+.cn-end p{margin:0}
+.cn-end .cn-list{margin:0}
+.cn-end .cn-list li{margin:0 0 4px}
+.cn-end .cn-list li:last-child{margin-bottom:0}
+.cn-end .cn-list li::marker{color:var(--k)}
+
+/* вопросы и ответы: раздел открыт, каждый вопрос раскрывается отдельно */
+.cn-qa{margin-top:22px}
+.cn-qa-h{margin:0 0 8px;font-size:18.5px;line-height:24px;font-weight:700;letter-spacing:-.2px;color:var(--c2-ink)}
+.cn-ref.cn-q{--k:var(--s);--k-ink:var(--c2-ink);--k-soft:#fff;--k-line:var(--c2-line);margin:6px 0}
+.cn-ref.cn-q.open{border-color:var(--s-line)}
+.cn-q .cn-ref-btn{align-items:flex-start;min-height:44px;padding:11px 12px 11px 14px;font-size:15.5px;line-height:21px;font-weight:600}
+.cn-q-n{flex:none;min-width:20px;color:var(--s-ink);font-weight:750;font-variant-numeric:tabular-nums}
+.cn-q .cn-ref-chev{margin-top:1px}
+.cn-q .cn-ref-body{padding:0 14px 12px 44px}
+.cn-body.cn-v2 .cn-q .qa-a{margin:0;font-size:15.5px;line-height:1.47;color:var(--c2-text)}
+.cn-v2 .cn-muted{color:var(--c2-muted)}
