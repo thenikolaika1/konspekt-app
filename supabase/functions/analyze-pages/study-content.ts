@@ -347,6 +347,7 @@ const LIMITS = {
   maxBase: 800,
   paragraph: 1100,
   highlightFrom: 500, // с какого объёма текста отсутствие выделений считается проблемой
+  highlightEvery: 300, // в среднем хотя бы одно выделение на столько знаков основного текста
   boldShare: 0.3, // доля жирного в основном тексте
   boldPhrase: 160, // одна жирная «фраза» длиннее — выделено целое предложение
   termDefinition: 300,
@@ -358,6 +359,12 @@ const LIMITS = {
 };
 
 const FORBIDDEN_IN_SECTIONS = ["REMEMBER", "CONCLUSION"];
+
+/** Подпись к рисунку, схеме или таблице («Рис. 24. …») — не пункт учебника. */
+export const FIGURE_CAPTION = /^\s*(?:рис(?:\.|унок)|схема|табл(?:\.|ица))\s*\d/i;
+
+/** Обрывки вида «транспорт что и кислорода», «продуктов обмена что.» — пропущенное слово в ответе модели. */
+const DANGLING_CHTO = /(?:^|[^,\s—–-])\s+что(?=\s*[.;:)]|\s+и\s|\s+в\s|\s+по\s)/i;
 
 /** Все текстовые значения блока (для подсчёта длины и поиска артефактов). */
 function blockTexts(b: Obj): string[] {
@@ -438,6 +445,10 @@ export function qualityIssues(c: StudyContent, pageCount: number): string[] {
   } else if (c.sections.length > 1) {
     issues.push("не заполнен meta.sourceOutline — выпиши дословно заголовки основных пунктов учебника с фотографий, разделы должны им соответствовать");
   }
+  const captions = c.sections.filter((s) => FIGURE_CAPTION.test(plain(s.heading))).map((s) => plain(s.heading));
+  if (captions.length)
+    issues.push("подписи к рисункам сделаны разделами: " + captions.slice(0, 3).map((h) => "«" + h + "»").join(", ") +
+      " — это не пункты учебника; перенеси их содержание в текст или карточку соответствующего пункта");
 
   // объём — мягкие ориентиры по числу читаемых страниц
   const main = mainTexts(c);
@@ -456,13 +467,23 @@ export function qualityIssues(c: StudyContent, pageCount: number): string[] {
   // смысловые выделения: их полное отсутствие в большом тексте и явный перебор
   const markers = main.join(" ").match(MARKER) || [];
   if (mainChars >= LIMITS.highlightFrom && !markers.length)
-    issues.push("в основном тексте нет смысловых выделений: отметь настоящие термины [t:…], даты [d:…], личности [p:…], формулы [f:…] и **ключевые мысли** — только там, где это действительно важно");
+    issues.push("в основном тексте нет смысловых выделений: отметь **жирным** ключевые слова, термины [t:…], даты [d:…], личности [p:…], формулы [f:…] — только там, где это действительно важно");
+  else if (mainChars >= 2 * LIMITS.highlightEvery && markers.length * LIMITS.highlightEvery < mainChars)
+    issues.push("слишком мало выделений (" + markers.length + " на " + mainChars + " знаков): в каждом содержательном абзаце выдели **жирным** 1–4 ключевых слова — термины, процессы, основные объекты, функции");
   const bold = [...main.join(" ").matchAll(BOLD)].map((m) => m[1]);
   const boldChars = bold.reduce((n, b) => n + b.length, 0);
   if (mainChars >= 300 && boldChars > LIMITS.boldShare * mainChars)
     issues.push("слишком много жирного текста (" + Math.round((100 * boldChars) / mainChars) + "% основного текста): выделяй только ключевые слова и короткие фразы");
   else if (bold.some((b) => b.length > LIMITS.boldPhrase))
     issues.push("жирным выделены целые предложения: выделяй только ключевые слова и короткие фразы");
+
+  const dangling = [...new Set(main.map(plain).filter((t) => DANGLING_CHTO.test(t)).map((t) => {
+    const m = t.match(DANGLING_CHTO);
+    return t.slice(Math.max(0, (m?.index || 0) - 25), (m?.index || 0) + 12).trim();
+  }))];
+  if (dangling.length)
+    issues.push("в тексте есть оборванные фразы с пропущенным словом: " + dangling.slice(0, 2).map((x) => "«…" + x + "…»").join(", ") +
+      " — каждое предложение должно быть грамматически полным");
 
   const forbidden = blocks.filter((b) => FORBIDDEN_IN_SECTIONS.includes(b.type as string)).length;
   if (forbidden) issues.push("в основной части есть блоки REMEMBER/CONCLUSION — они запрещены; «Важно» — только в remember, вывод — только в conclusion");

@@ -1,13 +1,13 @@
 /**
  * Edge Function analyze-pages: фотографии страниц (private bucket temp-pages) → AI-провайдер
- * (основной OpenRouter, резервный Z.AI — см. providers.ts) → StudyContent v1 → public.notes.content.
+ * (основной GigaChat-2-Max, резервные OpenRouter и Z.AI — см. providers.ts) → StudyContent v1 → public.notes.content.
  *
  * Запрос: POST { note_id, paths[] } с заголовком Authorization: Bearer <JWT пользователя>.
  * Ответ сразу 202 { status: "processing" }; сама генерация идёт в фоне (EdgeRuntime.waitUntil),
  * поэтому закрытие PWA её не прерывает. Клиент узнаёт результат по notes.status.
  *
  * Секреты только из окружения функции:
- *   OPENROUTER_API_KEY, ZAI_API_KEY — Edge Function Secrets (заданы вручную);
+ *   GIGACHAT_AUTH_KEY, OPENROUTER_API_KEY, ZAI_API_KEY — Edge Function Secrets (заданы вручную);
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY — Supabase передаёт сам.
  * Ключи и фотографии в лог не пишутся.
  */
@@ -27,7 +27,7 @@ const STALE_MS = 5 * 60_000;
 const BUDGET_MS = 140_000;
 // повторный запрос к модели делаем, только если на него остаётся не меньше этого времени
 const MIN_RETRY_MS = 45_000;
-// qwen/qwen3.8-27b:free и GLM-4.6V-Flash бесплатны; при смене модели здесь указывается цена за 1M токенов
+// GigaChat (Freemium), qwen/qwen3.8-27b:free и GLM-4.6V-Flash бесплатны; при смене модели здесь указывается цена за 1M токенов
 const PRICE_PER_M = { input: 0, output: 0 };
 
 const ALLOWED_ORIGINS = ["https://thenikolaika1.github.io"];
@@ -223,7 +223,8 @@ async function processNote(job: Job) {
       },
     ];
 
-    let best: { content: StudyContent; issues: string[] } | null = null;
+    // model — модель, которая дала этот вариант (в ai_generations пишется модель итогового конспекта)
+    let best: { content: StudyContent; issues: string[]; model: string } | null = null;
     let last: ReturnType<typeof validateStudyContent> | null = null;
     // повтор по качеству идёт к тому же провайдеру; резервный подключается только при ошибке провайдера
     let used: ProviderId | undefined;
@@ -254,7 +255,7 @@ async function processNote(job: Job) {
       if (result.ok) {
         // 11. формат Classic Note: пересказ, дубли, лишние блоки, артефакты распознавания
         const issues = qualityIssues(result.content, images.length);
-        if (!best || issues.length <= best.issues.length) best = { content: result.content, issues };
+        if (!best || issues.length <= best.issues.length) best = { content: result.content, issues, model: reply.model };
         if (!issues.length) break;
         problems = issues;
       } else {
@@ -271,6 +272,7 @@ async function processNote(job: Job) {
       throw new StepError(last.ok ? "EMPTY_CONTENT" : last.code, last.ok ? "" : last.reason);
     }
     if (best.issues.length) console.warn("[analyze-pages] accepted with issues:", best.issues.join(" | "));
+    usage.model = best.model;
 
     // консервативная чистка: только удаление лишнего и явно повреждённого, без правки текста
     const { content, report } = sanitize(best.content);

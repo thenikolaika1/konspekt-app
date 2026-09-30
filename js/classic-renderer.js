@@ -5,9 +5,12 @@
  * Весь текст экранируется; разметку добавляет только renderer. Пустые разделы не выводятся.
  *
  * meta.format = "classic-2" (новые AI-конспекты, эталон — PWA «Физика 8» / «История 8»):
- * заголовки разделов — дословно пункты учебника (без автонумерации), карточка «Главное» перед первым
- * разделом, карточки со своим заголовком, списки с заголовком и «причина → следствие» — мягкими карточками,
- * справочные блоки в конце — сворачиваемые. Старые конспекты (без format) выглядят как раньше.
+ * разделы — пункты учебника с номером (номер из учебника или по порядку); подписи к рисункам («Рис. 24. …»)
+ * не считаются разделами и выводятся скромной подписью без номера; «Главное» — небольшая карточка в начале;
+ * смысловые карточки разных типов (определение, важно, состав/функции, причина → следствие, процесс, пример,
+ * формула) — каждая со своим смысловым цветом (CSS .k-*). В конце: Термины, Личности, Даты, Формулы —
+ * сворачиваемые; «Важно» и «Вывод» — открытые карточки; «Вопросы и ответы» — открытый раздел, каждый вопрос
+ * раскрывается отдельно. Старые конспекты (без format) выглядят как раньше.
  *
  * K.modes — реестр режимов представления. Новый режим (sticky, handwritten, quiz…)
  * добавляется сюда и получает тот же StudyContent — без повторного анализа фото.
@@ -51,13 +54,50 @@
         "</ul>"
       : "";
 
-  /** v2 — конспект classic-2: списки с заголовком и причинно-следственные связи становятся карточками. */
+  /**
+   * classic-2: смысловые карточки. Каждый тип — свой смысловой цвет (k-*), одинаковый для всех предметов;
+   * предмет задаёт только акцент страницы. null — блок выводится так же, как в прежнем формате.
+   */
+  const kcard = (kind, label, inner, cls) =>
+    '<div class="cn-box k-' + kind + (cls ? " " + cls : "") + '"><div class="cn-box-label">' + label + "</div>" + inner + "</div>";
+  function blockV2(b) {
+    switch (b.type) {
+      case "DEFINITION":
+        return kcard("def", "Определение", '<p><span class="kw-def">' + inline(b.term) + "</span> — " + inline(b.text) + "</p>");
+      case "IMPORTANT":
+        return kcard("imp", titled(b, "Важно"), "<p>" + inline(b.text) + "</p>", b.title ? "titled" : "");
+      case "MAIN_IDEA":
+        return kcard("main", titled(b, "Главное"), "<p>" + inline(b.text) + "</p>", b.title ? "titled" : "");
+      case "CONCLUSION":
+        return kcard("concl", titled(b, "Вывод"), "<p>" + inline(b.text) + "</p>", b.title ? "titled" : "");
+      case "EXAMPLE":
+        return kcard("ex", titled(b, "Пример"), "<p>" + inline(b.text) + "</p>", b.title ? "titled" : "");
+      case "REMEMBER":
+        return kcard("imp", "Запомни", list(b.items));
+      case "LIST":
+        return b.title ? kcard("info", inline(b.title), list(b.items, b.ordered), "titled") : null;
+      case "PROCESS":
+        return b.title ? kcard("info", inline(b.title), list(b.steps, true), "titled") : kcard("info", "Этапы", list(b.steps, true));
+      case "CAUSE_EFFECT":
+        return kcard("cause", "Причина → следствие",
+          (b.causes.length ? '<p class="cn-lbl">Причины</p>' + list(b.causes) : "") +
+          (b.effects.length ? '<p class="cn-lbl">Следствия</p>' + list(b.effects) : ""));
+      case "FORMULA":
+        return kcard("formula", "Формула",
+          '<div class="formula">' + esc(b.expression) + "</div>" + (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables));
+    }
+    return null;
+  }
+
   function block(b, v2) {
+    if (v2) {
+      const html = blockV2(b);
+      if (html !== null) return html;
+    }
     switch (b.type) {
       case "PARAGRAPH":
         return "<p>" + inline(b.text) + "</p>";
       case "LIST":
-        if (v2 && b.title) return box("list-card", "head", inline(b.title), list(b.items, b.ordered));
         return sub(b.title) + list(b.items, b.ordered);
       case "MAIN_IDEA":
         return box("main", "imp", titled(b, "Важно · главная мысль"), "<p>" + inline(b.text) + "</p>");
@@ -82,10 +122,6 @@
           (b.text ? " — " + inline(b.text) : "") + "</p>"
         );
       case "CAUSE_EFFECT":
-        if (v2)
-          return box("cause", "head", "Причина → следствие",
-            (b.causes.length ? '<p class="cn-lbl">Причины:</p>' + list(b.causes) : "") +
-            (b.effects.length ? '<p class="cn-lbl">Следствия:</p>' + list(b.effects) : ""));
         return (
           sub("Причина → следствие") +
           (b.causes.length ? '<p class="cn-lbl">Причины:</p>' + list(b.causes) : "") +
@@ -100,7 +136,6 @@
             (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables),
         );
       case "PROCESS":
-        if (v2 && b.title) return box("list-card", "head", inline(b.title), list(b.steps, true));
         return sub(b.title) + list(b.steps, true);
       case "SEQUENCE":
         return (
@@ -131,7 +166,7 @@
     const m = c.meta;
     const lead = m.topic && m.topic !== m.title ? '<p class="cn-lead">' + esc(m.topic) + "</p>" : "";
     return (
-      '<header class="cn-intro"><div class="cn-kicker">' + esc(m.subjectLabel) + "</div>" +
+      '<header class="cn-intro' + (m.format === "classic-2" ? " cn-v2i" : "") + '"><div class="cn-kicker">' + esc(m.subjectLabel) + "</div>" +
       '<h1 class="note-title">' + esc(m.title) + "</h1>" + lead +
       (m.tagline.length ? '<div class="note-meta">' + m.tagline.map(esc).join('<span class="sep">·</span>') + "</div>" : "") +
       "</header>"
@@ -149,9 +184,15 @@
    * Сворачиваемый справочный блок classic-2: [ Термины ⌄ ]. Содержимое остаётся в документе (поиск по конспекту
    * находит его и раскрывает блок), по нажатию плавно раскрывается. Открытие/закрытие — app.js (data-ref).
    */
-  const ref = (cls, title, inner) =>
-    '<section class="cn-ref ' + cls + '"><h2 class="cn-ref-h"><button type="button" class="cn-ref-btn" data-ref aria-expanded="false" aria-controls="ref-' + cls +
-    '"><span>' + title + "</span>" + CHEVRON + '</button></h2><div class="cn-ref-panel" id="ref-' + cls + '"><div class="cn-ref-inner">' + inner + "</div></div></section>";
+  const ref = (cls, title, inner, tag = "section", h = "h2", id = "ref-" + cls) =>
+    "<" + tag + ' class="cn-ref ' + cls + '"><' + h + ' class="cn-ref-h"><button type="button" class="cn-ref-btn" data-ref aria-expanded="false" aria-controls="' + id +
+    '">' + title + CHEVRON + "</button></" + h + '><div class="cn-ref-panel" id="' + id + '" role="region"><div class="cn-ref-inner"><div class="cn-ref-body">' + inner +
+    "</div></div></div></" + tag + ">";
+  /** Открытая справочная карточка classic-2 («Важно», «Вывод»): без сворачивания. */
+  const openCard = (kind, title, inner) => '<section class="cn-end k-' + kind + '"><h2 class="cn-end-h">' + title + "</h2>" + inner + "</section>";
+  /** Подпись к рисунку/схеме/таблице («Рис. 24. …») — не раздел учебника. */
+  const FIGURE_CAPTION = /^\s*(?:рис(?:\.|унок)|схема|табл(?:\.|ица))\s*\d/i;
+  const plainText = (s) => String(s || "").replace(/\*\*/g, "").replace(/\[(?:t|d|p|f):([^\]\n]+?)\]/g, "$1");
 
   /**
    * Утверждённый формат Classic Note (одинаковый для всех предметов):
@@ -163,12 +204,27 @@
     const v2 = c.meta.format === "classic-2";
     let h = '<article class="cn-body' + (v2 ? " cn-v2" : "") + '">';
     if (c.warnings.length) h += '<p class="note-warning">' + c.warnings.map(esc).join("<br>") + "</p>";
-    if (v2 && c.lead) h += box("lead", "imp", "Главное", "<p>" + inline(c.lead) + "</p>");
+    if (v2 && c.lead) h += kcard("main", "Главное", "<p>" + inline(c.lead) + "</p>", "lead");
+    let num = 0;
     c.sections.forEach((s, i) => {
+      if (!v2) {
+        h += '<section class="cn-sec">';
+        if (s.heading) h += '<h2 class="cn-h2">' + (i + 1) + ". " + inline(s.heading) + "</h2>";
+        h += s.blocks.map((b) => block(b, v2)).join("") + "</section>";
+        return;
+      }
+      // classic-2: подпись к рисунку — продолжение текущего пункта, без номера
+      if (s.heading && FIGURE_CAPTION.test(plainText(s.heading))) {
+        h += '<section class="cn-sec cn-fig"><p class="cn-cap">' + inline(s.heading) + "</p>" + s.blocks.map((b) => block(b, true)).join("") + "</section>";
+        return;
+      }
+      // номер из учебника («2. …», «2) …») или по порядку
+      const m = /^\s*(\d{1,2})\s*[.)]\s+(\S.*)$/.exec(s.heading || "");
+      num = m ? Number(m[1]) : num + 1;
+      const title = m ? m[2] : s.heading;
       h += '<section class="cn-sec">';
-      // classic-2: заголовок — дословно пункт учебника (номер, если он есть в учебнике, уже в тексте)
-      if (s.heading) h += '<h2 class="cn-h2">' + (v2 ? "" : i + 1 + ". ") + inline(s.heading) + "</h2>";
-      h += s.blocks.map((b) => block(b, v2)).join("") + "</section>";
+      if (title) h += '<h2 class="cn-h2"><span class="cn-num">' + num + '</span><span class="cn-h2-t">' + inline(title) + "</span></h2>";
+      h += s.blocks.map((b) => block(b, true)).join("") + "</section>";
     });
 
     const terms = g.terms.map((t) => '<p class="cn-gl"><span class="kw-def">' + esc(t.term) + "</span> — " + inline(t.definition) + "</p>").join("");
@@ -187,14 +243,24 @@
       .join("");
 
     if (v2) {
-      // тот же порядок справочных блоков, каждый — сворачиваемый; пустые не выводятся
-      if (g.terms.length) h += ref("terms", "Термины", terms);
-      if (g.people.length) h += ref("people", "Личности", people);
-      if (g.dates.length) h += ref("dates", "Даты", dates);
-      if (g.formulas.length) h += ref("formulas", "Формулы", formulas);
-      if (c.remember.length) h += ref("important", "Важно", remember);
-      if (c.conclusion) h += ref("conclusion", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
-      if (c.selfCheck.length) h += ref("qa-part", "Вопросы и ответы", qa);
+      // справочник — сворачиваемый; «Важно» и «Вывод» — открытые карточки; вопросы раскрываются по одному.
+      // Пустые блоки не выводятся.
+      const pair = (a, b) => '<div class="cn-pair"><div class="cn-pair-k">' + a + '</div><div class="cn-pair-v">' + b + "</div></div>";
+      const t = (s) => '<span class="cn-ref-t">' + s + "</span>";
+      if (g.terms.length) h += ref("terms", t("Термины"), g.terms.map((x) => pair('<span class="kw-def">' + esc(x.term) + "</span>", inline(x.definition))).join(""));
+      if (g.people.length) h += ref("people", t("Личности"), g.people.map((x) => pair('<span class="kw-person">' + esc(x.name) + "</span>", inline(x.role))).join(""));
+      if (g.dates.length) h += ref("dates", t("Даты"), g.dates.map((x) => pair('<span class="kw-date">' + esc(x.date) + "</span>", inline(x.event))).join(""));
+      if (g.formulas.length) h += ref("formulas", t("Формулы"), formulas);
+      if (c.remember.length) h += openCard("imp", "Важно", remember);
+      if (c.conclusion) h += openCard("concl", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
+      if (c.selfCheck.length)
+        h += '<section class="cn-qa"><h2 class="cn-qa-h">Вопросы и ответы</h2>' +
+          c.selfCheck
+            .map((x, i) =>
+              ref("cn-q", '<span class="cn-q-n">' + (i + 1) + '.</span><span class="cn-q-t">' + inline(x.q) + "</span>",
+                x.a ? '<p class="qa-a">' + inline(x.a) + "</p>" : '<p class="qa-a cn-muted">Ответ не указан.</p>', "div", "h3", "ref-q" + (i + 1)))
+            .join("") +
+          "</section>";
       return h + "</article>";
     }
 
