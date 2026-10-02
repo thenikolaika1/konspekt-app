@@ -1,0 +1,53 @@
+/* Classic Note v38 — визуально ближе к PWA «Физика 8» / «История 8».
+   Предмет задаёт акцент страницы, смысловые цвета карточек остаются одинаковыми. */
+.cn-v2{color:#25344a;font-size:15px;line-height:1.62}
+.cn-v2 .cn-sec{margin:0 0 26px}
+.cn-v2 .cn-h2{display:flex;align-items:flex-start;gap:10px;margin:24px 0 12px;color:#17243b;font-size:19px;line-height:1.28;font-weight:850;letter-spacing:-.3px}
+.cn-v2 .cn-num{flex:0 0 auto;min-width:29px;height:29px;padding:0 8px;border-radius:9px;background:#edf5fe;color:#0a7cf4;display:grid;place-items:center;font-size:14px;font-weight:850}
+.cn-v2 p{margin:9px 0}
+.cn-v2 strong{color:#101827;font-weight:850}
+.cn-v2 .kw-term,.cn-v2 .kw-def{color:#2f8b62;font-weight:850}
+.cn-v2 .kw-date{color:#a54858;font-weight:850}
+.cn-v2 .kw-person{color:#9a673e;font-weight:850}
+.cn-v2 .formula-inline{color:#0a7cf4;font-weight:850}
+
+/* Карточки: лёгкие, как в старых предметных PWA; без сплошной жёлтой заливки. */
+.cn-v2 .cn-box{margin:14px 0;border:1px solid #e3e8ef;border-left-width:5px;border-radius:11px;padding:12px 14px;background:#fff;box-shadow:none}
+.cn-v2 .cn-box-label{margin:0 0 6px;font-size:13px;font-weight:850;letter-spacing:.01em}
+.cn-v2 .cn-box p:last-child,.cn-v2 .cn-box ul:last-child,.cn-v2 .cn-box ol:last-child{margin-bottom:0}
+.cn-v2 .k-main{background:#f2f7fd;border-color:#0a7cf4}.cn-v2 .k-main .cn-box-label{color:#0a7cf4}
+.cn-v2 .k-def{background:#eef8f2;border-color:#2f8b62}.cn-v2 .k-def .cn-box-label{color:#2f8b62}
+.cn-v2 .k-info{background:#f3f8fd;border-color:#5b8fc5}.cn-v2 .k-info .cn-box-label{color:#3f709f}
+.cn-v2 .k-imp{background:#fbf0f2;border-color:#a54858}.cn-v2 .k-imp .cn-box-label{color:#a54858}
+.cn-v2 .k-concl{background:#eef8f2;border-color:#2f8b62}.cn-v2 .k-concl .cn-box-label{color:#2f8b62}
+.cn-v2 .k-cause{background:#fbf0f2;border-color:#a54858}.cn-v2 .k-cause .cn-box-label{color:#a54858}
+.cn-v2 .k-formula{background:#edf5fe;border-color:#0a7cf4}.cn-v2 .k-formula .cn-box-label{color:#0a7cf4}
+.cn-v2 .k-ex{background:#faf4ec;border-color:#9a673e}.cn-v2 .k-ex .cn-box-label{color:#9a673e}
+
+/* Таблица — отдельный учебный блок, а не жёлтая карточка. */
+.cn-v2 .table-wrap{margin:14px 0;border:1px solid #dfe6ee;border-radius:11px;overflow:hidden;background:#fff}
+.cn-v2 .note-table{width:100%;border-collapse:collapse;font-size:13px}
+.cn-v2 .note-table th{background:#f2f7fd;color:#244469;font-weight:800;text-align:left}
+.cn-v2 .note-table th,.cn-v2 .note-table td{padding:9px 10px;border-bottom:1px solid #e7ebf0}
+.cn-v2 .note-table tr:last-child td{border-bottom:0}
+
+/* Конечные блоки повторяют логику старых PWA: Важно — красный, Вывод — зелёный. */
+.cn-v2 .cn-end{margin:18px 0;border:1px solid #e3e8ef;border-left:5px solid;border-radius:11px;padding:13px 14px;background:#fff}
+.cn-v2 .cn-end-h{font-size:15px;margin:0 0 7px;font-weight:850}
+.cn-v2 .cn-end.k-imp{background:#fbf0f2;border-color:#a54858}.cn-v2 .cn-end.k-imp .cn-end-h{color:#a54858}
+.cn-v2 .cn-end.k-concl{background:#eef8f2;border-color:#2f8b62}.cn-v2 .cn-end.k-concl .cn-end-h{color:#2f8b62}
+
+/* Справочник и вопросы — белые компактные панели, цвет только в ключевых словах. */
+.cn-v2 .cn-ref{margin:10px 0;border:1px solid #e3e8ef;border-radius:11px;background:#fff;overflow:hidden}
+.cn-v2 .cn-ref-btn{color:#17243b;font-weight:800}
+.cn-v2 .cn-pair{border-top:1px solid #edf0f4}
+.cn-v2 .cn-qa{margin-top:24px}.cn-v2 .cn-qa-h{font-size:21px;color:#17243b;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #a54858}
+.cn-v2 .cn-q-n{color:#0a7cf4;font-weight:850}
+
+/* Биология не должна превращать весь конспект в зелёный: зелёный только для терминов/определений и выводов. */
+.nt-biology .cn-v2{--note-important:#a54858;--note-secondary:#2f8b62}
+.nt-biology .cn-v2 .cn-h2,.nt-biology .cn-v2 p,.nt-biology .cn-v2 li{color:#25344a}
+.nt-biology .cn-v2 strong{color:#101827}
+.nt-biology .cn-v2 .kw-term,.nt-biology .cn-v2 .kw-def{color:#2f8b62}
+
+@media(max-width:380px){.cn-v2{font-size:14px}.cn-v2 .cn-h2{font-size:18px}.cn-v2 .cn-box{padding:11px 12px}}
