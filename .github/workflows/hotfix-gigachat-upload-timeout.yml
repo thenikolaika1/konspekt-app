@@ -18,6 +18,8 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+      - name: Show Supabase CLI version
+        run: supabase --version
       - name: Download current production function
         run: |
           rm -rf supabase/functions/analyze-pages
@@ -42,7 +44,7 @@ jobs:
           count="$(printf '%s\n' "$changes" | sed '/^$/d' | wc -l)"
           test "$count" -eq 1
           printf '%s\n' "$changes" | grep -q 'providers.ts'
-      - name: Deploy patched production bundle
-        run: supabase functions deploy analyze-pages --project-ref "$PROJECT_REF" --use-api --no-verify-jwt
+      - name: Deploy patched production bundle with safe diagnostics
+        run: supabase functions deploy analyze-pages --project-ref "$PROJECT_REF" --use-api --no-verify-jwt --create-ticket
       - name: Verify active function
         run: supabase functions list --project-ref "$PROJECT_REF"
