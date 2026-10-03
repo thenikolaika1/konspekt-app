@@ -1,10 +1,6 @@
 name: Hotfix GigaChat upload timeout
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/hotfix-gigachat-upload-timeout.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,11 +22,26 @@ jobs:
         run: |
           rm -rf supabase/functions/analyze-pages
           supabase functions download analyze-pages --project-ref "$PROJECT_REF" --use-api
+          cp -a supabase/functions/analyze-pages /tmp/analyze-pages-production
       - name: Patch only GigaChat Files API upload timeout
         run: |
           python3 .github/scripts/hotfix_gigachat_upload_timeout.py
-          grep -q 'uploadMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
-          grep -q 'upload timeout' supabase/functions/analyze-pages/providers.ts
+          grep -q 'uploadRequestMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'signal: AbortSignal = ctrl.signal' supabase/functions/analyze-pages/providers.ts
+          grep -q 'api("/files", { method: "POST", body: form }, uploadCtrl.signal)' supabase/functions/analyze-pages/providers.ts
+          grep -q 'new ProviderError("AI_TIMEOUT", "upload timeout "' supabase/functions/analyze-pages/providers.ts
+      - name: Verify patch is local to providers.ts
+        run: |
+          test "$(diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages | wc -l)" -eq 1
+          diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages | grep -q 'providers.ts'
+          diff -u /tmp/analyze-pages-production/providers.ts supabase/functions/analyze-pages/providers.ts
+        continue-on-error: true
+      - name: Reject unexpected changed files
+        run: |
+          changes="$(diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages || true)"
+          count="$(printf '%s\n' "$changes" | sed '/^$/d' | wc -l)"
+          test "$count" -eq 1
+          printf '%s\n' "$changes" | grep -q 'providers.ts'
       - name: Deploy patched production bundle
         run: supabase functions deploy analyze-pages --project-ref "$PROJECT_REF" --use-api --no-verify-jwt
       - name: Verify active function
