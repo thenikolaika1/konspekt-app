@@ -1,0 +1,101 @@
+name: Hotfix GigaChat upload timeout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotfix-gigachat-upload-timeout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ohdeykbkgimvwstkwuuf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Download current production function
+        run: |
+          rm -rf supabase/functions/analyze-pages
+          supabase functions download analyze-pages --project-ref "$PROJECT_REF" --use-api
+      - name: Patch only GigaChat Files API upload timeout
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/functions/analyze-pages/providers.ts')
+          s = p.read_text()
+          old = '''  /** сколько страниц загружать в Files API одновременно: быстрее последовательной загрузки, без нагрузки на лимиты */
+  uploadConcurrency: 3,
+};'''
+          new = '''  /** сколько страниц загружать в Files API одновременно: быстрее последовательной загрузки, без нагрузки на лимиты */
+  uploadConcurrency: 3,
+  /** общий лимит этапа Files API; обычная загрузка занимает ~7–12 с, зависание не должно съедать весь AI-бюджет */
+  uploadMaxMs: 18_000,
+};'''
+          if s.count(old) != 1:
+              raise SystemExit('Expected GIGACHAT config block exactly once')
+          s = s.replace(old, new)
+          old2 = '''    stage = "upload";
+    t = Date.now();
+    await runPool(missing.map((u) => () => upload(u, urls.indexOf(u) + 1)), GIGACHAT.uploadConcurrency);
+    timings.uploadMs = Date.now() - t;'''
+          new2 = '''    stage = "upload";
+    t = Date.now();
+    const uploadCtrl = new AbortController();
+    const abortUploads = () => uploadCtrl.abort();
+    ctrl.signal.addEventListener("abort", abortUploads, { once: true });
+    const uploadTimer = setTimeout(() => uploadCtrl.abort(), Math.min(GIGACHAT.uploadMaxMs, Math.max(1, timeout - (Date.now() - started))));
+    try {
+      const uploadApi = async (url: string, n: number) => {
+        const { bytes, mime } = decodeDataUrl(url);
+        const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+        const form = new FormData();
+        form.append("file", new Blob([bytes], { type: mime }), "page-" + n + "." + ext);
+        form.append("purpose", "general");
+        for (let retried = false;; retried = true) {
+          const token = await gigaAccessToken(uploadCtrl.signal);
+          const res = await gigaFetch(GIGACHAT.apiUrl + "/files", { method: "POST", body: form, headers: { Authorization: "Bearer " + token, Accept: "application/json" } }, uploadCtrl.signal);
+          const body = await res.text();
+          if (res.status === 401 && !retried) {
+            if (gigaToken?.value === token) gigaToken = null;
+            continue;
+          }
+          if (!res.ok) throw fail(res.status, body);
+          let id = "";
+          try { id = String(JSON.parse(body).id || ""); } catch { /* no id */ }
+          if (!id) throw new ProviderError("AI_ERROR", "upload: no file id", "gigachat", res.status);
+          s.files.set(url, id);
+          uploaded++;
+          return;
+        }
+      };
+      await runPool(missing.map((u) => () => uploadApi(u, urls.indexOf(u) + 1)), GIGACHAT.uploadConcurrency);
+    } catch (e) {
+      if (uploadCtrl.signal.aborted && !ctrl.signal.aborted) {
+        throw new ProviderError("AI_TIMEOUT", "upload timeout " + GIGACHAT.uploadMaxMs + " ms", "gigachat");
+      }
+      throw e;
+    } finally {
+      clearTimeout(uploadTimer);
+      ctrl.signal.removeEventListener("abort", abortUploads);
+    }
+    timings.uploadMs = Date.now() - t;'''
+          if s.count(old2) != 1:
+              raise SystemExit('Expected upload stage exactly once')
+          s = s.replace(old2, new2)
+          p.write_text(s)
+          PY
+          grep -q 'uploadMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'upload timeout' supabase/functions/analyze-pages/providers.ts
+      - name: Deploy patched production bundle
+        run: supabase functions deploy analyze-pages --project-ref "$PROJECT_REF" --use-api --no-verify-jwt
+      - name: Verify active function
+        run: supabase functions list --project-ref "$PROJECT_REF"
