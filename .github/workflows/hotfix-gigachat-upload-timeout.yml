@@ -1,4 +1,4 @@
-name: Hotfix GigaChat upload timeout
+name: Hotfix AI provider budget
 
 on:
   workflow_dispatch:
@@ -20,31 +20,69 @@ jobs:
           version: latest
       - name: Show Supabase CLI version
         run: supabase --version
-      - name: Download current production function
+      - name: Download ACTIVE production function
         run: |
           rm -rf supabase/functions/analyze-pages
           supabase functions download analyze-pages --project-ref "$PROJECT_REF" --use-api
           cp -a supabase/functions/analyze-pages /tmp/analyze-pages-production
-      - name: Patch only GigaChat Files API upload timeout
+      - name: Require ACTIVE v17 Files hotfix invariants
         run: |
-          python3 .github/scripts/hotfix_gigachat_upload_timeout.py
           grep -q 'uploadRequestMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'uploadConcurrency: 3' supabase/functions/analyze-pages/providers.ts
           grep -q 'signal: AbortSignal = ctrl.signal' supabase/functions/analyze-pages/providers.ts
           grep -q 'api("/files", { method: "POST", body: form }, uploadCtrl.signal)' supabase/functions/analyze-pages/providers.ts
-          grep -q 'new ProviderError("AI_TIMEOUT", "upload timeout "' supabase/functions/analyze-pages/providers.ts
-      - name: Verify patch is local to providers.ts
+          grep -q 'const BUDGET_MS = 140_000' supabase/functions/analyze-pages/index.ts
+      - name: Patch only provider budget constants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/functions/analyze-pages/providers.ts')
+          s = p.read_text()
+          replacements = {
+              'primaryMaxMs: 105_000,': 'primaryMaxMs: 75_000,',
+              'fallbackReserveMs: 30_000,': 'fallbackReserveMs: 55_000,',
+              'lastReserveMs: 12_000,': 'lastReserveMs: 25_000,',
+          }
+          for old, new in replacements.items():
+              if s.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one ACTIVE production constant: {old}')
+              s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          grep -q 'primaryMaxMs: 75_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'fallbackReserveMs: 55_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'lastReserveMs: 25_000' supabase/functions/analyze-pages/providers.ts
+      - name: Validate diff is exactly three constant lines
         run: |
           test "$(diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages | wc -l)" -eq 1
           diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages | grep -q 'providers.ts'
-          diff -u /tmp/analyze-pages-production/providers.ts supabase/functions/analyze-pages/providers.ts
-        continue-on-error: true
-      - name: Reject unexpected changed files
+          diff -u /tmp/analyze-pages-production/providers.ts supabase/functions/analyze-pages/providers.ts | tee /tmp/budget.diff || true
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path('/tmp/budget.diff').read_text().splitlines()
+          removed = [x[1:].strip() for x in lines if x.startswith('-') and not x.startswith('---')]
+          added = [x[1:].strip() for x in lines if x.startswith('+') and not x.startswith('+++')]
+          expected_removed = {
+              'primaryMaxMs: 105_000,',
+              'fallbackReserveMs: 30_000,',
+              'lastReserveMs: 12_000,',
+          }
+          expected_added = {
+              'primaryMaxMs: 75_000,',
+              'fallbackReserveMs: 55_000,',
+              'lastReserveMs: 25_000,',
+          }
+          if set(removed) != expected_removed or set(added) != expected_added or len(removed) != 3 or len(added) != 3:
+              raise SystemExit(f'Unexpected diff. removed={removed!r} added={added!r}')
+          PY
+      - name: Re-check preserved v17 behavior
         run: |
-          changes="$(diff -qr /tmp/analyze-pages-production supabase/functions/analyze-pages || true)"
-          count="$(printf '%s\n' "$changes" | sed '/^$/d' | wc -l)"
-          test "$count" -eq 1
-          printf '%s\n' "$changes" | grep -q 'providers.ts'
-      - name: Deploy patched production bundle with safe diagnostics
+          grep -q 'uploadRequestMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'uploadConcurrency: 3' supabase/functions/analyze-pages/providers.ts
+          grep -q 'releaseGigaFiles(s)' supabase/functions/analyze-pages/providers.ts
+          grep -q 'const BUDGET_MS = 140_000' supabase/functions/analyze-pages/index.ts
+          grep -q 'const MIN_RETRY_MS = 45_000' supabase/functions/analyze-pages/index.ts
+      - name: Deploy patched ACTIVE production bundle
         run: supabase functions deploy analyze-pages --project-ref "$PROJECT_REF" --use-api --no-verify-jwt --create-ticket
       - name: Verify active function
         run: supabase functions list --project-ref "$PROJECT_REF"
