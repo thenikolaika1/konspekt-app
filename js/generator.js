@@ -9,7 +9,7 @@
  *   (после перезагрузки или из списка «Не удалось»).
  * analyzePages(pages) → Promise<StudyContent> — прежний mock-контракт, оставлен для совместимости.
  *
- * Ошибка — Error с кодом в message (NO_PAGES, NETWORK, UPLOAD_FAILED, AI_TIMEOUT, …).
+ * Ошибка — Error с кодом в message (NO_PAGES, NETWORK, CONNECTION_LOST, SERVER_TIMEOUT, UPLOAD_FAILED, AI_TIMEOUT, …).
  *
  * Защита от двойной генерации: пока идёт генерация тех же страниц, повторный вызов получает
  * тот же Promise; повтор после ошибки продолжает ту же note (тот же note_id, уже загруженные

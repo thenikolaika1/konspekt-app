@@ -6,7 +6,11 @@
  * Готовый content и статусы ready/failed пишет только Edge Function — клиент создаёт
  * note в статусе processing, читает свои notes, переименовывает и удаляет их.
  *
- * Ошибки — Error с кодом в message (NETWORK, AUTH_FAILED, UPLOAD_FAILED, …), как в generator.js.
+ * Ошибки — Error с кодом в message, как в generator.js:
+ *  - NETWORK — устройство действительно без сети (navigator.onLine === false);
+ *  - CONNECTION_LOST — сеть есть, но ответа сервера не было (Load failed / Failed to fetch);
+ *  - SERVER_TIMEOUT — сработал наш таймаут запроса;
+ *  - остальные коды (AUTH_FAILED, CREATE_FAILED, UPLOAD_FAILED, BAD_REQUEST, …) — сервер ответил ошибкой.
  */
 (() => {
   const K = (window.K = window.K || {});
@@ -25,39 +29,70 @@
   }));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  function fail(code, cause) {
-    const offline = navigator.onLine === false || /fetch|network|load failed|timed? ?out/i.test(String(cause?.message || cause || ""));
-    const e = new Error(offline && code !== "AUTH_FAILED" ? "NETWORK" : code);
+  // Таймауты только для шагов генерации, повтор которых идемпотентен (тот же note_id / тот же путь фото).
+  // Обычные значения в production: создание note 0.2–0.8 с, запуск analyze-pages 1.8–3.2 с,
+  // загрузка одной страницы (~0.3–0.85 МБ) около 2–2.5 с.
+  const CREATE_TIMEOUT_MS = cfg.createTimeoutMs || 15_000;
+  const START_TIMEOUT_MS = cfg.startTimeoutMs || 20_000;
+  const UPLOAD_TIMEOUT_MS = cfg.uploadTimeoutMs || 45_000;
+
+  /** Ответа сервера не было: обрыв связи, Load failed, отмена по таймауту. Определяется по форме ошибки, не по тексту. */
+  const noResponse = (err, status) =>
+    !!err && (status === 0 || ["FunctionsFetchError", "StorageUnknownError"].includes(err.name) || (err.name === "AuthRetryableFetchError" && !err.status));
+
+  /** Ошибка без ответа сервера: без сети — NETWORK, по нашему таймауту — SERVER_TIMEOUT, иначе CONNECTION_LOST. */
+  function connectionError(cause, timedOut) {
+    const e = new Error(navigator.onLine === false ? "NETWORK" : timedOut ? "SERVER_TIMEOUT" : "CONNECTION_LOST");
+    e.cause = cause;
+    e.transient = true;
+    return e;
+  }
+
+  /** Ошибка запроса: нет ответа сервера → connectionError, ответ сервера → его код (не маскируется под сеть). */
+  function fail(code, cause, status) {
+    if (noResponse(cause, status)) return connectionError(cause);
+    const e = new Error(code);
     e.cause = cause;
     return e;
   }
 
-  // iOS/Safari после закрытия камеры иногда на долю секунды возвращает Load failed.
-  // Повторяем только безопасные/idempotent операции и только сетевые сбои.
-  const transient = (e) => e?.message === "NETWORK" || /fetch|network|load failed|timed? ?out/i.test(String(e?.cause?.message || e?.message || e || ""));
+  /** Контроллер отмены с таймаутом; timedOut() — сработал ли именно таймаут. */
+  function timeoutController(ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return { signal: ctrl.signal, timedOut: () => ctrl.signal.aborted, done: () => clearTimeout(timer) };
+  }
+
+  // iOS/Safari после закрытия камеры иногда возвращает Load failed или подвисает.
+  // Повторяем только идемпотентные операции и только когда ответа сервера не было; без сети не повторяем.
   async function retryNetwork(fn, attempts = 3) {
-    let last;
-    for (let i = 0; i < attempts; i++) {
-      try { return await fn(); } catch (e) {
-        last = e;
-        if (!transient(e) || i === attempts - 1) throw e;
+    for (let i = 0; ; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (!e.transient || navigator.onLine === false || i === attempts - 1) throw e;
+        // исходная ошибка — только в консоль, пользователю показывается код
+        console.warn("[cloud] no server response, retry " + (i + 1) + ":", e.message, String(e.cause?.message || ""));
         await sleep(500 * 2 ** i);
       }
     }
-    throw last;
   }
 
   function ensureUser() {
     if (!userPromise) {
       userPromise = (async () => {
-        const { data } = await sb().auth.getSession();
+        const { data, error } = await sb().auth.getSession();
         if (data?.session?.user) return data.session.user;
+        // Сессия есть, но обновить токен не удалось (сеть, 5xx) — gotrue её сохранил. Новый анонимный вход
+        // здесь потерял бы все конспекты пользователя, поэтому — ошибка, повтор позже с тем же пользователем.
+        // Без ошибки сессии нет совсем, либо сервер отверг токен и gotrue сам удалил сессию.
+        if (error && error.name === "AuthRetryableFetchError") throw fail("AUTH_FAILED", error);
         const res = await sb().auth.signInAnonymously();
-        if (res.error || !res.data?.user) throw fail(navigator.onLine === false ? "NETWORK" : "AUTH_FAILED", res.error);
+        if (res.error || !res.data?.user) throw fail("AUTH_FAILED", res.error);
         return res.data.user;
       })().catch((e) => {
         userPromise = null;
-        throw e.message === "NETWORK" || e.message === "AUTH_FAILED" ? e : fail("AUTH_FAILED", e);
+        throw ["NETWORK", "CONNECTION_LOST", "AUTH_FAILED"].includes(e.message) ? e : fail("AUTH_FAILED", e);
       });
     }
     return userPromise;
@@ -65,55 +100,108 @@
 
   async function listNotes() {
     await ensureUser();
-    const { data, error } = await sb().from("notes").select(NOTE_COLS).order("created_at", { ascending: false });
-    if (error) throw fail("LOAD_FAILED", error);
+    const { data, error, status } = await sb().from("notes").select(NOTE_COLS).order("created_at", { ascending: false });
+    if (error) throw fail("LOAD_FAILED", error, status);
     return data || [];
   }
 
   async function getNote(id) {
     await ensureUser();
-    const { data, error } = await sb().from("notes").select(NOTE_COLS).eq("id", id).maybeSingle();
-    if (error) throw fail("LOAD_FAILED", error);
+    const { data, error, status } = await sb().from("notes").select(NOTE_COLS).eq("id", id).maybeSingle();
+    if (error) throw fail("LOAD_FAILED", error, status);
     return data;
   }
 
   async function createProcessingNote(id) {
     const user = await ensureUser();
     return retryNetwork(async () => {
-      const { error } = await sb().from("notes").insert({ id, user_id: user.id, status: "processing", stage: "uploading", title: "Новый конспект" });
-      // Один note_id генерируется заранее, поэтому повтор после неизвестного результата insert безопасен.
-      if (error && error.code !== "23505") throw fail("CREATE_FAILED", error);
+      const t = timeoutController(CREATE_TIMEOUT_MS);
+      try {
+        const { error, status } = await sb()
+          .from("notes")
+          .insert({ id, user_id: user.id, status: "processing", stage: "uploading", title: "Новый конспект" })
+          .abortSignal(t.signal);
+        // Один note_id генерируется заранее: если первый insert дошёл, а ответ потерялся, повтор получит 23505 — note уже есть.
+        if (!error || error.code === "23505") return;
+        if (noResponse(error, status)) throw connectionError(error, t.timedOut());
+        throw fail("CREATE_FAILED", error, status);
+      } finally {
+        t.done();
+      }
     });
   }
 
   async function renameNote(id, title) {
     await ensureUser();
-    const { error } = await sb().from("notes").update({ title }).eq("id", id);
-    if (error) throw fail("SAVE_FAILED", error);
+    const { error, status } = await sb().from("notes").update({ title }).eq("id", id);
+    if (error) throw fail("SAVE_FAILED", error, status);
   }
 
   async function deleteNote(id) {
     await ensureUser();
     await removeFolder(id).catch((e) => console.warn("[cloud] photos cleanup failed", e));
-    const { error } = await sb().from("notes").delete().eq("id", id);
-    if (error) throw fail("DELETE_FAILED", error);
+    const { error, status } = await sb().from("notes").delete().eq("id", id);
+    if (error) throw fail("DELETE_FAILED", error, status);
   }
 
   const folder = (user, noteId) => user.id + "/" + noteId;
 
+  /** Storage отказал, потому что объект с этим путём уже есть (upsert: false). */
+  const isDuplicate = (err) => !!err && (err.status === 409 || String(err.statusCode) === "409" || /already exists|duplicate/i.test(String(err.message)));
+
+  /**
+   * Объект по этому пути — именно эта страница: путь уникален для страницы (в имени её page.id, папку пишет
+   * только владелец — RLS), и размер совпадает с её файлом. null — проверить не удалось (нет ответа сервера).
+   */
+  async function isSameObject(bucket, path, blob) {
+    const cut = path.lastIndexOf("/");
+    const name = path.slice(cut + 1);
+    const { data, error } = await bucket.list(path.slice(0, cut), { search: name, limit: 10 });
+    if (error) return null;
+    const f = (data || []).find((x) => x.name === name);
+    return !!f && Number(f.metadata?.size) === blob.size;
+  }
+
+  /** Загрузка с таймаутом. Storage не принимает signal, поэтому зависший запрос не обрывается, а перестаёт ждаться:
+   *  повтор идёт по тому же пути, и если исходный запрос всё же дошёл, повтор получит «уже есть» и проверку. */
+  function uploadWithTimeout(bucket, path, blob) {
+    let timer;
+    const timeout = new Promise((r) => (timer = setTimeout(() => r({ error: { name: "StorageUnknownError", message: "client timeout" }, timedOut: true }), UPLOAD_TIMEOUT_MS)));
+    const req = bucket.upload(path, blob, { contentType: "image/jpeg", upsert: false }).catch((e) => ({ error: e }));
+    return Promise.race([req, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  /**
+   * Загружает страницы в temp-pages/{uid}/{noteId}/NN-{page.id}.jpg по порядку. Путь детерминирован: повтор
+   * (в том числе после «Повторить») пишет ту же страницу по тому же пути, дублей в папке note не бывает.
+   * done: Map page.id → path — уже загруженные страницы (при повторе не загружаются снова).
+   */
   async function uploadPages(noteId, pages, done) {
     const user = await ensureUser();
     const bucket = sb().storage.from(BUCKET);
     const uploadOne = async (page, i) => {
       if (done.has(page.id)) return;
-      const path = folder(user, noteId) + "/" + String(i + 1).padStart(2, "0") + "-" + K.uid() + ".jpg";
+      const path = folder(user, noteId) + "/" + String(i + 1).padStart(2, "0") + "-" + page.id + ".jpg";
       let lastError = null;
+      let timedOut = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt) await sleep(1000 * 2 ** attempt);
-        const { error } = await bucket.upload(path, page.blob, { contentType: "image/jpeg", upsert: false });
-        if (!error) return done.set(page.id, path);
-        lastError = error;
+        const res = await uploadWithTimeout(bucket, path, page.blob);
+        if (!res.error) return done.set(page.id, path);
+        lastError = res.error;
+        timedOut = !!res.timedOut;
+        if (isDuplicate(res.error)) {
+          // прошлая попытка дошла, а ответ потерялся: тот же объект — успех; другой объект — ошибка без повтора
+          const same = await isSameObject(bucket, path, page.blob);
+          if (same) return done.set(page.id, path);
+          if (same === false) throw fail("UPLOAD_FAILED", res.error);
+          lastError = { name: "StorageUnknownError", message: "duplicate not verified" }; // проверка без ответа сервера
+          continue;
+        }
+        // ответ сервера 4xx не повторяем; без ответа или 5xx — повтор по тому же пути
+        if (!noResponse(res.error) && !(res.error.status >= 500)) break;
       }
+      if (noResponse(lastError)) throw connectionError(lastError, timedOut);
       throw fail("UPLOAD_FAILED", lastError);
     };
     const queue = pages.map((p, i) => [p, i]);
@@ -152,13 +240,21 @@
   async function startAnalysis(noteId, paths) {
     await ensureUser();
     return retryNetwork(async () => {
-      const { data, error } = await sb().functions.invoke(cfg.analyzeFunction || "analyze-pages", { body: { note_id: noteId, paths } });
-      if (!error) return data;
-      let code = "";
-      try { code = (await error.context?.json())?.error || ""; } catch (e) {}
-      // Серверная блокировка делает повтор безопасным: второй AI-запрос для той же note не стартует.
-      if (code === "ALREADY_PROCESSING") return { status: "processing" };
-      throw fail(code || (error.name === "FunctionsFetchError" ? "NETWORK" : "START_FAILED"), error);
+      const t = timeoutController(START_TIMEOUT_MS);
+      try {
+        const { data, error } = await sb().functions.invoke(cfg.analyzeFunction || "analyze-pages", { body: { note_id: noteId, paths }, signal: t.signal });
+        if (!error) return data;
+        // запрос не дошёл или ответ потерян: повтор с тем же note_id безопасен (сервер не запустит второй AI-запрос)
+        if (noResponse(error)) throw connectionError(error.context || error, t.timedOut());
+        let code = "";
+        try { code = (await error.context?.json())?.error || ""; } catch (e) {}
+        // Серверная блокировка делает повтор безопасным: второй AI-запрос для той же note не стартует.
+        if (code === "ALREADY_PROCESSING") return { status: "processing" };
+        // ответ сервера (4xx/5xx, relay error) — его код, без повтора
+        throw fail(code || "START_FAILED", error);
+      } finally {
+        t.done();
+      }
     });
   }
 
