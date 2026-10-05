@@ -1,0 +1,90 @@
+name: Sync analyze-pages from production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ohdeykbkgimvwstkwuuf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Download ACTIVE production analyze-pages
+        run: |
+          rm -rf /tmp/production-analyze-pages
+          mkdir -p /tmp/production-analyze-pages
+          rm -rf /tmp/supabase-download
+          mkdir -p /tmp/supabase-download/supabase/functions
+          cd /tmp/supabase-download
+          supabase functions download analyze-pages --project-ref "$PROJECT_REF" --use-api
+          cp -a supabase/functions/analyze-pages/. /tmp/production-analyze-pages/
+
+      - name: Validate ACTIVE v18 invariants before sync
+        run: |
+          test "$(find /tmp/production-analyze-pages -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = "ca.ts index.ts prompt.ts providers.ts study-content.ts "
+          grep -q 'const BUDGET_MS = 140_000' /tmp/production-analyze-pages/index.ts
+          grep -q 'const MIN_RETRY_MS = 45_000' /tmp/production-analyze-pages/index.ts
+          grep -q 'primaryMaxMs: 75_000' /tmp/production-analyze-pages/providers.ts
+          grep -q 'fallbackReserveMs: 55_000' /tmp/production-analyze-pages/providers.ts
+          grep -q 'lastReserveMs: 25_000' /tmp/production-analyze-pages/providers.ts
+          grep -q 'uploadConcurrency: 3' /tmp/production-analyze-pages/providers.ts
+          grep -q 'uploadRequestMaxMs: 18_000' /tmp/production-analyze-pages/providers.ts
+          grep -q 'newGigaSession' /tmp/production-analyze-pages/index.ts
+          grep -q 'closeGigaSession' /tmp/production-analyze-pages/index.ts
+          grep -q 'api("/files", { method: "POST", body: form }, uploadCtrl.signal)' /tmp/production-analyze-pages/providers.ts
+          grep -q 'export const PROVIDER_ORDER: ProviderId\[\] = \["gigachat", "openrouter", "zai"\]' /tmp/production-analyze-pages/providers.ts
+
+      - name: Show complete function diff before sync
+        run: diff -ru supabase/functions/analyze-pages /tmp/production-analyze-pages || true
+
+      - name: Replace repository function with exact ACTIVE source
+        run: |
+          rm -rf supabase/functions/analyze-pages
+          mkdir -p supabase/functions/analyze-pages
+          cp -a /tmp/production-analyze-pages/. supabase/functions/analyze-pages/
+
+      - name: Verify exact byte-for-byte equivalence
+        run: diff -r --no-dereference supabase/functions/analyze-pages /tmp/production-analyze-pages
+
+      - name: Verify only analyze-pages source changed
+        run: |
+          changed="$(git diff --name-only)"
+          test -n "$changed"
+          if echo "$changed" | grep -v '^supabase/functions/analyze-pages/' ; then
+            echo 'Unexpected changed file outside analyze-pages' >&2
+            exit 1
+          fi
+
+      - name: Re-check repository invariants
+        run: |
+          grep -q 'const BUDGET_MS = 140_000' supabase/functions/analyze-pages/index.ts
+          grep -q 'const MIN_RETRY_MS = 45_000' supabase/functions/analyze-pages/index.ts
+          grep -q 'primaryMaxMs: 75_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'fallbackReserveMs: 55_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'lastReserveMs: 25_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'uploadConcurrency: 3' supabase/functions/analyze-pages/providers.ts
+          grep -q 'uploadRequestMaxMs: 18_000' supabase/functions/analyze-pages/providers.ts
+          grep -q 'export const PROVIDER_ORDER: ProviderId\[\] = \["gigachat", "openrouter", "zai"\]' supabase/functions/analyze-pages/providers.ts
+
+      - name: Commit exact production source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze-pages
+          git diff --cached --quiet && { echo 'Repository already matches ACTIVE production'; exit 0; }
+          git commit -m "Sync analyze-pages source with production v18"
+          git push origin HEAD:main
