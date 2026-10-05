@@ -319,6 +319,12 @@
       ? ' style="--kt-bg:' + b.color + (BM_INKS[b.color.toLowerCase()] ? ";--g-ink:" + BM_INKS[b.color.toLowerCase()] + ";--g-acc:" + BM_INKS[b.color.toLowerCase()] : "") + '"'
       : "";
 
+  // «Недавние» без конспектов: тихая подсказка под заголовком. Пока не завершилась первая загрузка облачного
+  // списка, подсказку не показываем — иначе при пустом локальном кэше она мелькнёт перед карточками.
+  let recentReady = generator.kind !== "cloud";
+  const RECENT_EMPTY =
+    '<div class="recent-empty"><strong>Здесь появятся твои конспекты</strong><p>Создай первый конспект — и он сохранится здесь.</p></div>';
+
   function home() {
     const notes = store.listNotes();
     return (
@@ -344,7 +350,7 @@
       '</div><div class="section-row"><h2>Недавние</h2><button class="link" data-go="all-notes">Все ›</button></div>' +
       (notes.length
         ? '<div class="note-list">' + notes.slice(0, 3).map(noteCard).join("") + "</div>"
-        : emptyState("Здесь появятся твои конспекты", "Создай первый конспект из страниц учебника")) +
+        : recentReady ? RECENT_EMPTY : "") +
       "</div>"
     );
   }
@@ -1128,6 +1134,13 @@
   const LIST_SCREENS = ["home", "all-notes", "bookmark", "bookmarks", "profile"];
   let pendingTimer = null;
 
+  /** Первая загрузка списка завершилась (успешно или с ошибкой): с этого момента пустые «Недавние» показывают подсказку. */
+  function markRecentReady() {
+    if (recentReady) return;
+    recentReady = true;
+    if (S.screen === "home" && !store.listNotes().length && !S.sheet) render();
+  }
+
   async function syncCloud() {
     clearTimeout(pendingTimer);
     try {
@@ -1137,6 +1150,7 @@
     } catch (e) {
       console.warn("[sync] failed", e.message);
     }
+    markRecentReady();
     if (store.listPending().length && document.visibilityState !== "hidden") pendingTimer = setTimeout(syncCloud, 5000);
   }
 
@@ -1476,4 +1490,6 @@
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && syncCloud());
 
   store.init().then(preloadThumbs).then(render).then(syncCloud);
+  // если первая загрузка зависла, подсказку всё равно показать — не держать пустое место под «Недавними»
+  setTimeout(markRecentReady, 6000);
 })();
