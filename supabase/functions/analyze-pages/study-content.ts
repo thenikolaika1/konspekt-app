@@ -529,6 +529,34 @@ export function qualityIssues(c: StudyContent, pageCount: number): string[] {
   return issues;
 }
 
+// Критические проблемы — результат нельзя показывать как конспект: модель не составила разделы,
+// текста почти нет или большая часть текста — нечитаемые слова (их удалит sanitize).
+// Только они запускают повторный AI-запрос; всё остальное из qualityIssues() — некритическое:
+// конспект сохраняется (после sanitize), проблемы пишутся в лог, второй долгий запрос не делается.
+const CRITICAL = {
+  minPerPage: 100, // знаков основного текста на читаемую страницу после sanitize — меньше значит «почти пусто»
+  maxBrokenShare: 0.4, // доля основного текста, которую sanitize удалил как нечитаемую
+};
+
+const mainLength = (c: StudyContent) => plain(mainTexts(c).join(" ")).length;
+
+export type CriticalCode = "NO_SECTIONS" | "TOO_SHORT" | "BROKEN_TEXT";
+
+/** Критические проблемы конспекта: code — для выбора кода ошибки, text — для повторного запроса к модели. */
+export function criticalIssues(c: StudyContent, pageCount: number): { code: CriticalCode; text: string }[] {
+  if (!c.sections.length)
+    return [{ code: "NO_SECTIONS", text: "в ответе нет ни одного раздела — составь конспект по пунктам учебника с фотографий" }];
+  const out: { code: CriticalCode; text: string }[] = [];
+  const before = mainLength(c);
+  const after = mainLength(sanitize(c).content);
+  const readable = Math.max(1, c.meta.pages.filter((p) => p.readable !== "unreadable").length || pageCount);
+  if (before > 0 && (before - after) / before > CRITICAL.maxBrokenShare)
+    out.push({ code: "BROKEN_TEXT", text: "больше " + Math.round(100 * CRITICAL.maxBrokenShare) + "% текста — слова со смесью латиницы и кириллицы: перечитай фотографии, русские слова пиши только кириллицей" });
+  if (after < CRITICAL.minPerPage * readable)
+    out.push({ code: "TOO_SHORT", text: "конспект почти пустой (" + after + " знаков на " + readable + " стр.): перескажи все пункты учебника с фотографий" });
+  return out;
+}
+
 // предложения внутри текста; разметка [t:…] не разрывается
 const splitSentences = (s: string) => s.split(/(?<=[.!?…])\s+(?=[«"(\[*A-ZА-ЯЁ0-9])/u);
 const isBroken = (s: string) => mixedScriptWords(s).length > 0;

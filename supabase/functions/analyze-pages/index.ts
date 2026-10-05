@@ -15,8 +15,8 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
-import { type ChatMessage, configuredProviders, generate, ProviderError, type ProviderId } from "./providers.ts";
-import { extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
+import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
+import { criticalIssues, extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -27,6 +27,8 @@ const STALE_MS = 5 * 60_000;
 const BUDGET_MS = 140_000;
 // повторный запрос к модели делаем, только если на него остаётся не меньше этого времени
 const MIN_RETRY_MS = 45_000;
+// и не меньше, чем длилась предыдущая попытка, с запасом: GigaChat с тем же промптом отвечает примерно столько же
+const RETRY_SLACK = 1.2;
 // GigaChat (Freemium), qwen/qwen3.8-27b:free и GLM-4.6V-Flash бесплатны; при смене модели здесь указывается цена за 1M токенов
 const PRICE_PER_M = { input: 0, output: 0 };
 
@@ -179,6 +181,16 @@ Deno.serve(async (req) => {
 
 // ---------- генерация ----------
 
+/**
+ * Хватит ли оставшегося времени на полноценный повтор: провайдер повтора получит
+ * min(primaryMaxMs, осталось − резерв на резервные провайдеры), и этого должно хватить
+ * на попытку не короче MIN_RETRY_MS и не короче предыдущей попытки с запасом.
+ */
+export function retryFits(remainingMs: number, lastAttemptMs: number): boolean {
+  const providerMs = Math.min(TIMEOUTS.primaryMaxMs, remainingMs - TIMEOUTS.fallbackReserveMs);
+  return providerMs >= Math.max(MIN_RETRY_MS, lastAttemptMs * RETRY_SLACK);
+}
+
 function checkQuota(_admin: SupabaseClient, _userId: string): Promise<string | null> {
   // Лимит можно включить позже, например: число строк ai_generations пользователя за сутки
   // больше N → return "RATE_LIMITED". Сейчас генерации не ограничены.
@@ -193,25 +205,55 @@ type Job = {
   paths: string[];
 };
 
+/** Как Promise.all(items.map(fn)), но не больше limit одновременно; порядок результатов сохраняется. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** Код ошибки для конспекта, который так и остался критически плохим. */
+const criticalCode = (issues: { code: string }[]) => (issues.some((i) => i.code === "BROKEN_TEXT") ? "UNREADABLE_PAGES" : "EMPTY_CONTENT");
+
+type Candidate = { content: StudyContent; critical: { code: string; text: string }[]; issues: string[]; model: string; provider: ProviderId };
+/** Лучший из вариантов: меньше критических проблем, затем меньше некритических (при равенстве — более новый). */
+const better = (a: Candidate, b: Candidate | null) =>
+  !b || a.critical.length < b.critical.length || (a.critical.length === b.critical.length && a.issues.length <= b.issues.length);
+
 async function processNote(job: Job) {
   const { admin, storage, noteId, userId, paths } = job;
   const started = Date.now();
   const deadline = started + BUDGET_MS;
   const usage = { input: 0, output: 0, model: "" };
+  const giga = newGigaSession();
+  // безопасные метрики времени: только числа, имена провайдеров и коды — без ключей, токенов, изображений и текста
+  const m = {
+    page_count: paths.length, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
+    sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
+    retry_used: false, fallback_used: false, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "", error_code: "",
+  };
   let aiCalled = false;
+  let t = Date.now();
 
   try {
-    // 6. фотографии из private bucket, в порядке страниц
-    const images: string[] = [];
-    for (const path of paths) {
+    // 6. фотографии из private bucket, в порядке страниц (до 4 одновременно)
+    const images = await mapLimit(paths, 4, async (path) => {
       const { data, error } = await storage.storage.from(BUCKET).download(path);
       if (error || !data) throw new StepError("STORAGE_READ_FAILED", error?.message || "no data");
       if (data.size > MAX_IMAGE_BYTES) throw new StepError("IMAGE_TOO_LARGE");
       const mime = /^image\/(jpeg|png|webp)$/.test(data.type) ? data.type : "image/jpeg";
-      images.push("data:" + mime + ";base64," + encodeBase64(new Uint8Array(await data.arrayBuffer())));
-    }
+      return "data:" + mime + ";base64," + encodeBase64(new Uint8Array(await data.arrayBuffer()));
+    });
+    m.storage_ms = Date.now() - t;
 
-    // 7–10. все страницы одним запросом; строгий JSON; при нарушении формата — один повтор с перечнем проблем
+    // 7–10. все страницы одним запросом; строгий JSON. Повтор — только при критических проблемах
     const messages: ChatMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -224,46 +266,73 @@ async function processNote(job: Job) {
     ];
 
     // model — модель, которая дала этот вариант (в ai_generations пишется модель итогового конспекта)
-    let best: { content: StudyContent; issues: string[]; model: string } | null = null;
+    let best: Candidate | null = null;
     let last: ReturnType<typeof validateStudyContent> | null = null;
-    // повтор по качеству идёт к тому же провайдеру; резервный подключается только при ошибке провайдера
+    // повтор идёт к тому же провайдеру (GigaChat переиспользует загруженные страницы); резервный — только при ошибке провайдера
     let used: ProviderId | undefined;
+    let lastMs = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0 && deadline - Date.now() < MIN_RETRY_MS) break;
+      if (attempt > 0 && !retryFits(deadline - Date.now(), lastMs)) {
+        // полноценный повтор не успеет — заведомо обречённый запрос не начинаем
+        console.warn("[analyze-pages] retry skipped: not enough time (" + (deadline - Date.now()) + " ms left, last attempt " + lastMs + " ms)");
+        break;
+      }
       aiCalled = true;
+      m.attempts++;
+      if (attempt > 0) m.retry_used = true;
       let reply;
+      const attemptStarted = Date.now();
       try {
-        reply = await generate(messages, deadline, used);
+        reply = await generate(messages, deadline, used, giga);
       } catch (e) {
-        // повтор не удался из-за провайдеров — сохраняем уже полученный первый вариант
+        if (attempt > 0) m.retry_ms = Date.now() - attemptStarted;
+        // повтор не удался из-за провайдеров — остаётся уже полученный вариант
         if (best && e instanceof ProviderError) {
           console.warn("[analyze-pages] retry failed:", e.code, "— keeping first result");
           break;
         }
         throw e;
       }
+      lastMs = Date.now() - attemptStarted;
+      if (attempt > 0) m.retry_ms = lastMs;
       used = reply.provider;
+      m.provider = reply.provider;
       usage.model = reply.model;
       usage.input += reply.inputTokens;
       usage.output += reply.outputTokens;
+      m.oauth_ms += reply.timings.oauthMs;
+      m.upload_ms += reply.timings.uploadMs;
+      m.chat_ms += reply.timings.chatMs;
+      if (reply.fallbacks.length) m.fallback_used = true;
+
+      t = Date.now();
       const parsed = extractJson(reply.text);
       const result: ReturnType<typeof validateStudyContent> = parsed
         ? validateStudyContent(parsed, images.length)
         : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : "not json" };
+      m.parse_ms += Date.now() - t;
       last = result;
       let problems: string[];
       if (result.ok) {
-        // 11. формат Classic Note: пересказ, дубли, лишние блоки, артефакты распознавания
-        const issues = qualityIssues(result.content, images.length);
-        if (!best || issues.length <= best.issues.length) best = { content: result.content, issues, model: reply.model };
-        if (!issues.length) break;
-        problems = issues;
+        // 11. критические проблемы → повтор; некритические (оформление, выделения, sourceOutline…) → только в лог
+        t = Date.now();
+        const candidate: Candidate = {
+          content: result.content,
+          critical: criticalIssues(result.content, images.length),
+          issues: qualityIssues(result.content, images.length),
+          model: reply.model,
+          provider: reply.provider,
+        };
+        m.quality_ms += Date.now() - t;
+        if (better(candidate, best)) best = candidate;
+        if (!candidate.critical.length) break;
+        problems = [...candidate.critical.map((i) => i.text), ...candidate.issues];
       } else {
         // страницы действительно не читаются — повтор не поможет
         if (result.code === "UNREADABLE_PAGES" && !best) break;
         problems = [result.code === "AI_BAD_JSON" ? "ответ не является корректным JSON по схеме (" + result.reason + ")" : "в ответе нет ни разделов, ни терминов"];
       }
-      console.warn("[analyze-pages] attempt", attempt + 1, "issues:", problems.join(" | "));
+      console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
       messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
       messages.push({ role: "user", content: retryPrompt(problems) });
     }
@@ -271,15 +340,23 @@ async function processNote(job: Job) {
       if (!last) throw new StepError("AI_TIMEOUT");
       throw new StepError(last.ok ? "EMPTY_CONTENT" : last.code, last.ok ? "" : last.reason);
     }
+    m.critical = best.critical.length;
+    m.minor = best.issues.length;
+    // результат остался критически плохим (повтор не успел или не помог) — не сохраняем его как конспект
+    if (best.critical.length) throw new StepError(criticalCode(best.critical), best.critical.map((i) => i.code).join(","));
     if (best.issues.length) console.warn("[analyze-pages] accepted with issues:", best.issues.join(" | "));
     usage.model = best.model;
+    m.provider = best.provider;
 
     // консервативная чистка: только удаление лишнего и явно повреждённого, без правки текста
+    t = Date.now();
     const { content, report } = sanitize(best.content);
+    m.sanitize_ms = Date.now() - t;
     if (report.length) console.warn("[analyze-pages] sanitize:", report.join(" | "));
     if (!content.sections.length && !content.glossary.terms.length) throw new StepError("EMPTY_CONTENT", "empty after sanitize");
 
     // 15. успех: content, статус, данные для списков
+    t = Date.now();
     const { error: saveError } = await admin
       .from("notes")
       .update({
@@ -295,20 +372,29 @@ async function processNote(job: Job) {
       })
       .eq("id", noteId)
       .eq("user_id", userId);
+    m.save_ms = Date.now() - t;
     if (saveError) throw new StepError("SAVE_FAILED", saveError.message);
+    m.status = "ready";
 
     await logGeneration(admin, job, "success", usage, Date.now() - started);
 
-    // временные фотографии больше не нужны: вся папка note (включая дубли от повторных загрузок)
+    // временные фотографии больше не нужны: вся папка note (включая дубли от повторных загрузок) и файлы GigaChat
+    t = Date.now();
     const folder = userId + "/" + noteId;
-    const { data: listed } = await storage.storage.from(BUCKET).list(folder, { limit: 100 });
-    const toRemove = [...new Set([...paths, ...(listed || []).filter((f) => f.id).map((f) => folder + "/" + f.name)])];
-    const { error: removeError } = await storage.storage.from(BUCKET).remove(toRemove);
-    if (removeError) console.warn("[analyze-pages] cleanup failed:", removeError.message);
+    const storageCleanup = (async () => {
+      const { data: listed } = await storage.storage.from(BUCKET).list(folder, { limit: 100 });
+      const toRemove = [...new Set([...paths, ...(listed || []).filter((f) => f.id).map((f) => folder + "/" + f.name)])];
+      const { error: removeError } = await storage.storage.from(BUCKET).remove(toRemove);
+      if (removeError) console.warn("[analyze-pages] cleanup failed:", removeError.message);
+    })();
+    await Promise.all([storageCleanup, closeGigaSession(giga)]);
+    m.cleanup_ms = Date.now() - t;
   } catch (e) {
     // 16. ошибка: сначала записываем failed, фотографии остаются для повтора
     const known = e instanceof StepError || e instanceof ProviderError;
     const code = known ? e.code : "INTERNAL";
+    m.status = "failed";
+    m.error_code = code;
     console.error("[analyze-pages] failed:", code, known ? e.detail : String(e));
     const { error: failError } = await admin
       .from("notes")
@@ -317,6 +403,15 @@ async function processNote(job: Job) {
       .eq("user_id", userId);
     if (failError) console.error("[analyze-pages] could not mark failed:", failError.message);
     if (aiCalled) await logGeneration(admin, job, "failed", usage, Date.now() - started);
+  } finally {
+    // файлы GigaChat удаляются в любом случае (после успеха — уже удалены выше, здесь ничего не делается)
+    const leftover = await closeGigaSession(giga);
+    if (m.status !== "ready") m.cleanup_ms = leftover;
+    m.model = usage.model;
+    m.input_tokens = usage.input;
+    m.output_tokens = usage.output;
+    m.total_ms = Date.now() - started;
+    console.log("[analyze-pages] metrics " + JSON.stringify(m));
   }
 }
 
