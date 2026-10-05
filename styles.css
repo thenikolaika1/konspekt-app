@@ -1012,10 +1012,6 @@ ol.cn-list li::marker{font-weight:800;color:var(--note-primary-ink);font-size:1e
 /* пустое состояние */
 .empty-art{display:block;width:120px;height:96px;margin:4px auto 10px}
 .empty strong{color:var(--k-ink)}
-/* «Недавние» без конспектов: только текст, без карточки и иллюстрации */
-.recent-empty{padding:2px 0 6px}
-.recent-empty strong{display:block;font-size:15px;line-height:20px;font-weight:700;color:var(--k-ink)}
-.recent-empty p{margin:4px 0 0;font-size:13px;line-height:18px;color:var(--k-muted)}
 
 /* листы: цветные плашки иконок действий */
 .sheet{background:linear-gradient(180deg,#fff 0%,#fffdf9 100%)}
