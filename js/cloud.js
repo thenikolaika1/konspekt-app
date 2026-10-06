@@ -1,6 +1,6 @@
 /*
- * Supabase: анонимный вход, конспекты (public.notes), временные фото (Storage temp-pages)
- * и запуск Edge Function analyze-pages.
+ * Supabase: анонимный вход, конспекты (public.notes), временные фото (Storage temp-pages),
+ * запуск Edge Function analyze-pages и ранний доступ (get_my_access, redeem_beta_invite).
  *
  * Браузер использует только publishable key (js/config.js); все права ограничены RLS.
  * Готовый content и статусы ready/failed пишет только Edge Function — клиент создаёт
@@ -274,5 +274,40 @@
     throw new Error("STILL_PROCESSING");
   }
 
-  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote };
+  // ---------- ранний доступ (Friends & Family): источник истины — сервер ----------
+  // Клиент ничего не считает сам: quota, used и remaining приходят из get_my_access().
+
+  const ACCESS_TIMEOUT_MS = cfg.accessTimeoutMs || 15_000;
+
+  /** RPC с таймаутом: нет ответа сервера → connectionError, ответ сервера с ошибкой → code (не «нет доступа»). */
+  async function callRpc(fn, args, code) {
+    const t = timeoutController(ACCESS_TIMEOUT_MS);
+    try {
+      const { data, error, status } = await sb().rpc(fn, args).abortSignal(t.signal);
+      if (!error) return data;
+      if (noResponse(error, status)) throw connectionError(error, t.timedOut());
+      throw fail(code, error, status);
+    } finally {
+      t.done();
+    }
+  }
+
+  /** Доступ к генерации конспектов: { plan, quota, used, reserved, remaining, available } или null — доступа нет. */
+  async function getAccess() {
+    await ensureUser();
+    const rows = await retryNetwork(() => callRpc("get_my_access", undefined, "ACCESS_FAILED"));
+    return (Array.isArray(rows) ? rows : []).find((r) => r.resource === "text_generation") || null;
+  }
+
+  /**
+   * Активация кода приглашения для текущего пользователя: { result: activated | already_active | invalid, access }.
+   * Код уходит только в теле запроса; здесь он не сохраняется и не пишется в журнал.
+   */
+  async function redeemInvite(code) {
+    await ensureUser();
+    const data = await callRpc("redeem_beta_invite", { p_code: code }, "REDEEM_FAILED");
+    return { result: data?.result || "invalid", access: data?.access || null };
+  }
+
+  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote, getAccess, redeemInvite };
 })();

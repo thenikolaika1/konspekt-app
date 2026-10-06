@@ -7,7 +7,7 @@
  * отрисовка — K.modes.classic (js/classic-renderer.js). Генерация — K.generator.
  */
 (() => {
-  const { esc, study, store, images, generator, modes } = window.K;
+  const { esc, study, store, images, generator, modes, cloud } = window.K;
   const root = document.querySelector("#app"),
     cam = document.querySelector("#cameraInput"),
     gallery = document.querySelector("#galleryInput");
@@ -40,6 +40,9 @@
     draftBookmark: { icon: "book", color: BM_COLORS[0] },
     editBookmarkId: null,
     bookmarkForNote: null,
+    // ранний доступ: "off" — без Supabase (mock); "unknown" — сервер ещё не ответил или нет связи (приложение работает как обычно);
+    // "ok" — доступ есть, info — ответ get_my_access(); "none" — сервер ответил, что доступа нет
+    access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null },
   };
 
   const icon = (n) => {
@@ -99,11 +102,12 @@
   // scr-<экран> — чтобы стили экрана не задевали другие экраны
   const app = (c) => '<div class="app scr-' + S.screen + " " + (c || "") + '">';
 
-  const plural = (n, one, few, many) => {
+  // форма слова по числу: 1, 21 — one; 2–4, 22–24 — few; 0, 5–20, 11–14, 25… — many
+  const pluralForm = (n, one, few, many) => {
     const m10 = n % 10, m100 = n % 100;
-    const w = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
-    return n + " " + w;
+    return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
   };
+  const plural = (n, one, few, many) => n + " " + pluralForm(n, one, few, many);
   const notesCount = (n) => plural(n, "конспект", "конспекта", "конспектов");
 
   const MONTHS = ["янв.", "февр.", "марта", "апр.", "мая", "июня", "июля", "авг.", "сент.", "окт.", "нояб.", "дек."];
@@ -319,7 +323,38 @@
       ? ' style="--kt-bg:' + b.color + (BM_INKS[b.color.toLowerCase()] ? ";--g-ink:" + BM_INKS[b.color.toLowerCase()] + ";--g-acc:" + BM_INKS[b.color.toLowerCase()] : "") + '"'
       : "";
 
+  // ---------- ранний доступ ----------
+
+  const hasAccess = () => S.access.state === "ok";
+  const limitReached = () => hasAccess() && S.access.info.remaining <= 0;
+  // «Остался 1 конспект», «Осталось 2 конспекта», «Осталось 100 конспектов» — число только с сервера
+  const remainingText = (n) => pluralForm(n, "Остался", "Осталось", "Осталось") + " " + notesCount(n);
+
+  function earlyAccess() {
+    return (
+      app("welcome access") +
+      logo() +
+      brand() +
+      '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
+      '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
+      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button></div>'
+    );
+  }
+
+  // блок создания конспекта: обычный, с остатком или «закончились» (числа — из get_my_access)
+  function heroBody() {
+    const a = S.access.info;
+    if (limitReached())
+      return '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
+    return (
+      "<h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p>" +
+      (hasAccess() ? '<div class="hero-quota">' + esc(remainingText(a.remaining)) + "</div>" : "") +
+      '<button class="primary" data-go="camera">' + icon("camera") + "Сфотографировать</button>"
+    );
+  }
+
   function home() {
+    if (S.access.state === "none") return earlyAccess();
     const notes = store.listNotes();
     return (
       app() +
@@ -337,9 +372,8 @@
         .join("") +
       '<button class="bm" data-go="bookmarks"><div class="bm-icon kt tone-more">' +
       bmGlyph("more") +
-      '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() + '<div class="hero-label">' + icon("sparkle") + 'AI КОНСПЕКТ</div><h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p><button class="primary" data-go="camera">' +
-      icon("camera") +
-      "Сфотографировать</button>" +
+      '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() + '<div class="hero-label">' + icon("sparkle") + "AI КОНСПЕКТ</div>" +
+      heroBody() +
       art("scan") +
       '</div><div class="section-row"><h2>Недавние</h2><button class="link" data-go="all-notes">Все ›</button></div>' +
       (notes.length
@@ -1099,6 +1133,7 @@
       store.markOpened(n.id);
       S.history = ["home"];
       go("note", false);
+      refreshAccess();
     } catch (e) {
       if (run !== S.gen.run) return;
       console.error("[generation] failed", e);
@@ -1138,6 +1173,73 @@
       console.warn("[sync] failed", e.message);
     }
     if (store.listPending().length && document.visibilityState !== "hidden") pendingTimer = setTimeout(syncCloud, 5000);
+  }
+
+  // ---------- ранний доступ: состояние с сервера ----------
+
+  let accessPromise = null;
+
+  /** Новое состояние доступа с сервера; главная перерисовывается, только если оно изменилось. */
+  function setAccess(info, quiet) {
+    const next = { state: info ? "ok" : "none", info: info || null };
+    if (JSON.stringify(next) === JSON.stringify(S.access)) return;
+    S.access = next;
+    // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
+    if (!quiet && !firstPaint && S.screen === "home" && !S.sheet && !document.activeElement?.matches?.("input")) render();
+  }
+
+  /**
+   * Перечитать доступ (get_my_access). Без ответа сервера или при ошибке сервера состояние не меняется:
+   * сбой связи — не «нет доступа», экран и данные остаются как были, новый анонимный пользователь не создаётся.
+   */
+  function refreshAccess() {
+    if (S.access.state === "off") return Promise.resolve();
+    if (!accessPromise)
+      accessPromise = cloud
+        .getAccess()
+        .then((info) => setAccess(info), (e) => console.warn("[access] check failed", e.message))
+        .finally(() => (accessPromise = null));
+    return accessPromise;
+  }
+
+  const REDEEM_ERRORS = {
+    INVALID: "Код не подошёл. Проверь его и попробуй ещё раз.",
+    NETWORK: "Нет подключения к интернету. Проверь подключение и попробуй ещё раз.",
+    CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
+    SERVER_TIMEOUT: "Сервер не ответил вовремя. Попробуй ещё раз через минуту.",
+    AUTH_FAILED: "Не удалось подключиться к серверу. Попробуй ещё раз.",
+  };
+
+  // Экран кода не перерисовывается во время проверки, чтобы не потерять введённый код при ошибке.
+  function redeemUi(busy, message) {
+    const btn = root.querySelector("[data-redeem]");
+    const err = root.querySelector(".invite-error");
+    if (btn) {
+      btn.disabled = busy;
+      btn.textContent = busy ? "Проверяем…" : "Активировать";
+    }
+    if (err) err.textContent = message || "";
+  }
+
+  async function redeemCode() {
+    const field = root.querySelector("#inviteCode");
+    const code = field?.value.trim();
+    if (!code) return field?.focus();
+    redeemUi(true, "");
+    let res;
+    try {
+      res = await cloud.redeemInvite(code);
+    } catch (e) {
+      // сам код в журнал не попадает — только код ошибки
+      console.warn("[access] redeem failed", e.message);
+      return redeemUi(false, REDEEM_ERRORS[e.message] || "Что-то пошло не так. Попробуй ещё раз.");
+    }
+    if (res.result !== "activated" && res.result !== "already_active") return redeemUi(false, REDEEM_ERRORS.INVALID);
+    field.value = ""; // открытый код больше нигде не хранится
+    if (res.access) setAccess(res.access, true);
+    await refreshAccess(); // перечитываем доступ с сервера; без связи остаётся ответ активации
+    if (S.access.state === "none") return redeemUi(false, "Не удалось проверить доступ. Попробуй ещё раз.");
+    render();
   }
 
   // ---------- events ----------
@@ -1182,6 +1284,8 @@
     if ((x = el("[data-backdrop]")) && t === x) return closeSheet();
     if (el("[data-close]")) return closeSheet();
     if (el("[data-back]")) return back();
+
+    if (el("[data-redeem]")) return redeemCode();
 
     if (el("[data-start]")) {
       localStorage.setItem("k-first", "1");
@@ -1291,6 +1395,8 @@
     // навигация
     if ((x = el("[data-go]"))) {
       const to = x.dataset.go;
+      // без доступа и после «закончились» камеры на главной нет (это не защита лимита: её делает сервер)
+      if (to === "camera" && (S.access.state === "none" || limitReached())) return render();
       if (to === "new-bookmark") {
         S.editBookmarkId = null;
         S.bookmarkForNote = null;
@@ -1397,6 +1503,7 @@
 
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
+    if (e.key === "Enter" && e.target.id === "inviteCode") root.querySelector("[data-redeem]")?.click();
     if (e.key === "Enter" && e.target.id === "inNoteSearch") {
       e.preventDefault();
       nextNoteHit();
@@ -1406,7 +1513,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],.fab";
   root.addEventListener("click", (e) => {
@@ -1473,7 +1580,20 @@
   };
 
   // вернулись в приложение — обновляем облачные конспекты (в том числе те, что создавались без нас)
-  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && syncCloud());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    syncCloud();
+    refreshAccess();
+  });
 
-  store.init().then(preloadThumbs).then(render).then(syncCloud);
+  // Главную рисуем, когда известен доступ (не дольше ACCESS_WAIT_MS): иначе у пользователя без доступа мелькнёт
+  // обычный экран. Не дождались (медленная сеть, офлайн) — обычный экран, доступ подставится, когда придёт ответ.
+  const ACCESS_WAIT_MS = 1500;
+  const firstAccess = refreshAccess();
+  store
+    .init()
+    .then(preloadThumbs)
+    .then(() => S.screen === "home" && Promise.race([firstAccess, new Promise((r) => setTimeout(r, ACCESS_WAIT_MS))]))
+    .then(render)
+    .then(syncCloud);
 })();

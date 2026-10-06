@@ -1336,3 +1336,14 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 .cn-q .cn-ref-body{padding:0 14px 12px 44px}
 .cn-body.cn-v2 .cn-q .qa-a{margin:0;font-size:15.5px;line-height:1.47;color:var(--c2-text)}
 .cn-v2 .cn-muted{color:var(--c2-muted)}
+
+/* ранний доступ (F&F): остаток на главной и экран кода приглашения */
+.hero-quota{position:relative;z-index:3;display:inline-block;margin:-4px 0 14px;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.9);border:1px solid #cfe1fa;color:var(--blue-deep,var(--blue));font-size:13px;font-weight:650;line-height:16px}
+.hero .hero-limit-title{position:relative;z-index:3;max-width:58%;font-size:22px;line-height:1.15}
+.hero .hero-limit{margin-bottom:4px}
+.access .invite-form{width:100%;margin-top:30px}
+.access .invite-field{background:#fff;text-align:center;font-size:18px;font-weight:650;letter-spacing:1.5px;text-transform:uppercase;color:var(--navy);height:52px}
+.access .invite-field::placeholder{color:#b5bfcf;font-weight:500}
+.access .invite-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.12)}
+.access .invite-error{min-height:20px;margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
+.access .primary:disabled{opacity:.7}
