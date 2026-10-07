@@ -23,6 +23,8 @@ const MAX_PAGES = 8;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 // генерация, которая «висит» в analyzing дольше этого, считается прерванной — её можно запустить снова
 const STALE_MS = 5 * 60_000;
+// резерв операции лимита (F&F) живёт дольше бюджета генерации: если функцию прервали, резерв истечёт сам
+const LEASE_S = 600;
 // общий бюджет фоновой работы: меньше лимита времени Edge Function (150 с на бесплатном плане)
 const BUDGET_MS = 140_000;
 // повторный запрос к модели делаем, только если на него остаётся не меньше этого времени
@@ -142,27 +144,42 @@ Deno.serve(async (req) => {
   const quota = await checkQuota(admin, user.id);
   if (quota) return json(429, { error: quota }, cors);
 
-  // Атомарный захват: из uploading/failed или из «зависшей» генерации в analyzing.
-  // Второй одновременный запрос по той же note получит 0 строк — второй платной генерации не будет.
-  const now = new Date();
-  const staleIso = new Date(now.getTime() - STALE_MS).toISOString();
-  const { data: claimed, error: claimError } = await admin
-    .from("notes")
-    .update({ status: "processing", stage: "analyzing", error_code: null, updated_at: now.toISOString() })
-    .eq("id", noteId)
-    .eq("user_id", user.id)
-    .or(
-      "status.eq.failed," +
-        "and(status.eq.processing,stage.is.null)," +
-        "and(status.eq.processing,stage.neq.analyzing)," +
-        "and(status.eq.processing,stage.eq.analyzing,updated_at.lt." + staleIso + ")",
-    )
-    .select("id");
-  if (claimError) {
-    console.error("[analyze-pages] claim failed:", claimError.message);
+  // Атомарно в одной транзакции (start_text_generation, только service_role): захват note из uploading/failed
+  // или из «зависшей» генерации и резерв одной операции лимита раннего доступа (op = note_id).
+  // Второй одновременный запрос по той же note получит already_processing — второй платной генерации не будет;
+  // повтор той же note не занимает второй слот. Итог резерва фиксирует триггер на notes.status:
+  // ready → списан, failed → возвращён. Без права или при исчерпанном лимите AI не запускается.
+  const { data: start, error: startError } = await admin.rpc("start_text_generation", {
+    p_user_id: user.id,
+    p_note_id: noteId,
+    p_stale_seconds: STALE_MS / 1000,
+    p_lease_seconds: LEASE_S,
+  });
+  if (startError) {
+    console.error("[analyze-pages] start failed:", startError.message);
     return json(500, { error: "INTERNAL" }, cors);
   }
-  if (!claimed?.length) return json(409, { error: "ALREADY_PROCESSING" }, cors);
+  const result = typeof start?.result === "string" ? start.result : "";
+  if (result === "ready") return json(200, { status: "ready", note_id: noteId }, cors);
+  if (result === "not_found") return json(404, { error: "NOT_FOUND" }, cors);
+  if (result === "already_processing") return json(409, { error: "ALREADY_PROCESSING" }, cors);
+  if (result === "no_access" || result === "limit_reached") {
+    const code = result === "no_access" ? "NO_ACCESS" : "LIMIT_REACHED";
+    // note не остаётся «создаётся»: failed с причиной, фотографии сохраняются для повтора, когда доступ появится
+    const { error: markError } = await admin
+      .from("notes")
+      .update({ status: "failed", stage: "failed", error_code: code, updated_at: new Date().toISOString() })
+      .eq("id", noteId)
+      .eq("user_id", user.id)
+      .or("status.eq.failed,stage.is.null,stage.neq.analyzing");
+    if (markError) console.warn("[analyze-pages] could not mark " + code + ":", markError.message);
+    return json(403, { error: code }, cors);
+  }
+  if (result !== "started") {
+    // already_consumed (операция списана, а note не ready) и неизвестный ответ: AI не запускаем
+    console.error("[analyze-pages] start refused:", result || "no result");
+    return json(409, { error: result === "already_consumed" ? "ALREADY_CONSUMED" : "INTERNAL" }, cors);
+  }
 
   // Хранилище читаем от имени пользователя: RLS Storage дополнительно проверяет, что это его файлы
   const anon = publicKey();

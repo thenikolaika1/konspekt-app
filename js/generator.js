@@ -57,6 +57,16 @@
     throw new Error(row.error_code || "AI_ERROR");
   }
 
+  /** Запуск analyze-pages. Отказ по доступу сервер уже записал в note (failed) — в списке так же, без «Создаётся…». */
+  async function start(noteId, paths) {
+    try {
+      return await cloud.startAnalysis(noteId, paths);
+    } catch (e) {
+      if (e.message === "NO_ACCESS" || e.message === "LIMIT_REACHED") K.store.setLocalStatus(noteId, "failed", e.message);
+      throw e;
+    }
+  }
+
   async function cloudGenerate(pages, opts) {
     const key = keyOf(pages);
     // другой набор страниц — новая генерация; незавершённая прежняя note без результата убирается
@@ -84,7 +94,7 @@
     }
 
     stage("analyze");
-    await cloud.startAnalysis(job.noteId, paths);
+    await start(job.noteId, paths);
     const n = settle(await cloud.waitForNote(job.noteId, opts));
     if (current === job) current = null;
     return n;
@@ -108,7 +118,7 @@
     const paths = await cloud.listPagePaths(noteId);
     if (!paths.length) throw new Error("PAGES_MISSING");
     stage("analyze");
-    await cloud.startAnalysis(noteId, paths);
+    await start(noteId, paths);
     return settle(await cloud.waitForNote(noteId, opts));
   }
 
