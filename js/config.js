@@ -15,5 +15,10 @@
     supabaseKey: "sb_publishable_7t0cfHxy6z5QU4N1qW-4Og_6qcPhaQ_",
     analyzeFunction: "analyze-pages",
     pagesBucket: "temp-pages",
+    // Маршруты к тому же проекту Supabase. ru — прокси на площадке, доступной из России без VPN
+    // (deploy/ru-proxy): прямые соединения с Supabase (Cloudflare) российские провайдеры обрывают после ~16 КБ.
+    // Пустой адрес — маршрут выключен. route — маршрут по умолчанию; ?route=ru|direct — проверка на устройстве.
+    routes: { ru: "" },
+    route: "direct",
   };
 })();

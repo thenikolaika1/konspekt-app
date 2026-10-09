@@ -24,8 +24,29 @@
   let client = null;
   let userPromise = null;
 
-  const sb = () => client || (client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  /**
+   * Адрес API: прямой (supabaseUrl) или прокси из cfg.routes. Только адреса из config.js — маршрут из ссылки
+   * (?route=ru) выбирается из этого списка, произвольный адрес не принимается (иначе ссылкой можно было бы
+   * увести токены). Выбор по ссылке запоминается на устройстве; ?route=direct возвращает прямой маршрут.
+   */
+  function apiBase() {
+    const routes = { direct: cfg.supabaseUrl };
+    for (const [name, url] of Object.entries(cfg.routes || {})) if (/^https:\/\/[^/]+\/?$/.test(url || "")) routes[name] = url.replace(/\/$/, "");
+    let name = routes[cfg.route] ? cfg.route : "direct";
+    try {
+      const asked = new URLSearchParams(location.search).get("route");
+      if (asked && routes[asked]) localStorage.setItem("konspekt.route", asked);
+      const saved = localStorage.getItem("konspekt.route");
+      if (saved && routes[saved]) name = saved;
+    } catch (e) {}
+    return routes[name];
+  }
+
+  // Сессия хранится под ключом проекта, а не адреса: смена маршрута не создаёт нового анонимного пользователя
+  const STORAGE_KEY = "sb-" + new URL(cfg.supabaseUrl || "https://x.invalid").hostname.split(".")[0] + "-auth-token";
+
+  const sb = () => client || (client = window.supabase.createClient(apiBase(), cfg.supabaseKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: STORAGE_KEY },
   }));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

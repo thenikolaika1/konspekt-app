@@ -1,0 +1,28 @@
+# Yandex API Gateway: прозрачный прокси к Supabase для пользователей из России.
+# Прямые соединения с Supabase (Cloudflare) российские провайдеры обрывают после ~16 КБ,
+# поэтому фото не загружаются, а большие ответы (готовые конспекты) не доходят.
+# Шлюз только пересылает запросы: Auth, RLS, Storage и Edge Functions работают как раньше.
+# Лимит шлюза: запрос + ответ не больше 2,5 МБ (фото 0,6–0,9 МБ проходят).
+openapi: 3.0.0
+info:
+  title: konspekt-supabase-proxy
+  version: 1.0.0
+paths:
+  /{path+}:
+    x-yc-apigateway-any-method:
+      parameters:
+        - name: path
+          in: path
+          required: false
+          schema:
+            type: string
+      x-yc-apigateway-integration:
+        type: http
+        url: https://ohdeykbkgimvwstkwuuf.supabase.co/{path}
+        headers:
+          '*': '*'
+        query:
+          '*': '*'
+        timeouts:
+          connect: 5
+          read: 120
