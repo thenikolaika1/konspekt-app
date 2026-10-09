@@ -43,6 +43,8 @@
     // ранний доступ: "off" — без Supabase (mock); "unknown" — сервер ещё не ответил или нет связи (приложение работает как обычно);
     // "ok" — доступ есть, info — ответ get_my_access(); "none" — сервер ответил, что доступа нет
     access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null },
+    // экран «Аккаунт»: mode — view | restore; info — cloud.getAccount(); key — только что выпущенный ключ (до «Я сохранил»)
+    acct: { mode: "view", info: null, loadError: "", msg: "", err: "", key: "" },
   };
 
   const icon = (n) => {
@@ -337,7 +339,8 @@
       brand() +
       '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
       '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
-      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button></div>'
+      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button>' +
+      '<button class="text-action access-login" data-acct="restore">Есть ключ восстановления? Войти</button></div>'
     );
   }
 
@@ -360,7 +363,7 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      (S.access.state === "off" ? '<div class="brand-spark">' + icon("sparkle") + "</div>" : '<button class="brand-spark" data-acct="view" aria-label="Аккаунт">' + icon("user") + "</button>") + '</div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
       bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
@@ -545,6 +548,48 @@
     );
   }
 
+  // ---------- аккаунт: ключ восстановления ----------
+
+  const acctCard = (title, text) => '<div class="acct-card"><b>' + title + "</b><p>" + text + "</p></div>";
+  const acctSubmit = (action, label) => '<button class="primary wide acct-submit" data-acct-submit="' + action + '">' + label + "</button>";
+  const acctLink = (mode, label) => '<button class="text-action" data-acct="' + mode + '">' + label + "</button>";
+  const acctAction = (action, label, cls = "") => '<button class="text-action ' + cls + '" data-acct-submit="' + action + '">' + label + "</button>";
+  // облачные конспекты этого устройства — о них предупреждаем перед входом в другой аккаунт
+  const deviceNotes = () => store.listNotes().filter((n) => n.remote).length;
+
+  function account() {
+    const A = S.acct, i = A.info;
+    let body = "";
+    if (A.key) {
+      // ключ показывается один раз: после «Я сохранил» он стирается из памяти и со страницы
+      body = acctCard(A.keyTitle || "Ключ восстановления", "С ним можно открыть конспекты и доступ на другом устройстве. Сохрани его в надёжном месте — в менеджере паролей, заметках или на бумаге. Мы не храним ключ и не сможем показать его снова.") +
+        '<div class="acct-key" id="acctKey">' + esc(A.key) + '</div><button class="text-action" data-acct-submit="copy">Скопировать</button>' +
+        '<p class="acct-warn">Никому не показывай ключ: с ним можно открыть твои конспекты.</p>' + acctSubmit("saved", "Я сохранил ключ");
+    } else if (A.mode === "restore") {
+      const n = i && i.anonymous ? deviceNotes() : 0;
+      body = (n
+        ? acctCard("На этом устройстве есть конспекты без ключа", "После входа они не будут видны здесь, но не удалятся. Чтобы не потерять их, сначала создай для них ключ.") + acctLink("view", "Создать ключ для этих конспектов")
+        : acctCard("Вход по ключу", "Введи ключ восстановления, который ты сохранил на другом устройстве.")) +
+        '<label class="form-label" for="acctKeyInput">Ключ восстановления</label><input class="field acct-field acct-key-input" id="acctKeyInput" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">' +
+        acctSubmit("restore", n ? "Войти всё равно" : "Войти") + acctLink("view", "Отмена");
+    } else if (!i) {
+      body = A.loadError
+        ? acctCard("Не удалось загрузить аккаунт", esc(acctError(A.loadError))) + acctSubmit("reload", "Попробовать снова")
+        : '<p class="acct-text">Загружаем…</p>';
+    } else if (!i.hasKey) {
+      body = acctCard("Сохрани доступ к конспектам", "Сейчас конспекты и доступ привязаны только к этому устройству. Создай ключ восстановления — с ним их можно открыть на другом устройстве. Email и телефон не нужны.") +
+        acctSubmit("create", "Создать ключ") + acctLink("restore", "У меня есть ключ");
+    } else {
+      body = acctCard("Аккаунт защищён ключом", "Чтобы открыть конспекты на другом устройстве, введи там ключ восстановления.") +
+        acctAction("rotate", "Создать новый ключ") + acctAction("rotate-out", "Новый ключ и выход на других устройствах") +
+        acctAction("signout", "Выйти на этом устройстве", "acct-signout");
+    }
+    return (
+      app("acct-screen") + head("Аккаунт", "") + '<div class="acct">' + body +
+      '<p class="acct-msg" role="status">' + esc(A.msg) + '</p><p class="acct-error" role="alert">' + esc(A.err) + "</p></div></div>"
+    );
+  }
+
   function profile() {
     return (
       app() +
@@ -701,6 +746,7 @@
     note,
     "new-bookmark": newBookmark,
     profile,
+    account,
     error,
   };
 
@@ -1253,6 +1299,128 @@
     render();
   }
 
+  // ---------- аккаунт: действия ----------
+
+  const AUTH_ERRORS = {
+    // неверный ключ и несуществующий аккаунт неразличимы снаружи
+    invalid_credentials: "Ключ не подошёл. Проверь его и попробуй ещё раз.",
+    KEY_FORMAT: "В ключе должно быть 25 символов: буквы и цифры, например XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.",
+    over_request_rate_limit: "Слишком много попыток. Подожди несколько минут.",
+    NOT_ALLOWED: "Для этого аккаунта ключ создать нельзя.",
+    NETWORK: "Нет подключения к интернету. Проверь подключение и попробуй ещё раз.",
+    CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
+    SERVER_TIMEOUT: "Сервер не ответил вовремя. Попробуй ещё раз через минуту.",
+    AUTH_FAILED: "Не удалось подключиться к серверу. Попробуй ещё раз.",
+  };
+  const acctError = (code) => AUTH_ERRORS[code] || "Что-то пошло не так. Попробуй ещё раз.";
+
+  // Формы не перерисовываются во время запроса — введённое не теряется при ошибке
+  function acctUi(busy, err, msg, btnSel = ".acct [data-acct-submit].primary") {
+    const btn = root.querySelector(btnSel);
+    if (btn) {
+      if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+      btn.disabled = busy;
+      btn.textContent = busy ? "Подождите…" : btn.dataset.label;
+    }
+    const e = root.querySelector(".acct-error"), m = root.querySelector(".acct-msg");
+    if (e) e.textContent = err || "";
+    if (m) m.textContent = msg || "";
+  }
+
+  async function loadAccount() {
+    S.acct.loadError = "";
+    try {
+      S.acct.info = await cloud.getAccount();
+    } catch (e) {
+      console.warn("[account] load failed", e.message);
+      if (!S.acct.info) S.acct.loadError = e.message;
+    }
+    if (S.screen === "account") render();
+  }
+
+  function openAccount(mode) {
+    S.acct = { ...S.acct, mode: mode || "view", msg: "", err: "", confirm: "" };
+    if (S.screen === "account") render();
+    else go("account");
+    loadAccount();
+  }
+
+  /** Показать только что выпущенный ключ (один раз). */
+  function showKey(key, title, msg) {
+    S.acct = { ...S.acct, key, keyTitle: title, mode: "view", msg: msg || "", err: "" };
+    render();
+  }
+
+  async function accountAction(action) {
+    const A = S.acct;
+    // действия, которые меняют ключ или выходят, — после второго нажатия
+    const CONFIRM = { rotate: "Старый ключ перестанет работать. Нажми ещё раз.", "rotate-out": "Старый ключ перестанет работать, другие устройства выйдут. Нажми ещё раз.", signout: "Вернуться можно будет только с ключом. Нажми ещё раз, чтобы выйти." };
+    if (CONFIRM[action] && A.confirm !== action) {
+      A.confirm = action;
+      return acctUi(false, "", CONFIRM[action], null);
+    }
+    A.confirm = "";
+    const btnSel = '.acct [data-acct-submit="' + action + '"]';
+    acctUi(true, "", "", btnSel);
+    try {
+      if (action === "reload") return await loadAccount();
+      if (action === "copy") {
+        await navigator.clipboard.writeText(A.key);
+        return acctUi(false, "", "Ключ скопирован.", btnSel);
+      }
+      if (action === "saved") {
+        S.acct = { ...A, key: "", keyTitle: "", msg: "", err: "" };
+        await loadAccount();
+        return render();
+      }
+      if (action === "create" || action === "rotate" || action === "rotate-out") {
+        const key = await cloud.issueKey({ signOutOthers: action === "rotate-out" });
+        S.acct.info = { ...(S.acct.info || {}), anonymous: false, hasKey: true };
+        return showKey(key, action === "create" ? "Твой ключ восстановления" : "Новый ключ восстановления", action === "create" ? "" : "Старый ключ больше не работает." + (action === "rotate-out" ? " Другие устройства вышли из аккаунта." : ""));
+      }
+      if (action === "restore") {
+        const field = root.querySelector("#acctKeyInput");
+        if (!cloud.normalizeKey(field?.value)) return acctUi(false, acctError("KEY_FORMAT"), "", btnSel);
+        const before = A.info;
+        // id прежнего анонимного профиля этого устройства — чтобы его конспекты можно было найти позже
+        if (before?.anonymous && deviceNotes()) {
+          try {
+            const prev = JSON.parse(localStorage.getItem("konspekt.prevAnonymous") || "[]");
+            if (!prev.includes(before.id)) localStorage.setItem("konspekt.prevAnonymous", JSON.stringify([...prev, before.id].slice(-5)));
+          } catch (e) {}
+        }
+        const info = await cloud.signInWithKey(field.value);
+        field.value = "";
+        S.acct.info = info;
+        if (!before || before.id !== info.id) store.forgetRemote();
+        S.access = { state: "unknown", info: null };
+        await Promise.allSettled([store.sync(), refreshAccess()]);
+        S.history = ["home"];
+        // ключ одноразовый: после входа выпускаем новый, прежний перестаёт работать
+        try {
+          const key = await cloud.issueKey();
+          return showKey(key, "Новый ключ восстановления", "Ты вошёл. Прежний ключ больше не работает — сохрани этот.");
+        } catch (e) {
+          console.warn("[account] rotate after restore failed", e.message);
+          S.acct.msg = "Ты вошёл. Обнови ключ в «Аккаунте», когда будет связь.";
+          return render();
+        }
+      }
+      if (action === "signout") {
+        await cloud.signOut();
+        store.forgetRemote();
+        S.acct = { mode: "view", info: null, loadError: "", msg: "", err: "", key: "" };
+        S.access = { state: "unknown", info: null };
+        await Promise.allSettled([store.sync(), refreshAccess()]);
+        S.history = [];
+        return go("home", false);
+      }
+    } catch (e) {
+      console.warn("[account] " + action + " failed", e.message);
+      acctUi(false, acctError(e.message), "", btnSel);
+    }
+  }
+
   // ---------- events ----------
 
   async function saveBookmarkForm() {
@@ -1297,6 +1465,8 @@
     if (el("[data-back]")) return back();
 
     if (el("[data-redeem]")) return redeemCode();
+    if ((x = el("[data-acct-submit]"))) return accountAction(x.dataset.acctSubmit);
+    if ((x = el("[data-acct]"))) return openAccount(x.dataset.acct);
 
     if (el("[data-start]")) {
       localStorage.setItem("k-first", "1");
@@ -1515,6 +1685,7 @@
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
     if (e.key === "Enter" && e.target.id === "inviteCode") root.querySelector("[data-redeem]")?.click();
+    if (e.key === "Enter" && e.target.id === "acctKeyInput") root.querySelector('[data-acct-submit="restore"]')?.click();
     if (e.key === "Enter" && e.target.id === "inNoteSearch") {
       e.preventDefault();
       nextNoteHit();
@@ -1524,7 +1695,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem],[data-acct-submit]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],.fab";
   root.addEventListener("click", (e) => {

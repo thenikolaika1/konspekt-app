@@ -200,6 +200,14 @@
       } catch (e) {}
     },
 
+    /** Убирает с устройства кэш облачных конспектов (выход, вход в другой аккаунт); на сервере они остаются. */
+    forgetRemote() {
+      db.notes = db.notes.filter((n) => !n.remote);
+      try {
+        persist();
+      } catch (e) {}
+    },
+
     /** Облачные конспекты, которые ещё создаются. */
     listPending: () => db.notes.filter((n) => n.remote && n.status === "processing"),
 

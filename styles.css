@@ -1347,3 +1347,23 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 .access .invite-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.12)}
 .access .invite-error{min-height:20px;margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
 .access .primary:disabled{opacity:.7}
+
+/* аккаунт: ключ восстановления */
+button.brand-spark{padding:0;cursor:pointer;font:inherit}
+button.brand-spark .ui-icon{width:21px;height:21px}
+.acct{padding-bottom:24px}
+.acct-card{border:1px solid var(--line);border-radius:18px;padding:15px 16px;margin:6px 0 4px;background:#fbfdff}
+.acct-card b{display:block;font-size:16px;line-height:21px;color:var(--navy)}
+.acct-card p{margin:6px 0 0;font-size:14px;line-height:20px;color:var(--muted)}
+.acct-key{margin:18px 0 0;padding:16px 12px;border:1px dashed #b9cff0;border-radius:14px;background:#fff;text-align:center;font:700 19px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.5px;color:var(--navy);word-break:break-all;user-select:all;-webkit-user-select:all}
+.acct-warn{margin:10px 0 0;font-size:13px;line-height:18px;color:var(--wine)}
+.acct .field{background:#fff;font-size:16px;height:50px}
+.acct .acct-key-input{text-transform:uppercase;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.5px;text-align:center}
+.acct .primary.wide{margin-top:20px}
+.acct .text-action{display:block;margin:14px auto 0}
+.acct-text{color:var(--muted);font-size:14px}
+.acct-msg{margin:14px 0 0;font-size:14px;line-height:20px;color:var(--green)}
+.acct-error{margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
+.acct-msg:empty,.acct-error:empty{display:none}
+.acct .primary:disabled{opacity:.7}
+.access .access-login{margin-top:14px}

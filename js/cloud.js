@@ -330,5 +330,79 @@
     return { result: data?.result || "invalid", access: data?.access || null };
   }
 
-  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote, getAccess, redeemInvite };
+  // ---------- аккаунт: ключ восстановления (без email, телефона и пароля) ----------
+  // Аккаунт — тот же пользователь Supabase, что и анонимный: user_id, конспекты и доступ не меняются.
+  // Ключ выпускает Edge Function account-key; Supabase Auth хранит его bcrypt-хэш как пароль служебного
+  // логина, вычисляемого из ключа (тот же алгоритм — supabase/functions/account-key/key.ts).
+  // Ключ здесь не сохраняется и не пишется в журнал.
+
+  const KEY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const KEY_DOMAIN = "@id.konspekt.invalid";
+
+  /** Ввод → 25 символов алфавита или null; регистр, пробелы и дефисы не важны, O→0, I/L→1. */
+  function normalizeKey(input) {
+    const s = String(input || "").toUpperCase().replace(/[^0-9A-Z]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+    return s.length === 25 && [...s].every((c) => KEY_ALPHABET.includes(c)) ? s : null;
+  }
+
+  async function keyLogin(key) {
+    const k = normalizeKey(key);
+    if (!k) throw new Error("KEY_FORMAT");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("konspekt-recovery-v1:" + k));
+    const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+    return { email: "k" + hex.slice(0, 40) + KEY_DOMAIN, password: "Kn-1." + k };
+  }
+
+  /** Ошибка Supabase Auth: нет ответа сервера → NETWORK/CONNECTION_LOST, иначе её код (invalid_credentials, …). */
+  const authFail = (error) => (noResponse(error, error?.status) ? connectionError(error) : fail(error?.code || (error?.status === 429 ? "over_request_rate_limit" : "AUTH_ERROR"), error, error?.status));
+
+  /** После входа или выхода пользователь сменился: следующий запрос возьмёт новую сессию. */
+  const resetUser = () => (userPromise = null);
+
+  /** Текущий аккаунт: id, анонимный ли, защищён ли ключом. */
+  async function getAccount() {
+    await ensureUser();
+    const { data, error } = await sb().auth.getUser();
+    if (error || !data?.user) throw authFail(error);
+    const u = data.user;
+    return { id: u.id, anonymous: !!u.is_anonymous, hasKey: (u.email || "").endsWith(KEY_DOMAIN) };
+  }
+
+  /** Новый ключ (первый или взамен прежнего — прежний сразу перестаёт работать). → строка ключа. */
+  async function issueKey({ signOutOthers = false } = {}) {
+    await ensureUser();
+    const t = timeoutController(START_TIMEOUT_MS);
+    try {
+      const { data, error } = await sb().functions.invoke("account-key", { body: { signOutOthers }, signal: t.signal });
+      if (!error && typeof data?.key === "string") return data.key;
+      if (error && noResponse(error)) throw connectionError(error.context || error, t.timedOut());
+      let code = "";
+      try { code = (await error?.context?.json())?.error || ""; } catch (e) {}
+      throw fail(code || "KEY_FAILED", error);
+    } finally {
+      t.done();
+    }
+  }
+
+  /** Вход по ключу на этом устройстве: сессия переходит на пользователя, которому принадлежит ключ. */
+  async function signInWithKey(key) {
+    const login = await keyLogin(key);
+    const { data, error } = await sb().auth.signInWithPassword(login);
+    if (error || !data?.user) throw authFail(error);
+    resetUser();
+    return { id: data.user.id, anonymous: false, hasKey: true };
+  }
+
+  /** Выход только на этом устройстве; следующий запрос начнёт новую анонимную сессию. */
+  async function signOut() {
+    const { error } = await sb().auth.signOut({ scope: "local" });
+    resetUser();
+    if (error && !noResponse(error, error.status)) console.warn("[account] sign out:", error.code || error.status);
+  }
+
+  K.cloud = {
+    enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
+    startAnalysis, waitForNote, getAccess, redeemInvite,
+    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin,
+  };
 })();
