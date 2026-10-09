@@ -340,8 +340,12 @@
       '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
       '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
       '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button>' +
-      (S.signedOut ? '<p class="acct-warn access-signed-out">Ты вышел из аккаунта на этом устройстве: ключ сменили на другом устройстве. Войди новым ключом.</p>' : "") +
-      '<button class="text-action access-login" data-acct="restore">Есть ключ восстановления? Войти</button></div>'
+      // вышли из аккаунта (ключ сменили на другом устройстве) — объяснение вместе с кнопкой входа по ключу
+      (S.signedOut
+        ? '<div class="access-signed-out" role="status"><b>Вы вышли из аккаунта на этом устройстве</b><p>Ключ восстановления сменили на другом устройстве. Войдите новым ключом — конспекты и доступ вернутся.</p>' +
+          '<button class="text-action access-login" data-acct="restore">Войти по ключу</button></div>'
+        : '<button class="text-action access-login" data-acct="restore">Есть ключ восстановления? Войти</button>') +
+      "</div>"
     );
   }
 
@@ -1331,7 +1335,7 @@
   const acctError = (code) => AUTH_ERRORS[code] || "Что-то пошло не так. Попробуй ещё раз.";
 
   // Формы не перерисовываются во время запроса — введённое не теряется при ошибке
-  function acctUi(busy, err, msg, btnSel = ".acct [data-acct-submit].primary") {
+  function acctUi(busy, err, msg, btnSel = ".acct [data-acct-submit].primary", warn = false) {
     const btn = root.querySelector(btnSel);
     if (btn) {
       if (!btn.dataset.label) btn.dataset.label = btn.textContent;
@@ -1340,7 +1344,10 @@
     }
     const e = root.querySelector(".acct-error"), m = root.querySelector(".acct-msg");
     if (e) e.textContent = err || "";
-    if (m) m.textContent = msg || "";
+    if (m) {
+      m.textContent = msg || "";
+      m.classList.toggle("acct-msg-warn", !!(warn && msg)); // предупреждение перед необратимым действием
+    }
   }
 
   async function loadAccount() {
@@ -1411,7 +1418,7 @@
     }
     if (CONFIRM[action] && A.confirm !== action) {
       A.confirm = action;
-      return acctUi(false, "", CONFIRM[action], null);
+      return acctUi(false, "", CONFIRM[action], null, true);
     }
     A.confirm = "";
     const btnSel = '.acct [data-acct-submit="' + action + '"]';

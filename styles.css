@@ -1365,6 +1365,7 @@ button.brand-spark .ui-icon{width:21px;height:21px}
 .acct-msg{margin:14px 0 0;font-size:14px;line-height:20px;color:var(--green)}
 .acct-error{margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
 .acct-msg:empty,.acct-error:empty{display:none}
+.acct-msg.acct-msg-warn{padding:11px 13px;border-radius:13px;background:var(--winebg);color:var(--wine);font-size:13px;line-height:19px}
 .acct .primary:disabled{opacity:.7}
 .acct-keyscreen{padding-top:4px}
 .acct-key-title{margin:6px 0 4px;font-size:23px;line-height:28px;letter-spacing:-.6px;color:var(--navy)}
@@ -1381,3 +1382,7 @@ button.brand-spark .ui-icon{width:21px;height:21px}
 .acct-keyscreen .primary:disabled{opacity:.45;box-shadow:none}
 .acct-hint{margin:14px 2px 0;font-size:13px;line-height:19px;color:var(--muted);text-align:center}
 .access .access-login{margin-top:14px}
+.access .access-signed-out{width:100%;margin-top:16px;padding:14px 16px 4px;border:1px solid #d6e6fb;border-radius:16px;background:#f2f7fd;text-align:left}
+.access .access-signed-out b{display:block;font-size:15px;line-height:20px;color:var(--navy)}
+.access .access-signed-out p{margin:5px 0 0;font-size:13px;line-height:19px;color:var(--muted)}
+.access .access-signed-out .access-login{margin:6px 0 4px;padding:6px 0}
