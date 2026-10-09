@@ -1381,6 +1381,7 @@
         return acctUi(false, "", "Ключ скопирован.", btnSel);
       }
       if (action === "saved") {
+        cloud.clearPendingKey();
         S.acct = { ...A, key: "", keyTitle: "", msg: "", err: "" };
         await loadAccount();
         return render();
@@ -1782,10 +1783,20 @@
   // Главную рисуем, когда известен доступ (не дольше ACCESS_WAIT_MS): иначе у пользователя без доступа мелькнёт
   // обычный экран. Не дождались (медленная сеть, офлайн) — обычный экран, доступ подставится, когда придёт ответ.
   const ACCESS_WAIT_MS = 1500;
-  const firstAccess = refreshAccess();
+  // незавершённое создание ключа (обрыв связи, приложение закрыли до «Я сохранил») — показываем ключ ещё раз
+  const pending = S.access.state === "off" ? Promise.resolve(null) : cloud.resumePendingKey().catch((e) => (console.warn("[account] pending key check failed", e.message), null));
+  const firstAccess = pending.then(refreshAccess);
   store
     .init()
     .then(preloadThumbs)
+    .then(() => pending)
+    .then((key) => {
+      if (!key) return;
+      S.acct = { ...S.acct, key, keyTitle: "Твой ключ восстановления", mode: "view", msg: "Создание ключа не было завершено. Ключ действует — сохрани его.", err: "" };
+      S.history = ["home"];
+      S.screen = "account";
+      loadAccount();
+    })
     .then(() => S.screen === "home" && Promise.race([firstAccess, new Promise((r) => setTimeout(r, ACCESS_WAIT_MS))]))
     .then(render)
     .then(syncCloud);

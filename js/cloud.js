@@ -26,6 +26,10 @@
   // Устройство, вошедшее в аккаунт по ключу. Если сессию потом отзовут (ключ сменили на другом устройстве),
   // ensureUser начнёт новую анонимную сессию — а приложение покажет, что нужно войти ключом.
   const KEY_DEVICE = "konspekt.keyDevice", SIGNED_OUT = "konspekt.signedOut";
+  // Ключ, который уже мог уйти на сервер, но пользователь ещё не нажал «Я сохранил». Хранится на устройстве до этого
+  // момента (как и токены сессии), чтобы ключ не потерялся при обрыве связи или закрытии приложения.
+  const PENDING = "konspekt.pendingKey";
+  const setPending = (k) => { try { k ? localStorage.setItem(PENDING, k) : localStorage.removeItem(PENDING); } catch (e) {} };
 
   /**
    * Адрес API: прямой (supabaseUrl) или прокси из cfg.routes. Только адреса из config.js — маршрут из ссылки
@@ -418,6 +422,7 @@
   async function issueKey({ currentKey = "" } = {}) {
     await ensureUser();
     const key = newRecoveryKey();
+    setPending(key);
     const body = { newKey: normalizeKey(key) };
     if (currentKey) body.currentKey = normalizeKey(currentKey) || "";
     const t = timeoutController(START_TIMEOUT_MS);
@@ -428,10 +433,14 @@
         if (!noResponse(error)) {
           let code = "";
           try { code = (await error.context?.json())?.error || ""; } catch (e) {}
+          setPending(null); // сервер ответил отказом — ключ не принят
           throw fail(code || "KEY_FAILED", error);
         }
         lost = connectionError(error.context || error, t.timedOut()); // запрос мог дойти: проверим входом
-      } else if (!data?.ok) throw fail("KEY_FAILED");
+      } else if (!data?.ok) {
+        setPending(null);
+        throw fail("KEY_FAILED");
+      }
     } finally {
       t.done();
     }
@@ -444,13 +453,40 @@
         return { key, signedIn: true };
       }
       // ответ не дошёл и ключ не подходит — сервер его не принял, прежняя сессия и прежний ключ в силе
-      if (lost && error?.code === "invalid_credentials") throw lost;
+      if (lost && error?.code === "invalid_credentials") {
+        setPending(null);
+        throw lost;
+      }
       if (!noResponse(error, error?.status) && error?.status !== 429 && !(error?.status >= 500)) break;
       await new Promise((r) => setTimeout(r, 800 * (i + 1)));
     }
     // ключ принят, но войти им сейчас не удалось (сессия уже отозвана) — пользователь входит показанным ключом
     keyDevice(false);
     return { key, signedIn: false };
+  }
+
+  /** Пользователь сохранил ключ — с устройства его можно убрать. */
+  const clearPendingKey = () => setPending(null);
+
+  /**
+   * При запуске: ключ, создание которого не было завершено (обрыв связи, приложение закрыли). Если сервер его принял —
+   * входим им (прежние сессии уже отозваны) и возвращаем, чтобы показать ещё раз; если не принял — забываем. → ключ | null
+   */
+  async function resumePendingKey() {
+    let key = null;
+    try { key = localStorage.getItem(PENDING); } catch (e) {}
+    if (!normalizeKey(key)) return setPending(null), null;
+    const login = await keyLogin(key);
+    const { data } = await sb().auth.getSession();
+    if (data?.session?.user?.email === login.email) return keyDevice(true), key;
+    const res = await sb().auth.signInWithPassword(login);
+    if (!res.error && res.data?.user) {
+      resetUser();
+      keyDevice(true);
+      return key;
+    }
+    if (res.error?.code === "invalid_credentials") return setPending(null), null; // не принят или уже заменён
+    return key; // нет связи — покажем ключ, войти им можно позже
   }
 
   /** Вход по ключу на этом устройстве: сессия переходит на пользователя, которому принадлежит ключ. */
@@ -474,6 +510,6 @@
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
     startAnalysis, waitForNote, getAccess, redeemInvite,
-    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin, newRecoveryKey, takeSignedOut,
+    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin, newRecoveryKey, takeSignedOut, clearPendingKey, resumePendingKey,
   };
 })();
