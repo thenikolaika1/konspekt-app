@@ -1,7 +1,7 @@
 /**
  * Edge Function account-key: ключ восстановления аккаунта — без email, телефона и обычного пароля.
  *
- * POST { signOutOthers?: boolean } с заголовком Authorization: Bearer <JWT пользователя> → 200 { key }
+ * POST { signOutOthers?: boolean, currentKey?: string } с заголовком Authorization: Bearer <JWT пользователя> → 200 { key }
  *
  * Ключ — 25 символов base32 (125 бит случайности из crypto.getRandomValues). Supabase Auth хранит его
  * как пароль (bcrypt) служебного логина, вычисляемого из самого ключа (keyLogin): адрес в зоне .invalid
@@ -10,6 +10,7 @@
  * - user_id не меняется: анонимный пользователь становится постоянным (email_confirm), его конспекты,
  *   доступ и журнал лимита остаются как есть;
  * - каждый вызов выпускает новый ключ, старый перестаёт работать сразу (ротация);
+ *   сменить уже выданный ключ можно только с текущим ключом: одной украденной сессии для этого мало;
  * - signOutOthers — заодно завершить сессии на других устройствах (если ключ мог попасть к чужим);
  * - ключ меняет только сам владелец по своему JWT; аккаунты с настоящим email этот путь не трогает.
  *
@@ -17,7 +18,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
-import { keyLogin, newRecoveryKey } from "./key.ts";
+import { keyLogin, newRecoveryKey, normalizeKey } from "./key.ts";
 
 const ALLOWED_ORIGINS = ["https://thenikolaika1.github.io"];
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -71,10 +72,17 @@ Deno.serve(async (req) => {
   if (!user.is_anonymous && !keyAccount) return json(403, { error: "NOT_ALLOWED" }, cors);
   if (user.phone) return json(403, { error: "NOT_ALLOWED" }, cors);
 
-  let body: { signOutOthers?: unknown } = {};
+  let body: { signOutOthers?: unknown; currentKey?: unknown } = {};
   try {
-    body = await req.json();
+    body = (await req.json()) || {};
   } catch { /* пустое тело — без завершения других сессий */ }
+
+  // смена ключа: нужен текущий ключ (его служебный логин должен совпасть с логином аккаунта)
+  if (keyAccount) {
+    const current = typeof body.currentKey === "string" ? normalizeKey(body.currentKey) : null;
+    if (!current) return json(403, { error: "CURRENT_KEY_REQUIRED" }, cors);
+    if ((await keyLogin(current)).email !== user.email) return json(403, { error: "CURRENT_KEY_INVALID" }, cors);
+  }
 
   const key = newRecoveryKey();
   const login = await keyLogin(key);

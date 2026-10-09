@@ -581,6 +581,7 @@
         acctSubmit("create", "Создать ключ") + acctLink("restore", "У меня есть ключ");
     } else {
       body = acctCard("Аккаунт защищён ключом", "Чтобы открыть конспекты на другом устройстве, введи там ключ восстановления.") +
+        '<label class="form-label" for="acctCurrentKey">Чтобы сменить ключ, введи текущий</label><input class="field acct-field acct-key-input" id="acctCurrentKey" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">' +
         acctAction("rotate", "Создать новый ключ") + acctAction("rotate-out", "Новый ключ и выход на других устройствах") +
         acctAction("signout", "Выйти на этом устройстве", "acct-signout");
     }
@@ -1307,6 +1308,8 @@
     KEY_FORMAT: "В ключе должно быть 25 символов: буквы и цифры, например XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.",
     over_request_rate_limit: "Слишком много попыток. Подожди несколько минут.",
     NOT_ALLOWED: "Для этого аккаунта ключ создать нельзя.",
+    CURRENT_KEY_REQUIRED: "Введи текущий ключ, чтобы создать новый.",
+    CURRENT_KEY_INVALID: "Текущий ключ не подошёл. Проверь его и попробуй ещё раз.",
     NETWORK: "Нет подключения к интернету. Проверь подключение и попробуй ещё раз.",
     CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
     SERVER_TIMEOUT: "Сервер не ответил вовремя. Попробуй ещё раз через минуту.",
@@ -1355,6 +1358,11 @@
     const A = S.acct;
     // действия, которые меняют ключ или выходят, — после второго нажатия
     const CONFIRM = { rotate: "Старый ключ перестанет работать. Нажми ещё раз.", "rotate-out": "Старый ключ перестанет работать, другие устройства выйдут. Нажми ещё раз.", signout: "Вернуться можно будет только с ключом. Нажми ещё раз, чтобы выйти." };
+    const current = root.querySelector("#acctCurrentKey");
+    if ((action === "rotate" || action === "rotate-out") && !cloud.normalizeKey(current?.value)) {
+      A.confirm = "";
+      return acctUi(false, acctError(current?.value.trim() ? "KEY_FORMAT" : "CURRENT_KEY_REQUIRED"), "", null);
+    }
     if (CONFIRM[action] && A.confirm !== action) {
       A.confirm = action;
       return acctUi(false, "", CONFIRM[action], null);
@@ -1374,7 +1382,8 @@
         return render();
       }
       if (action === "create" || action === "rotate" || action === "rotate-out") {
-        const key = await cloud.issueKey({ signOutOthers: action === "rotate-out" });
+        const key = await cloud.issueKey({ signOutOthers: action === "rotate-out", currentKey: action === "create" ? "" : current.value });
+        if (current) current.value = "";
         S.acct.info = { ...(S.acct.info || {}), anonymous: false, hasKey: true };
         return showKey(key, action === "create" ? "Твой ключ восстановления" : "Новый ключ восстановления", action === "create" ? "" : "Старый ключ больше не работает." + (action === "rotate-out" ? " Другие устройства вышли из аккаунта." : ""));
       }
@@ -1389,7 +1398,8 @@
             if (!prev.includes(before.id)) localStorage.setItem("konspekt.prevAnonymous", JSON.stringify([...prev, before.id].slice(-5)));
           } catch (e) {}
         }
-        const info = await cloud.signInWithKey(field.value);
+        const used = field.value;
+        const info = await cloud.signInWithKey(used);
         field.value = "";
         S.acct.info = info;
         if (!before || before.id !== info.id) store.forgetRemote();
@@ -1398,7 +1408,7 @@
         S.history = ["home"];
         // ключ одноразовый: после входа выпускаем новый, прежний перестаёт работать
         try {
-          const key = await cloud.issueKey();
+          const key = await cloud.issueKey({ currentKey: used });
           return showKey(key, "Новый ключ восстановления", "Ты вошёл. Прежний ключ больше не работает — сохрани этот.");
         } catch (e) {
           console.warn("[account] rotate after restore failed", e.message);

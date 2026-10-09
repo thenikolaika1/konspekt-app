@@ -368,12 +368,12 @@
     return { id: u.id, anonymous: !!u.is_anonymous, hasKey: (u.email || "").endsWith(KEY_DOMAIN) };
   }
 
-  /** Новый ключ (первый или взамен прежнего — прежний сразу перестаёт работать). → строка ключа. */
-  async function issueKey({ signOutOthers = false } = {}) {
+  /** Новый ключ (первый или взамен прежнего — прежний сразу перестаёт работать; для смены нужен текущий). → строка ключа. */
+  async function issueKey({ signOutOthers = false, currentKey = "" } = {}) {
     await ensureUser();
     const t = timeoutController(START_TIMEOUT_MS);
     try {
-      const { data, error } = await sb().functions.invoke("account-key", { body: { signOutOthers }, signal: t.signal });
+      const { data, error } = await sb().functions.invoke("account-key", { body: currentKey ? { signOutOthers, currentKey: normalizeKey(currentKey) || "" } : { signOutOthers }, signal: t.signal });
       if (!error && typeof data?.key === "string") return data.key;
       if (error && noResponse(error)) throw connectionError(error.context || error, t.timedOut());
       let code = "";
