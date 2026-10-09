@@ -465,8 +465,26 @@
     return { key, signedIn: false };
   }
 
-  /** Пользователь сохранил ключ — с устройства его можно убрать. */
-  const clearPendingKey = () => setPending(null);
+  /**
+   * «Продолжить» на экране ключа: убеждаемся, что сервер принял именно этот ключ (сессия уже открыта им или вход им
+   * проходит), и только тогда убираем его с устройства. Не принят — KEY_NOT_ACCEPTED (ключ забываем); нет связи — ошибка
+   * сети, ключ остаётся на устройстве.
+   */
+  async function confirmKey(key) {
+    const login = await keyLogin(key);
+    const { data } = await sb().auth.getSession();
+    if (data?.session?.user?.email !== login.email) {
+      const res = await sb().auth.signInWithPassword(login);
+      if (res.error?.code === "invalid_credentials") {
+        setPending(null);
+        throw fail("KEY_NOT_ACCEPTED");
+      }
+      if (res.error || !res.data?.user) throw authFail(res.error);
+      resetUser();
+      keyDevice(true);
+    }
+    setPending(null);
+  }
 
   /**
    * При запуске: ключ, создание которого не было завершено (обрыв связи, приложение закрыли). Если сервер его принял —
@@ -510,6 +528,6 @@
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
     startAnalysis, waitForNote, getAccess, redeemInvite,
-    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin, newRecoveryKey, takeSignedOut, clearPendingKey, resumePendingKey,
+    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin, newRecoveryKey, takeSignedOut, confirmKey, resumePendingKey,
   };
 })();

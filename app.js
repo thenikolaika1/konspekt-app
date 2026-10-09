@@ -562,15 +562,22 @@
     const A = S.acct, i = A.info;
     let body = "";
     if (A.key) {
-      // ключ показывается один раз: после «Я сохранил» он стирается из памяти и со страницы
-      body = acctCard(A.keyTitle || "Ключ восстановления", "С ним можно открыть конспекты и доступ на другом устройстве. Сохрани его в надёжном месте — в менеджере паролей, заметках или на бумаге. Мы не храним ключ и не сможем показать его снова.") +
-        '<div class="acct-key" id="acctKey">' + esc(A.key) + '</div><button class="text-action" data-acct-submit="copy">Скопировать</button>' +
-        '<p class="acct-warn">Никому не показывай ключ: с ним можно открыть твои конспекты.</p>' + acctSubmit("saved", "Я сохранил ключ");
+      // Ключ на экране до «Продолжить»: кнопка доступна через 10 с видимого показа и после отметки.
+      // Таймер — напоминание прочитать предупреждение, а не защита: он живёт только в памяти страницы.
+      const left = keyLeft();
+      body = '<div class="acct-keyscreen"><h2 class="acct-key-title">Сохраните ключ восстановления</h2><p class="acct-key-sub">Он защищает доступ к вашим конспектам</p>' +
+        "<p class=\"acct-key-text\">Сохраните этот ключ в надёжном месте. Он понадобится для входа в аккаунт на другом устройстве или после переустановки приложения.</p>" +
+        '<div class="acct-key" id="acctKey">' + esc(A.key).split("-").join("-<wbr>") + "</div>" +
+        '<button class="secondary acct-copy" data-acct-submit="copy">Скопировать</button><p class="acct-copied" role="status">' + (A.copied ? "Ключ скопирован" : "") + "</p>" +
+        '<p class="acct-warn acct-key-warn">Если вы потеряете ключ и доступ ко всем устройствам, восстановить аккаунт и конспекты может быть невозможно. Никому не передавайте ключ.</p>' +
+        '<label class="acct-check"><input type="checkbox" id="acctKeySaved"' + (A.keyAck ? " checked" : "") + "><span>Я сохранил ключ и понимаю, зачем он нужен</span></label>" +
+        '<button class="primary wide acct-submit" data-acct-submit="saved"' + (left || !A.keyAck ? " disabled" : "") + ">" + (left ? "Продолжить (" + left + " с)" : "Продолжить") + "</button></div>";
     } else if (A.mode === "restore") {
       const n = i && i.anonymous ? deviceNotes() : 0;
       body = (n
         ? acctCard("На этом устройстве есть конспекты без ключа", "После входа они не будут видны здесь, но не удалятся. Чтобы не потерять их, сначала создай для них ключ.") + acctLink("view", "Создать ключ для этих конспектов")
         : acctCard("Вход по ключу", "Введи ключ восстановления, который ты сохранил на другом устройстве.")) +
+        '<p class="acct-hint">Установил приложение на главный экран или открыл на новом устройстве? Введи ключ, созданный раньше, — вернутся прежние конспекты и лимит.</p>' +
         '<label class="form-label" for="acctKeyInput">Ключ восстановления</label><input class="field acct-field acct-key-input" id="acctKeyInput" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">' +
         acctSubmit("restore", n ? "Войти всё равно" : "Войти") + acctLink("view", "Отмена");
     } else if (!i) {
@@ -579,7 +586,8 @@
         : '<p class="acct-text">Загружаем…</p>';
     } else if (!i.hasKey) {
       body = acctCard("Сохрани доступ к конспектам", "Сейчас конспекты и доступ привязаны только к этому устройству. Создай ключ восстановления — с ним их можно открыть на другом устройстве. Email и телефон не нужны.") +
-        acctSubmit("create", "Создать ключ") + acctLink("restore", "У меня есть ключ");
+        acctSubmit("create", "Создать ключ") + acctLink("restore", "У меня есть ключ") +
+        '<p class="acct-hint">Уже создавал ключ — в браузере или на другом устройстве? Нажми «У меня есть ключ», чтобы вернуть прежние конспекты.</p>';
     } else {
       body = acctCard("Аккаунт защищён ключом", "Чтобы открыть конспекты на другом устройстве, введи там ключ восстановления.") +
         '<label class="form-label" for="acctCurrentKey">Чтобы сменить ключ, введи текущий</label><input class="field acct-field acct-key-input" id="acctCurrentKey" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">' +
@@ -952,6 +960,7 @@
       lastScreenHtml = html;
     }
     firstPaint = false;
+    keyGate();
     S.pages.forEach((p) => seenPages.add(p));
 
     // лист / окно: открытие, смена содержимого без повторной анимации, закрытие
@@ -1354,9 +1363,42 @@
 
   /** Показать только что выпущенный ключ (один раз). */
   function showKey(key, title, msg) {
-    S.acct = { ...S.acct, key, keyTitle: title, mode: "view", msg: msg || "", err: "" };
+    S.acct = { ...S.acct, key, keyTitle: title, mode: "view", msg: msg || "", err: "", ...keyGateReset() };
     render();
   }
+
+  // ---------- экран ключа: 10 секунд видимого показа + отметка «Я сохранил» ----------
+  // Время считается по performance.now() и только пока страница видна (в фоне — пауза). Ничего не хранится:
+  // после перезагрузки или повторного открытия PWA отсчёт начинается заново — обойти его перезагрузкой нельзя.
+  const KEY_WAIT_MS = 10000;
+  let keyTick = null;
+  const keyGateReset = () => ({ keyShownMs: 0, keyVisibleSince: null, keyAck: false, copied: false });
+  const keyElapsed = () => (S.acct.keyShownMs || 0) + (S.acct.keyVisibleSince != null ? performance.now() - S.acct.keyVisibleSince : 0);
+  const keyLeft = () => Math.max(0, Math.ceil((KEY_WAIT_MS - keyElapsed()) / 1000));
+
+  /** После каждой отрисовки: запустить/остановить отсчёт и обновить кнопку без перерисовки экрана. */
+  function keyGate() {
+    const A = S.acct, shown = S.screen === "account" && !!A.key && !!root.querySelector("#acctKey");
+    const visible = document.visibilityState !== "hidden";
+    if (shown && visible && A.keyVisibleSince == null) A.keyVisibleSince = performance.now();
+    if ((!shown || !visible) && A.keyVisibleSince != null) {
+      A.keyShownMs = keyElapsed();
+      A.keyVisibleSince = null;
+    }
+    const btn = root.querySelector('.acct [data-acct-submit="saved"]');
+    if (btn && !btn.dataset.busy) {
+      const left = keyLeft();
+      btn.textContent = left ? "Продолжить (" + left + " с)" : "Продолжить";
+      btn.disabled = left > 0 || !A.keyAck;
+    }
+    const running = shown && visible && keyLeft() > 0;
+    if (running && !keyTick) keyTick = setInterval(keyGate, 250);
+    if (!running && keyTick) {
+      clearInterval(keyTick);
+      keyTick = null;
+    }
+  }
+  document.addEventListener("visibilitychange", keyGate);
 
   async function accountAction(action) {
     const A = S.acct;
@@ -1377,12 +1419,35 @@
     try {
       if (action === "reload") return await loadAccount();
       if (action === "copy") {
-        await navigator.clipboard.writeText(A.key);
-        return acctUi(false, "", "Ключ скопирован.", btnSel);
+        acctUi(false, "", "", btnSel);
+        try {
+          await navigator.clipboard.writeText(A.key);
+        } catch (e) {
+          return acctUi(false, "Не удалось скопировать. Выделите ключ и скопируйте вручную.", "", null);
+        }
+        A.copied = true;
+        const c = root.querySelector(".acct-copied");
+        if (c) c.textContent = "Ключ скопирован";
+        return;
       }
       if (action === "saved") {
-        cloud.clearPendingKey();
-        S.acct = { ...A, key: "", keyTitle: "", msg: "", err: "" };
+        if (keyLeft() > 0 || !A.keyAck) return keyGate(); // кнопка ещё недоступна
+        const btn = root.querySelector(btnSel);
+        if (btn) btn.dataset.busy = "1";
+        try {
+          // подтверждаем только ключ, который действительно принят сервером
+          await cloud.confirmKey(A.key);
+        } catch (e) {
+          if (btn) delete btn.dataset.busy;
+          if (e.message === "KEY_NOT_ACCEPTED") {
+            S.acct = { ...A, key: "", keyTitle: "", msg: "", err: "Этот ключ не был сохранён на сервере. Создайте ключ ещё раз.", ...keyGateReset() };
+            await loadAccount();
+            return render();
+          }
+          keyGate();
+          throw e;
+        }
+        S.acct = { ...A, key: "", keyTitle: "", msg: "", err: "", ...keyGateReset() };
         await loadAccount();
         return render();
       }
@@ -1391,7 +1456,7 @@
         if (current) current.value = "";
         S.acct.info = { ...(S.acct.info || {}), anonymous: false, hasKey: true };
         const msg = !res.signedIn
-          ? "Ключ создан, но войти им на этом устройстве не получилось. Сохрани ключ и войди им: «Есть ключ восстановления? Войти»."
+          ? "Нет связи с сервером, поэтому не удалось проверить ключ. Сохраните его — при нажатии «Продолжить» мы проверим ещё раз."
           : action === "rotate" ? "Старый ключ больше не работает. Другие устройства вышли из аккаунта — там нужно войти новым ключом." : "";
         if (!res.signedIn) S.acct.info = null;
         return showKey(res.key, action === "create" ? "Твой ключ восстановления" : "Новый ключ восстановления", msg);
@@ -1689,6 +1754,10 @@
   }
 
   function onInput(e) {
+    if (e.target.id === "acctKeySaved") {
+      S.acct.keyAck = e.target.checked;
+      return keyGate();
+    }
     if (e.target.id === "inNoteSearch") findInNote(e.target.value);
     if (e.target.id === "noteSearch") filterList("#allList", store.listNotes(), e.target.value);
     if (e.target.id === "bmSearch") filterList("#bmList", store.notesInBookmark(S.bookmarkId), e.target.value);
@@ -1724,6 +1793,7 @@
       });
   });
   root.addEventListener("input", onInput);
+  root.addEventListener("change", (e) => e.target.id === "acctKeySaved" && onInput(e));
   document.addEventListener("keydown", onKeydown);
   // Новая версия на сервере. Приложение, оставленное открытым (PWA в фоне), не должно
   // перезагружаться на глазах у пользователя: если он уже начал что-то делать, старый экран
@@ -1734,7 +1804,7 @@
   const BUILD = ((document.querySelector('script[src*="app.js"]') || {}).src || "").match(/[?&]v=(\d+)/)?.[1];
   let touchedSinceVisible = false;
   let updateReady = false;
-  const safeToReload = () => !["camera", "processing"].includes(S.screen) && !S.sheet;
+  const safeToReload = () => !["camera", "processing"].includes(S.screen) && !S.sheet && !S.acct.key;
 
   async function liveBuild() {
     navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
@@ -1792,7 +1862,7 @@
     .then(() => pending)
     .then((key) => {
       if (!key) return;
-      S.acct = { ...S.acct, key, keyTitle: "Твой ключ восстановления", mode: "view", msg: "Создание ключа не было завершено. Ключ действует — сохрани его.", err: "" };
+      S.acct = { ...S.acct, key, keyTitle: "", mode: "view", msg: "Создание ключа не было завершено. Сохраните ключ — он уже действует.", err: "", ...keyGateReset() };
       S.history = ["home"];
       S.screen = "account";
       loadAccount();

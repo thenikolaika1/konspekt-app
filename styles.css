@@ -1366,4 +1366,18 @@ button.brand-spark .ui-icon{width:21px;height:21px}
 .acct-error{margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
 .acct-msg:empty,.acct-error:empty{display:none}
 .acct .primary:disabled{opacity:.7}
+.acct-keyscreen{padding-top:4px}
+.acct-key-title{margin:6px 0 4px;font-size:23px;line-height:28px;letter-spacing:-.6px;color:var(--navy)}
+.acct-key-sub{margin:0;font-size:14px;line-height:20px;color:var(--blue);font-weight:650}
+.acct-key-text{margin:14px 0 0;font-size:14px;line-height:21px;color:var(--muted)}
+.acct-keyscreen .acct-key{font-size:clamp(15px,4.6vw,19px);letter-spacing:.3px;word-break:keep-all;overflow-wrap:normal}
+.acct-copy{display:block;width:100%;margin:10px 0 0;padding:12px;font-size:15px;color:var(--blue)}
+.acct-copied{margin:6px 0 0;min-height:18px;font-size:13px;line-height:18px;color:var(--green);text-align:center;transition:opacity .25s ease}
+.acct-copied:empty{opacity:0}
+.acct-key-warn{margin:12px 0 0;padding:11px 13px;border-radius:13px;background:var(--winebg);font-size:13px;line-height:19px}
+.acct-check{display:flex;gap:11px;align-items:flex-start;margin:16px 0 0;font-size:14px;line-height:20px;color:var(--navy);cursor:pointer}
+.acct-check input{flex:0 0 22px;width:22px;height:22px;margin:0;accent-color:var(--blue)}
+.acct-keyscreen .primary.wide{margin-top:16px;transition:opacity .2s ease}
+.acct-keyscreen .primary:disabled{opacity:.45;box-shadow:none}
+.acct-hint{margin:14px 2px 0;font-size:13px;line-height:19px;color:var(--muted);text-align:center}
 .access .access-login{margin-top:14px}
