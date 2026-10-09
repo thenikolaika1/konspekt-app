@@ -1,18 +1,11 @@
 /**
- * Ключ восстановления: формат, генерация и служебный логин Supabase Auth.
- * Тот же алгоритм — в браузере (js/cloud.js, keyLogin); тесты проверяют совпадение.
+ * Ключ восстановления: формат и служебный логин Supabase Auth.
+ * Ключ создаёт браузер (js/cloud.js, newRecoveryKey); keyLogin — тот же алгоритм, что там; тесты проверяют совпадение.
  */
 
 /** Crockford base32: без I, L, O, U — их не спутать при переписывании; 32 символа = ровно 5 бит. */
 export const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const KEY_LENGTH = 25; // 125 бит
-
-/** Новый ключ: байты crypto.getRandomValues, 256 делится на 32 — распределение без смещения. */
-export function newRecoveryKey(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(KEY_LENGTH));
-  const raw = Array.from(bytes, (b) => ALPHABET[b % 32]).join("");
-  return raw.match(/.{5}/g)!.join("-");
-}
 
 /** Ввод пользователя → 25 символов алфавита или null. Регистр, пробелы и дефисы не важны; O→0, I/L→1. */
 export function normalizeKey(input: string): string | null {

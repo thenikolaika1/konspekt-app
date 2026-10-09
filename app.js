@@ -340,6 +340,7 @@
       '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
       '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
       '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button>' +
+      (S.signedOut ? '<p class="acct-warn access-signed-out">Ты вышел из аккаунта на этом устройстве: ключ сменили на другом устройстве. Войди новым ключом.</p>' : "") +
       '<button class="text-action access-login" data-acct="restore">Есть ключ восстановления? Войти</button></div>'
     );
   }
@@ -582,7 +583,7 @@
     } else {
       body = acctCard("Аккаунт защищён ключом", "Чтобы открыть конспекты на другом устройстве, введи там ключ восстановления.") +
         '<label class="form-label" for="acctCurrentKey">Чтобы сменить ключ, введи текущий</label><input class="field acct-field acct-key-input" id="acctCurrentKey" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">' +
-        acctAction("rotate", "Создать новый ключ") + acctAction("rotate-out", "Новый ключ и выход на других устройствах") +
+        acctAction("rotate", "Создать новый ключ") +
         acctAction("signout", "Выйти на этом устройстве", "acct-signout");
     }
     return (
@@ -1255,7 +1256,10 @@
     if (!accessPromise)
       accessPromise = cloud
         .getAccess()
-        .then((info) => setAccess(info), (e) => console.warn("[access] check failed", e.message))
+        .then((info) => {
+          if (cloud.takeSignedOut?.()) S.signedOut = true;
+          setAccess(info);
+        }, (e) => console.warn("[access] check failed", e.message))
         .finally(() => (accessPromise = null));
     return accessPromise;
   }
@@ -1357,9 +1361,9 @@
   async function accountAction(action) {
     const A = S.acct;
     // действия, которые меняют ключ или выходят, — после второго нажатия
-    const CONFIRM = { rotate: "Старый ключ перестанет работать. Нажми ещё раз.", "rotate-out": "Старый ключ перестанет работать, другие устройства выйдут. Нажми ещё раз.", signout: "Вернуться можно будет только с ключом. Нажми ещё раз, чтобы выйти." };
+    const CONFIRM = { rotate: "Старый ключ перестанет работать, другие устройства выйдут из аккаунта. Нажми ещё раз.", signout: "Вернуться можно будет только с ключом. Нажми ещё раз, чтобы выйти." };
     const current = root.querySelector("#acctCurrentKey");
-    if ((action === "rotate" || action === "rotate-out") && !cloud.normalizeKey(current?.value)) {
+    if (action === "rotate" && !cloud.normalizeKey(current?.value)) {
       A.confirm = "";
       return acctUi(false, acctError(current?.value.trim() ? "KEY_FORMAT" : "CURRENT_KEY_REQUIRED"), "", null);
     }
@@ -1381,11 +1385,15 @@
         await loadAccount();
         return render();
       }
-      if (action === "create" || action === "rotate" || action === "rotate-out") {
-        const key = await cloud.issueKey({ signOutOthers: action === "rotate-out", currentKey: action === "create" ? "" : current.value });
+      if (action === "create" || action === "rotate") {
+        const res = await cloud.issueKey({ currentKey: action === "rotate" ? current.value : "" });
         if (current) current.value = "";
         S.acct.info = { ...(S.acct.info || {}), anonymous: false, hasKey: true };
-        return showKey(key, action === "create" ? "Твой ключ восстановления" : "Новый ключ восстановления", action === "create" ? "" : "Старый ключ больше не работает." + (action === "rotate-out" ? " Другие устройства вышли из аккаунта." : ""));
+        const msg = !res.signedIn
+          ? "Ключ создан, но войти им на этом устройстве не получилось. Сохрани ключ и войди им: «Есть ключ восстановления? Войти»."
+          : action === "rotate" ? "Старый ключ больше не работает. Другие устройства вышли из аккаунта — там нужно войти новым ключом." : "";
+        if (!res.signedIn) S.acct.info = null;
+        return showKey(res.key, action === "create" ? "Твой ключ восстановления" : "Новый ключ восстановления", msg);
       }
       if (action === "restore") {
         const field = root.querySelector("#acctKeyInput");
@@ -1398,23 +1406,16 @@
             if (!prev.includes(before.id)) localStorage.setItem("konspekt.prevAnonymous", JSON.stringify([...prev, before.id].slice(-5)));
           } catch (e) {}
         }
-        const used = field.value;
-        const info = await cloud.signInWithKey(used);
+        const info = await cloud.signInWithKey(field.value);
         field.value = "";
         S.acct.info = info;
         if (!before || before.id !== info.id) store.forgetRemote();
         S.access = { state: "unknown", info: null };
         await Promise.allSettled([store.sync(), refreshAccess()]);
         S.history = ["home"];
-        // ключ одноразовый: после входа выпускаем новый, прежний перестаёт работать
-        try {
-          const key = await cloud.issueKey({ currentKey: used });
-          return showKey(key, "Новый ключ восстановления", "Ты вошёл. Прежний ключ больше не работает — сохрани этот.");
-        } catch (e) {
-          console.warn("[account] rotate after restore failed", e.message);
-          S.acct.msg = "Ты вошёл. Обнови ключ в «Аккаунте», когда будет связь.";
-          return render();
-        }
+        S.signedOut = false;
+        S.acct = { ...S.acct, mode: "view", msg: "Ты вошёл в аккаунт. Конспекты и доступ — те же, что на другом устройстве.", err: "" };
+        return render();
       }
       if (action === "signout") {
         await cloud.signOut();

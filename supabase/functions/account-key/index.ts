@@ -1,9 +1,10 @@
 /**
  * Edge Function account-key: ключ восстановления аккаунта — без email, телефона и обычного пароля.
  *
- * POST { signOutOthers?: boolean, currentKey?: string } с заголовком Authorization: Bearer <JWT пользователя> → 200 { key }
+ * POST { newKey: string, currentKey?: string } с заголовком Authorization: Bearer <JWT пользователя> → 200 { ok: true }
  *
- * Ключ — 25 символов base32 (125 бит случайности из crypto.getRandomValues). Supabase Auth хранит его
+ * Ключ — 25 символов base32 (125 бит случайности из crypto.getRandomValues) — создаёт устройство пользователя:
+ * так он не теряется, если ответ функции не дошёл (сессии к этому моменту уже отозваны). Supabase Auth хранит его
  * как пароль (bcrypt) служебного логина, вычисляемого из самого ключа (keyLogin): адрес в зоне .invalid
  * (RFC 2606) никуда не доставляется, письма на него не уходят. Мы ключ не храним и не пишем в журнал.
  *
@@ -11,14 +12,15 @@
  *   доступ и журнал лимита остаются как есть;
  * - каждый вызов выпускает новый ключ, старый перестаёт работать сразу (ротация);
  *   сменить уже выданный ключ можно только с текущим ключом: одной украденной сессии для этого мало;
- * - signOutOthers — заодно завершить сессии на других устройствах (если ключ мог попасть к чужим);
+ * - Supabase Auth при смене пароля завершает ВСЕ сессии пользователя, включая текущую, поэтому клиент
+ *   сразу входит заново новым ключом; остальные устройства выходят (им нужен новый ключ);
  * - ключ меняет только сам владелец по своему JWT; аккаунты с настоящим email этот путь не трогает.
  *
  * Секреты только из окружения функции: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (передаёт Supabase).
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
-import { keyLogin, newRecoveryKey, normalizeKey } from "./key.ts";
+import { keyLogin, normalizeKey } from "./key.ts";
 
 const ALLOWED_ORIGINS = ["https://thenikolaika1.github.io"];
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -72,10 +74,12 @@ Deno.serve(async (req) => {
   if (!user.is_anonymous && !keyAccount) return json(403, { error: "NOT_ALLOWED" }, cors);
   if (user.phone) return json(403, { error: "NOT_ALLOWED" }, cors);
 
-  let body: { signOutOthers?: unknown; currentKey?: unknown } = {};
+  let body: { newKey?: unknown; currentKey?: unknown } = {};
   try {
     body = (await req.json()) || {};
-  } catch { /* пустое тело — без завершения других сессий */ }
+  } catch { /* пустое тело — ниже KEY_FORMAT */ }
+  const key = typeof body.newKey === "string" ? normalizeKey(body.newKey) : null;
+  if (!key) return json(400, { error: "KEY_FORMAT" }, cors);
 
   // смена ключа: нужен текущий ключ (его служебный логин должен совпасть с логином аккаунта)
   if (keyAccount) {
@@ -84,7 +88,7 @@ Deno.serve(async (req) => {
     if ((await keyLogin(current)).email !== user.email) return json(403, { error: "CURRENT_KEY_INVALID" }, cors);
   }
 
-  const key = newRecoveryKey();
+  if (keyAccount && key === normalizeKey(String(body.currentKey))) return json(400, { error: "KEY_FORMAT" }, cors);
   const login = await keyLogin(key);
   const { error: updateError } = await admin.auth.admin.updateUserById(user.id, {
     email: login.email,
@@ -97,11 +101,6 @@ Deno.serve(async (req) => {
     return json(500, { error: "KEY_FAILED" }, cors);
   }
 
-  if (body.signOutOthers === true) {
-    const { error: outError } = await admin.auth.admin.signOut(token, "others");
-    if (outError) console.warn("[account-key] sign out others failed:", outError.code || outError.status || "error");
-  }
-
-  console.log("[account-key] key issued" + (keyAccount ? " (rotation)" : " (first)") + (body.signOutOthers === true ? ", others signed out" : ""));
-  return json(200, { key }, cors);
+  console.log("[account-key] key issued" + (keyAccount ? " (rotation)" : " (first)"));
+  return json(200, { ok: true }, cors);
 });

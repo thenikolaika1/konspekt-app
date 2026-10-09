@@ -23,6 +23,9 @@
 
   let client = null;
   let userPromise = null;
+  // Устройство, вошедшее в аккаунт по ключу. Если сессию потом отзовут (ключ сменили на другом устройстве),
+  // ensureUser начнёт новую анонимную сессию — а приложение покажет, что нужно войти ключом.
+  const KEY_DEVICE = "konspekt.keyDevice", SIGNED_OUT = "konspekt.signedOut";
 
   /**
    * Адрес API: прямой (supabaseUrl) или прокси из cfg.routes. Только адреса из config.js — маршрут из ссылки
@@ -99,15 +102,35 @@
     }
   }
 
+  // Устройство с ключом один раз за запуск сверяет сессию с сервером: если ключ сменили на другом устройстве,
+  // Supabase Auth уже отозвал сессию, но access-токен ещё действует до часа — выходим сразу, а не через час.
+  let sessionChecked = false;
+  async function sessionRevoked() {
+    let device = false;
+    try { device = localStorage.getItem(KEY_DEVICE) === "1"; } catch (e) {}
+    if (!device || sessionChecked) return false;
+    const { error } = await sb().auth.getUser();
+    if (!error) return !(sessionChecked = true);
+    // отозванную сессию supabase-js сообщает как AuthSessionMissingError (session_not_found) и сам её удаляет
+    const revoked = error.name === "AuthSessionMissingError" || error.status === 401 || error.status === 403;
+    if (!revoked || noResponse(error, error.status)) return false; // без связи или сбой сервера — проверим позже
+    await sb().auth.signOut({ scope: "local" });
+    return true;
+  }
+
   function ensureUser() {
     if (!userPromise) {
       userPromise = (async () => {
         const { data, error } = await sb().auth.getSession();
-        if (data?.session?.user) return data.session.user;
+        if (data?.session?.user && !(await sessionRevoked())) return data.session.user;
         // Сессия есть, но обновить токен не удалось (сеть, 5xx) — gotrue её сохранил. Новый анонимный вход
         // здесь потерял бы все конспекты пользователя, поэтому — ошибка, повтор позже с тем же пользователем.
         // Без ошибки сессии нет совсем, либо сервер отверг токен и gotrue сам удалил сессию.
         if (error && error.name === "AuthRetryableFetchError") throw fail("AUTH_FAILED", error);
+        try {
+          if (localStorage.getItem(KEY_DEVICE) === "1") localStorage.setItem(SIGNED_OUT, "1");
+          localStorage.removeItem(KEY_DEVICE);
+        } catch (e) {}
         const res = await sb().auth.signInAnonymously();
         if (res.error || !res.data?.user) throw fail("AUTH_FAILED", res.error);
         return res.data.user;
@@ -364,24 +387,70 @@
     await ensureUser();
     const { data, error } = await sb().auth.getUser();
     if (error || !data?.user) throw authFail(error);
-    const u = data.user;
-    return { id: u.id, anonymous: !!u.is_anonymous, hasKey: (u.email || "").endsWith(KEY_DOMAIN) };
+    const u = data.user, hasKey = (u.email || "").endsWith(KEY_DOMAIN);
+    if (hasKey) keyDevice(true);
+    return { id: u.id, anonymous: !!u.is_anonymous, hasKey };
   }
 
-  /** Новый ключ (первый или взамен прежнего — прежний сразу перестаёт работать; для смены нужен текущий). → строка ключа. */
-  async function issueKey({ signOutOthers = false, currentKey = "" } = {}) {
-    await ensureUser();
-    const t = timeoutController(START_TIMEOUT_MS);
+  const keyDevice = (on) => { try { on ? localStorage.setItem(KEY_DEVICE, "1") : localStorage.removeItem(KEY_DEVICE); } catch (e) {} };
+  /** Один раз true, если устройство выкинуло из аккаунта по ключу. */
+  function takeSignedOut() {
     try {
-      const { data, error } = await sb().functions.invoke("account-key", { body: currentKey ? { signOutOthers, currentKey: normalizeKey(currentKey) || "" } : { signOutOthers }, signal: t.signal });
-      if (!error && typeof data?.key === "string") return data.key;
-      if (error && noResponse(error)) throw connectionError(error.context || error, t.timedOut());
-      let code = "";
-      try { code = (await error?.context?.json())?.error || ""; } catch (e) {}
-      throw fail(code || "KEY_FAILED", error);
+      const v = localStorage.getItem(SIGNED_OUT) === "1";
+      localStorage.removeItem(SIGNED_OUT);
+      return v;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Новый ключ: 25 символов из crypto.getRandomValues (256 делится на 32 — без смещения), XXXXX-XXXXX-… */
+  function newRecoveryKey() {
+    const bytes = crypto.getRandomValues(new Uint8Array(25));
+    return Array.from(bytes, (b) => KEY_ALPHABET[b % 32]).join("").match(/.{5}/g).join("-");
+  }
+
+  /**
+   * Новый ключ (первый или взамен прежнего — для смены нужен текущий). Ключ создаёт само устройство, поэтому он
+   * не теряется, даже если ответ сервера не дошёл. Supabase Auth при смене завершает все сессии пользователя,
+   * включая эту, поэтому сразу входим новым ключом. → { key, signedIn }
+   */
+  async function issueKey({ currentKey = "" } = {}) {
+    await ensureUser();
+    const key = newRecoveryKey();
+    const body = { newKey: normalizeKey(key) };
+    if (currentKey) body.currentKey = normalizeKey(currentKey) || "";
+    const t = timeoutController(START_TIMEOUT_MS);
+    let lost = null;
+    try {
+      const { data, error } = await sb().functions.invoke("account-key", { body, signal: t.signal });
+      if (error) {
+        if (!noResponse(error)) {
+          let code = "";
+          try { code = (await error.context?.json())?.error || ""; } catch (e) {}
+          throw fail(code || "KEY_FAILED", error);
+        }
+        lost = connectionError(error.context || error, t.timedOut()); // запрос мог дойти: проверим входом
+      } else if (!data?.ok) throw fail("KEY_FAILED");
     } finally {
       t.done();
     }
+    const login = await keyLogin(key);
+    for (let i = 0; i < 3; i++) {
+      const { data, error } = await sb().auth.signInWithPassword(login);
+      if (!error && data?.user) {
+        resetUser();
+        keyDevice(true);
+        return { key, signedIn: true };
+      }
+      // ответ не дошёл и ключ не подходит — сервер его не принял, прежняя сессия и прежний ключ в силе
+      if (lost && error?.code === "invalid_credentials") throw lost;
+      if (!noResponse(error, error?.status) && error?.status !== 429 && !(error?.status >= 500)) break;
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+    // ключ принят, но войти им сейчас не удалось (сессия уже отозвана) — пользователь входит показанным ключом
+    keyDevice(false);
+    return { key, signedIn: false };
   }
 
   /** Вход по ключу на этом устройстве: сессия переходит на пользователя, которому принадлежит ключ. */
@@ -390,6 +459,7 @@
     const { data, error } = await sb().auth.signInWithPassword(login);
     if (error || !data?.user) throw authFail(error);
     resetUser();
+    keyDevice(true);
     return { id: data.user.id, anonymous: false, hasKey: true };
   }
 
@@ -397,12 +467,13 @@
   async function signOut() {
     const { error } = await sb().auth.signOut({ scope: "local" });
     resetUser();
+    keyDevice(false);
     if (error && !noResponse(error, error.status)) console.warn("[account] sign out:", error.code || error.status);
   }
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
     startAnalysis, waitForNote, getAccess, redeemInvite,
-    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin,
+    getAccount, issueKey, signInWithKey, signOut, normalizeKey, keyLogin, newRecoveryKey, takeSignedOut,
   };
 })();
