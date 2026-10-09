@@ -88,8 +88,16 @@
     try {
       paths = await cloud.uploadPages(job.noteId, pages, job.paths);
     } catch (e) {
+      // Фото не дошли до сервера, хотя сеть есть: отдельный код, чтобы подсказать про другую сеть
+      // (бывает, что мелкие запросы проходят, а загрузка фото обрывается). Повтор продолжит ту же загрузку.
+      const code = e.message === "CONNECTION_LOST" || e.message === "SERVER_TIMEOUT" ? "UPLOAD_CONNECTION" : e.message;
       // в списке это не «Создаётся…»: фото не дошли, повтор продолжит загрузку
-      K.store.setLocalStatus(job.noteId, "failed", e.message);
+      K.store.setLocalStatus(job.noteId, "failed", code);
+      if (code !== e.message) {
+        const err = new Error(code);
+        err.cause = e;
+        throw err;
+      }
       throw e;
     }
 
