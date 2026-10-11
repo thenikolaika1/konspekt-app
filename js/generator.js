@@ -57,12 +57,15 @@
     throw new Error(row.error_code || "AI_ERROR");
   }
 
+  // отказы сервера без запуска AI (note уже failed с этим кодом)
+  const REFUSALS = ["NO_ACCESS", "LIMIT_REACHED", "ACCESS_EXPIRED", "TOO_MANY_PAGES", "AI_PAUSED", "AI_BUSY"];
+
   /** Запуск analyze-pages. Отказ по доступу сервер уже записал в note (failed) — в списке так же, без «Создаётся…». */
   async function start(noteId, paths) {
     try {
       return await cloud.startAnalysis(noteId, paths);
     } catch (e) {
-      if (e.message === "NO_ACCESS" || e.message === "LIMIT_REACHED") K.store.setLocalStatus(noteId, "failed", e.message);
+      if (REFUSALS.includes(e.message)) K.store.setLocalStatus(noteId, "failed", e.message);
       throw e;
     }
   }

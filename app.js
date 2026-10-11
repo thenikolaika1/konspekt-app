@@ -12,7 +12,8 @@
     cam = document.querySelector("#cameraInput"),
     gallery = document.querySelector("#galleryInput");
 
-  const MAX_PAGES = 8;
+  // Friends & Family: не больше 4 страниц (сервер проверяет тот же лимит — private.ai_limits.max_pages)
+  const MAX_PAGES = 4;
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
@@ -582,6 +583,10 @@
     // отказ сервера по раннему доступу (обычно вместо этого экрана — главная с экраном кода или «закончились»)
     NO_ACCESS: ["Нужен код раннего доступа.", "Введи код приглашения на главном экране."],
     LIMIT_REACHED: ["Бесплатные конспекты закончились.", "Если другой конспект ещё создаётся, дождись его."],
+    ACCESS_EXPIRED: ["Тестовый период закончился.", "Спасибо за участие! Библиотека по-прежнему доступна."],
+    TOO_MANY_PAGES: ["Слишком много страниц.", "Можно отправить не больше " + MAX_PAGES + " страниц."],
+    AI_PAUSED: ["Создание конспектов временно приостановлено.", "Библиотека работает как обычно. Попробуй позже."],
+    AI_BUSY: ["Сейчас создаётся много конспектов.", "Подожди пару минут и попробуй ещё раз."],
   };
   GEN_ERRORS.UPLOAD_INTERRUPTED = GEN_ERRORS.PAGES_MISSING;
 
@@ -1144,7 +1149,7 @@
       S.gen.error = e.message || "";
       S.history = ["home"];
       // сервер отказал по доступу: правда — get_my_access(); главная сама покажет экран кода или «закончились»
-      if (e.message === "NO_ACCESS" || e.message === "LIMIT_REACHED") {
+      if (e.message === "NO_ACCESS" || e.message === "LIMIT_REACHED" || e.message === "ACCESS_EXPIRED") {
         await refreshAccess();
         if (run !== S.gen.run) return;
         if (S.access.state === "none" || limitReached()) return go("home", false);

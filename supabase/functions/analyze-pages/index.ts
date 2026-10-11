@@ -40,6 +40,16 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
 
+// Отказы start_text_generation: AI не запускается, note помечается failed с этим кодом (фото остаются для повтора).
+export const REFUSALS: Record<string, [number, string]> = {
+  no_access: [403, "NO_ACCESS"],
+  limit_reached: [403, "LIMIT_REACHED"],
+  access_expired: [403, "ACCESS_EXPIRED"],
+  too_many_pages: [400, "TOO_MANY_PAGES"],
+  ai_paused: [503, "AI_PAUSED"],
+  ai_busy: [429, "AI_BUSY"],
+};
+
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
 class StepError extends Error {
@@ -154,6 +164,8 @@ Deno.serve(async (req) => {
     p_note_id: noteId,
     p_stale_seconds: STALE_MS / 1000,
     p_lease_seconds: LEASE_S,
+    // лимит страниц F&F (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
+    p_page_count: paths.length,
   });
   if (startError) {
     console.error("[analyze-pages] start failed:", startError.message);
@@ -163,8 +175,9 @@ Deno.serve(async (req) => {
   if (result === "ready") return json(200, { status: "ready", note_id: noteId }, cors);
   if (result === "not_found") return json(404, { error: "NOT_FOUND" }, cors);
   if (result === "already_processing") return json(409, { error: "ALREADY_PROCESSING" }, cors);
-  if (result === "no_access" || result === "limit_reached") {
-    const code = result === "no_access" ? "NO_ACCESS" : "LIMIT_REACHED";
+  const refusal = Object.hasOwn(REFUSALS, result) ? REFUSALS[result] : undefined;
+  if (refusal) {
+    const [httpStatus, code] = refusal;
     // note не остаётся «создаётся»: failed с причиной, фотографии сохраняются для повтора, когда доступ появится
     const { error: markError } = await admin
       .from("notes")
@@ -173,7 +186,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .or("status.eq.failed,stage.is.null,stage.neq.analyzing");
     if (markError) console.warn("[analyze-pages] could not mark " + code + ":", markError.message);
-    return json(403, { error: code }, cors);
+    return json(httpStatus, { error: code }, cors);
   }
   if (result !== "started") {
     // already_consumed (операция списана, а note не ready) и неизвестный ответ: AI не запускаем

@@ -2,7 +2,7 @@
 // Выпуск одноразовых кодов раннего доступа (Friends & Family).
 //
 // Запуск локально (не в CI и не на сервере):
-//   node tools/ff-invite-codes.mjs --count 5 --quota 5 --label "F&F октябрь"
+//   node tools/ff-invite-codes.mjs --count 5 --quota 1 --label "F&F октябрь" --expires 2026-10-19T00:00:00+03:00
 //
 // Печатает:
 //   1) открытые коды — раздать людям лично (никуда не коммитить, не вставлять в SQL);
@@ -18,8 +18,14 @@ const args = Object.fromEntries(
 const count = Number(args.count);
 const quota = Number(args.quota);
 const label = args.label ?? null;
+// --expires: до какого момента код можно активировать (ISO 8601 с часовым поясом); без него — бессрочно
+const expires = args.expires ?? null;
+if (expires !== null && (!/(Z|[+-]\d\d:\d\d)$/.test(expires) || Number.isNaN(Date.parse(expires)))) {
+  console.error("--expires: ISO 8601 с часовым поясом, например 2026-10-19T00:00:00+03:00");
+  process.exit(1);
+}
 if (!Number.isInteger(count) || count < 1 || count > 200 || !Number.isInteger(quota) || quota < 1) {
-  console.error('Usage: node tools/ff-invite-codes.mjs --count <1..200> --quota <N> [--label "..."]');
+  console.error('Usage: node tools/ff-invite-codes.mjs --count <1..200> --quota <N> [--label "..."] [--expires <ISO 8601>]');
   process.exit(1);
 }
 
@@ -38,4 +44,5 @@ const codes = Array.from({ length: count }, code);
 console.log("# Коды (раздать лично; не сохранять в репозиторий и не вставлять в SQL):");
 for (const c of codes) console.log(c);
 console.log("\n-- SQL для Supabase SQL Editor (только хэши):");
-for (const c of codes) console.log(`select private.admin_add_beta_invite('${hash(c)}', ${quota}, ${sqlText(label)});`);
+for (const c of codes)
+  console.log(`select private.admin_add_beta_invite('${hash(c)}', ${quota}, ${sqlText(label)}${expires ? `, ${sqlText(expires)}::timestamptz` : ""});`);
