@@ -213,7 +213,9 @@ begin
          finalized_at = null
    where l.state <> 'consumed';
 
-  update private.ai_limits set total_starts = total_starts + 1, updated_at = pg_catalog.now();
+  -- where id: строка настроек одна (id = true); без WHERE запрос отклоняет safeupdate,
+  -- который Supabase загружает для API (роль authenticator) — в том числе внутри функций
+  update private.ai_limits set total_starts = total_starts + 1, updated_at = pg_catalog.now() where id;
 
   -- 7. захват note (как в v18)
   update public.notes
@@ -241,8 +243,8 @@ grant execute on function public.start_text_generation(uuid, uuid, integer, inte
 
 -- -------------------------------------------------------------------------------------
 -- Управление (SQL Editor, владелец):
---   задать бюджет запусков:  update private.ai_limits set max_total_starts = <N>, updated_at = now();
---   выключить AI:            update private.ai_limits set ai_enabled = false, updated_at = now();
+--   задать бюджет запусков:  update private.ai_limits set max_total_starts = <N>, updated_at = now() where id;
+--   выключить AI:            update private.ai_limits set ai_enabled = false, updated_at = now() where id;
 --   состояние:               select * from private.ai_limits;
 --
 -- Откат (вручную): вернуть start_text_generation и get_my_access из 20261006120000 (drop новой

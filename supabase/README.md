@@ -59,6 +59,6 @@ Dashboard: Edge Functions → Deploy a new function → Via Editor → имя `a
 - `max_pages` — страниц в запросе (4); `max_user_starts` — запусков AI на пользователя F&F, включая неудачные (3);
   `max_in_flight` — одновременных генераций (3).
 - Глобальный бюджет: `max_total_starts` (после миграции 0 — AI выключен, пока не задан явно), `total_starts` — счётчик.
-  `update private.ai_limits set max_total_starts = <N>, updated_at = now();`
-- Выключить AI (библиотека продолжает работать): `update private.ai_limits set ai_enabled = false, updated_at = now();`
+  `update private.ai_limits set max_total_starts = <N>, updated_at = now() where id;`
+- Выключить AI (библиотека продолжает работать): `update private.ai_limits set ai_enabled = false, updated_at = now() where id;`
 - Состояние: `select * from private.ai_limits;`
