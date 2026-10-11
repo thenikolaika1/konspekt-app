@@ -24,9 +24,16 @@
   let client = null;
   let userPromise = null;
 
-  const sb = () => client || (client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  }));
+  // последний токен сессии — для отправки аналитики при уходе со страницы (fetch keepalive, без await)
+  let lastToken = "";
+  function sb() {
+    if (client) return client;
+    client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    });
+    client.auth.onAuthStateChange((_event, session) => (lastToken = session?.access_token || ""));
+    return client;
+  }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Таймауты только для шагов генерации, повтор которых идемпотентен (тот же note_id / тот же путь фото).
@@ -309,5 +316,26 @@
     return { result: data?.result || "invalid", access: data?.access || null };
   }
 
-  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote, getAccess, redeemInvite };
+  /**
+   * Аналитика (js/analytics.js): пакет событий в RPC public.track. Пользователя сервер берёт из JWT.
+   * keepalive — при уходе страницы: supabase-js так не умеет, поэтому прямой запрос с последним токеном
+   * (нет токена — не отправляем, события останутся в очереди до следующего запуска).
+   */
+  async function track(events, { keepalive = false } = {}) {
+    if (!keepalive) {
+      await ensureUser();
+      return callRpc("track", { p_events: events }, "TRACK_FAILED");
+    }
+    if (!lastToken) throw new Error("NO_SESSION");
+    const res = await fetch(cfg.supabaseUrl + "/rest/v1/rpc/track", {
+      method: "POST",
+      keepalive: true,
+      headers: { apikey: cfg.supabaseKey, Authorization: "Bearer " + lastToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_events: events }),
+    });
+    if (!res.ok) throw new Error("TRACK_FAILED");
+    return res.json();
+  }
+
+  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote, getAccess, redeemInvite, track };
 })();

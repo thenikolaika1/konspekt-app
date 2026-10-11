@@ -15,5 +15,7 @@
     supabaseKey: "sb_publishable_7t0cfHxy6z5QU4N1qW-4Og_6qcPhaQ_",
     analyzeFunction: "analyze-pages",
     pagesBucket: "temp-pages",
+    // аналитика использования (js/analytics.js): false — события не собираются и не отправляются
+    analytics: true,
   };
 })();

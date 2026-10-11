@@ -48,3 +48,17 @@ Dashboard: Edge Functions → Deploy a new function → Via Editor → имя `a
 - Поднять всем BETA не ниже N: `select private.admin_raise_beta_quota(10);` (только повышает).
 - Доступ пользователя: `select * from private.user_entitlements where user_id = '<user_id>';`
   и `select state, count(*) from private.usage_ledger where user_id = '<user_id>' group by 1;`
+
+### Ограничения AI на время F&F (`private.ai_limits`, миграция 20261011120000)
+
+Одна строка настроек; проверяет `start_text_generation`, AI при отказе не вызывается.
+
+- Окно F&F для прав по кодам приглашения: `beta_starts_at` … `beta_ends_at` (2026-10-12 00:00 — 2026-10-19 00:00 МСК).
+  Вне окна генерация отклоняется (`ACCESS_EXPIRED`), `get_my_access` показывает 0. Ручные права (`admin_set_entitlement`) окном не ограничены.
+- Коды F&F: `node tools/ff-invite-codes.mjs --count <N> --quota 1 --label "F&F" --expires 2026-10-19T00:00:00+03:00`.
+- `max_pages` — страниц в запросе (4); `max_user_starts` — запусков AI на пользователя F&F, включая неудачные (3);
+  `max_in_flight` — одновременных генераций (3).
+- Глобальный бюджет: `max_total_starts` (после миграции 0 — AI выключен, пока не задан явно), `total_starts` — счётчик.
+  `update private.ai_limits set max_total_starts = <N>, updated_at = now();`
+- Выключить AI (библиотека продолжает работать): `update private.ai_limits set ai_enabled = false, updated_at = now();`
+- Состояние: `select * from private.ai_limits;`
