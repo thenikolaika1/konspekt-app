@@ -20,6 +20,9 @@
  * @property {''|'classic-2'} [meta.format]  'classic-2' — новый формат (структура по пунктам учебника,
  *                                         сворачиваемые справочные блоки); у старых конспектов поля нет
  * @property {string[]} [meta.sourceOutline] заголовки основных пунктов учебника (classic-2)
+ * @property {string} [meta.selfCheckTitle] название раздела вопросов (по умолчанию «Вопросы и ответы»)
+ * @property {string} [meta.selfCheckNote] пометка под названием раздела вопросов
+ * @property {string} [meta.materialType] тип материала готового конспекта: «Решение задач», «Лабораторные работы», «Итоги главы»
  * @property {string} [lead]               «Главное» перед первым разделом (classic-2)
  * @property {{id:string, heading:string, blocks:Block[]}[]} sections
  * @property {Object} glossary
@@ -191,6 +194,12 @@
         })),
         format: FORMATS.includes(m.format) ? m.format : "",
         sourceOutline: strs(m.sourceOutline),
+        // необязательное название раздела вопросов (готовые конспекты: «Вопросы для самопроверки»); нет — поле не добавляется
+        ...(str(m.selfCheckTitle) ? { selfCheckTitle: str(m.selfCheckTitle) } : {}),
+        // необязательная пометка под названием раздела вопросов (например, «формулировки переданы своими словами»)
+        ...(str(m.selfCheckNote) ? { selfCheckNote: str(m.selfCheckNote) } : {}),
+        // необязательный тип материала (не теория параграфа): показывается меткой в шапке готового конспекта
+        ...(str(m.materialType) ? { materialType: str(m.materialType) } : {}),
       },
       lead: str(r.lead),
       sections,

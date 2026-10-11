@@ -1347,3 +1347,347 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 .access .invite-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.12)}
 .access .invite-error{min-height:20px;margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
 .access .primary:disabled{opacity:.7}
+
+/* ---------- библиотека готовых конспектов: те же поверхности, рамки и радиусы, что у закладок и карточек ---------- */
+.lib-entry,.lib-row{width:100%;display:grid;grid-template-columns:52px minmax(0,1fr) 20px;gap:14px;align-items:center;padding:11px 14px 11px 12px;border:1px solid #e3eaf2;border-radius:17px;background:linear-gradient(180deg,#fff,#fcfdff);box-shadow:0 8px 24px rgba(30,57,85,.055);color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform .18s ease,box-shadow .18s ease}
+.lib-entry:active,.lib-row:active{transform:scale(.985)}
+.lib-tile{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#f8fbff,#e9f4ff);border:1px solid #dcecff;color:var(--blue)}
+.lib-tile .ui-icon{width:24px;height:24px}
+.lib-row-text{min-width:0}
+.lib-row-text b{display:block;font-size:16px;line-height:21px;font-weight:800;overflow-wrap:anywhere}
+.lib-row-text .meta{display:block;margin-top:2px;font-size:12.5px;line-height:17px}
+.lib-entry .chev,.lib-row .chev{color:#9aa6b8;display:grid;place-items:center}
+.lib-entry .chev .ui-icon,.lib-row .chev .ui-icon{width:18px;height:18px}
+.lib-entry:focus-visible,.lib-row:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.lib-list{display:grid;gap:10px;margin-top:14px}
+.lib-group{margin:22px 2px 0;font-size:13px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.lib-group+.lib-list{margin-top:10px}
+.lib-path{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px;padding:0;list-style:none;font-size:12px;font-weight:700;color:#9aa6b8}
+.lib-path li{display:flex;align-items:center;gap:6px}
+.lib-path li+li:before{content:"›";color:#c3ccd8}
+.lib-path li.done{color:var(--muted)}
+.lib-path li.current{color:var(--blue)}
+.lib-screen .empty{padding-top:36px}
+@media (prefers-reduced-motion:reduce){.lib-entry,.lib-row{transition:none}.lib-entry:active,.lib-row:active{transform:none}}
+
+/* ---------- нижняя панель разделов: Главная · Библиотека · Фото · Я ---------- */
+.tabbar{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,430px);z-index:14;display:grid;grid-template-columns:repeat(4,1fr);padding:6px 6px calc(6px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid var(--line);box-shadow:0 -8px 24px rgba(25,48,76,.05)}
+.tabbar[hidden]{display:none}
+.tab{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0 2px;color:#8a95a8;font:inherit;font-size:10.5px;line-height:13px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:color .2s ease}
+.tab-ico{width:52px;height:30px;border-radius:15px;display:grid;place-items:center;transition:background-color .2s ease}
+.tab .ui-icon{width:23px;height:23px;transition:transform .18s ease}
+.tab:active .ui-icon{transform:scale(.92)}
+.tab.active{color:var(--blue)}
+.tab.active .tab-ico{background:#eaf3ff}
+.tab:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:14px}
+/* содержимое и плавающая кнопка не уходят под панель */
+body.has-tabbar .app{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+body.has-tabbar .fab{bottom:calc(90px + env(safe-area-inset-bottom))}
+/* «Я»: строки «Конспекты» и «Закладки» открывают свои списки */
+button.profile-row{width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button.profile-row>div:nth-child(2){flex:1}
+button.profile-row .chev{color:#9aa6b8;display:grid;place-items:center}
+button.profile-row .chev .ui-icon{width:18px;height:18px}
+button.profile-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+@media (prefers-reduced-motion:reduce){.tab,.tab-ico,.tab .ui-icon{transition:none}.tab:active .ui-icon{transform:none}}
+
+/* =====================================================================================
+   ЕДИНЫЙ ВИЗУАЛЬНЫЙ ЯЗЫК (задача №3): эталон — главная (мягкие градиенты, искры, глубина).
+   Токены ниже используют библиотека, готовые конспекты, профиль и нижняя панель.
+   Глобального сброса нет: правила ограничены своими экранами/компонентами.
+   ===================================================================================== */
+:root{
+  --ds-r-xl:24px;--ds-r-lg:20px;--ds-r:16px;--ds-r-sm:12px;
+  --ds-sh-1:0 1px 2px rgba(20,28,64,.05),0 8px 22px rgba(20,40,90,.07);
+  --ds-sh-2:0 2px 6px rgba(20,28,64,.05),0 16px 36px rgba(20,60,140,.11);
+  --ds-line:#e5ebf3;
+  --ds-hero:radial-gradient(circle at 92% 18%,rgba(255,255,255,.65),transparent 24%),linear-gradient(135deg,#eaf5ff 0%,#f3f8ff 46%,#eef9f3 100%);
+  --ds-press:.982;
+  --ds-t-fast:120ms;--ds-t:180ms;
+  --tabbar-h:72px;
+}
+/* палитры коллекций: насыщенный тон, тёмный текст, мягкая поверхность, рамка, акцент, градиенты */
+[class*="subj-"]{--sj:#1666c8;--sj-ink:#0d4a96;--sj-soft:#e8f2fe;--sj-line:#d6e6fa;--sj-accent:#8ab8f5;
+  --sj-grad:linear-gradient(135deg,#eef6ff 0%,#e8f2fe 55%,#eef4fb 100%);--sj-deep:linear-gradient(150deg,#3a95f7 0%,#1666c8 60%,#174f9e 100%);--sj-glow:rgba(10,124,244,.08)}
+.subj-history{--sj:#982c44;--sj-ink:#6f1f33;--sj-soft:#f8e9ec;--sj-line:#f0d8de;--sj-accent:#d9a441;
+  --sj-grad:linear-gradient(135deg,#fff5ea 0%,#fbe9ea 52%,#f5e7f1 100%);--sj-deep:linear-gradient(150deg,#c0566a 0%,#982c44 55%,#6d2140 100%);--sj-glow:rgba(152,44,68,.08)}
+.subj-biology{--sj:#11805a;--sj-ink:#0b5f42;--sj-soft:#e3f4eb;--sj-line:#cdebdb;--sj-accent:#8ddbb8;
+  --sj-grad:linear-gradient(135deg,#f1fbf5 0%,#e3f4eb 55%,#eaf6f7 100%);--sj-deep:linear-gradient(150deg,#2aa676 0%,#11805a 60%,#0d6649 100%);--sj-glow:rgba(17,128,90,.08)}
+.subj-physics{--sj:#3f4fd8;--sj-ink:#2c37a3;--sj-soft:#ebedfd;--sj-line:#d9ddfa;--sj-accent:#a78bfa;
+  --sj-grad:linear-gradient(135deg,#eef3ff 0%,#ebedfd 55%,#f2ecfd 100%);--sj-deep:linear-gradient(150deg,#5d6ff2 0%,#3f4fd8 60%,#5a3ec4 100%);--sj-glow:rgba(63,79,216,.08)}
+.subj-chemistry{--sj:#1666c8;--sj-ink:#0f4c94;--sj-accent:#6fd3cf;--sj-grad:linear-gradient(135deg,#ecf8f8 0%,#e4f0fb 60%,#eef4fb 100%)}
+.subj-geography{--sj:#0c7fa0;--sj-ink:#085d76;--sj-soft:#e0f3f6;--sj-line:#c9e8ee;--sj-accent:#7fd3c4;--sj-grad:linear-gradient(135deg,#eaf8fa 0%,#e0f3f6 55%,#eaf4fb 100%);--sj-deep:linear-gradient(150deg,#22a3c4 0%,#0c7fa0 60%,#0a5f80 100%)}
+.subj-literature{--sj:#7d3c8e;--sj-ink:#5e2b6c;--sj-soft:#f4ebf6;--sj-line:#e8d8ec;--sj-accent:#e3a4c7;--sj-grad:linear-gradient(135deg,#fbf2f7 0%,#f4ebf6 55%,#efeafb 100%);--sj-deep:linear-gradient(150deg,#a05ab2 0%,#7d3c8e 60%,#5d2a6e 100%)}
+.subj-russian{--sj:#23409e;--sj-ink:#1a3079;--sj-soft:#e9edf9;--sj-line:#d7def4;--sj-accent:#e48c97;--sj-deep:linear-gradient(150deg,#4565c9 0%,#23409e 60%,#1b307a 100%)}
+
+/* корень раздела нижней панели: без стрелки «назад», заголовок на месте стрелки */
+.screen-head.tab-root{padding-top:max(14px,calc(20px - env(safe-area-inset-top)))}
+
+/* ---------- библиотека: коллекции предметов ---------- */
+.lib-screen{background:radial-gradient(440px 280px at 108% -60px,var(--sj-glow,rgba(10,124,244,.07)),transparent 70%) no-repeat,radial-gradient(360px 240px at -60px 140px,rgba(31,157,116,.04),transparent 70%) no-repeat,var(--bg)}
+.lib-screen .lib-path{margin:6px 0 2px}
+.lib-coll,.lib-book,.lib-book-hero{position:relative;overflow:hidden;isolation:isolate}
+.lib-coll{width:100%;min-height:118px;display:grid;grid-template-columns:58px minmax(0,1fr) 34px;gap:16px;align-items:center;padding:20px 16px 20px 18px;border:1px solid var(--sj-line);border-radius:var(--ds-r-xl);
+  background:var(--sj-grad);box-shadow:var(--ds-sh-2);color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  transition:transform var(--ds-t-fast) var(--ease-out,ease),box-shadow var(--ds-t) ease}
+.lib-coll:active{transform:scale(var(--ds-press));box-shadow:var(--ds-sh-1)}
+.lib-deco{position:absolute;right:-4px;top:-6px;width:120px;height:90px;color:var(--sj);opacity:.32;z-index:-1;pointer-events:none}
+.lib-coll-ico{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;background:var(--sj-deep);color:#fff;box-shadow:0 10px 20px rgba(20,28,64,.16),inset 0 1px 0 rgba(255,255,255,.25)}
+.lib-coll-ico .ui-icon{width:28px;height:28px;stroke-width:1.9}
+.lib-coll-text{min-width:0}
+.lib-coll-text b{display:block;font-size:21px;line-height:25px;font-weight:850;letter-spacing:-.4px;color:var(--navy);overflow-wrap:anywhere}
+.lib-coll-meta{display:block;margin-top:4px;font-size:13px;line-height:17px;font-weight:650;color:var(--sj-ink)}
+.lib-coll-go{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.85);color:var(--sj);box-shadow:0 2px 6px rgba(20,28,64,.08)}
+.lib-coll-go .ui-icon{width:18px;height:18px}
+
+/* ---------- учебник: стилизованная обложка (корешок, цифра класса), без выдуманного названия ---------- */
+.lib-cover{position:relative;flex:none;width:62px;height:82px;border-radius:5px 12px 12px 5px;background:var(--sj-deep);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding-left:6px;box-shadow:0 10px 20px rgba(20,28,64,.18),inset 0 1px 0 rgba(255,255,255,.22);overflow:hidden}
+.lib-cover-spine{position:absolute;left:0;top:0;bottom:0;width:8px;background:rgba(0,0,0,.18);box-shadow:1px 0 0 rgba(255,255,255,.18)}
+.lib-cover-grade{font-size:28px;line-height:28px;font-weight:850;letter-spacing:-.5px}
+.lib-cover-lbl{margin-top:2px;font-size:9px;line-height:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;opacity:.85}
+.lib-cover-lines{position:absolute;left:16px;right:9px;bottom:10px;height:11px;background:repeating-linear-gradient(rgba(255,255,255,.4) 0 2px,transparent 2px 5px)}
+.lib-cover-ico .ui-icon{width:26px;height:26px}
+.lib-cover.big{width:80px;height:106px}
+.lib-cover.big .lib-cover-grade{font-size:38px;line-height:38px}
+.lib-cover.big .lib-cover-lbl{font-size:10px}
+.lib-book{width:100%;display:grid;grid-template-columns:62px minmax(0,1fr) 20px;gap:16px;align-items:center;padding:14px 14px 14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-r-lg);
+  background:linear-gradient(180deg,#fff,#fcfdff);box-shadow:var(--ds-sh-1);color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  transition:transform var(--ds-t-fast) var(--ease-out,ease),background-color var(--ds-t) ease}
+.lib-book:active{transform:scale(var(--ds-press));background:var(--sj-soft)}
+.lib-book-text{min-width:0;display:flex;flex-direction:column;gap:3px}
+.lib-book-text b{font-size:18px;line-height:23px;font-weight:850;letter-spacing:-.3px;overflow-wrap:anywhere}
+.lib-kicker{font-size:11px;line-height:14px;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:var(--sj)}
+.lib-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.lib-chips span{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;line-height:15px;font-weight:700;white-space:nowrap}
+.lib-book-authors{font-size:13px;line-height:17px;color:var(--muted)}
+.lib-book .chev,.lib-par .chev{color:#a3aec0;display:grid;place-items:center}
+.lib-book .chev .ui-icon,.lib-par .chev .ui-icon{width:18px;height:18px}
+.lib-book-hero{display:grid;grid-template-columns:80px minmax(0,1fr);gap:18px;align-items:center;margin-top:16px;padding:18px;border:1px solid var(--sj-line);border-radius:var(--ds-r-xl);background:var(--sj-grad);box-shadow:var(--ds-sh-2)}
+.lib-book-hero .lib-chips span{background:rgba(255,255,255,.8);border:1px solid var(--sj-line)}
+
+/* ---------- параграфы: номер — меткой, название — крупно; плотно, чтобы десятки пунктов листались легко ---------- */
+.lib-group-row{display:flex;align-items:center;gap:8px;margin:26px 2px 10px}
+.lib-group-row .lib-group{margin:0}
+.lib-group-n{min-width:22px;padding:2px 8px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;line-height:16px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
+.lib-list.lib-pars{gap:8px;margin-top:0}
+.lib-par{width:100%;display:grid;grid-template-columns:62px minmax(0,1fr) 18px;gap:12px;align-items:center;min-height:62px;padding:11px 12px 11px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-r);
+  background:#fff;box-shadow:0 1px 2px rgba(20,28,64,.04),0 4px 12px rgba(20,40,90,.04);color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  transition:transform var(--ds-t-fast) var(--ease-out,ease),background-color var(--ds-t) ease,border-color var(--ds-t) ease}
+.lib-par:active{transform:scale(var(--ds-press));background:var(--sj-soft);border-color:var(--sj-line)}
+.lib-par-num{justify-self:stretch;display:grid;place-items:center;min-height:34px;padding:4px 6px;border-radius:10px;background:var(--sj-soft);color:var(--sj-ink);font-size:13.5px;line-height:16px;font-weight:850;white-space:nowrap;font-variant-numeric:tabular-nums}
+.lib-par-num.extra{background:linear-gradient(145deg,#fff8e8,#fbecd0);color:#b57d1f}
+.lib-par-num .ui-icon{width:17px;height:17px}
+.lib-par-title{min-width:0;font-size:15.5px;line-height:20px;font-weight:700;letter-spacing:-.1px;overflow-wrap:anywhere;text-wrap:pretty}
+.lib-par.soon{background:#fbfcfe;box-shadow:none}
+.lib-par.soon .lib-par-title{color:var(--muted)}
+.lib-soon{justify-self:end;grid-column:3;padding:3px 7px;border-radius:999px;background:#eef1f6;color:var(--muted);font-size:11px;font-weight:800;white-space:nowrap}
+.lib-par.soon{grid-template-columns:62px minmax(0,1fr) auto}
+.lib-coll:focus-visible,.lib-book:focus-visible,.lib-par:focus-visible,.pf-tile:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+/* ---------- готовый конспект: шапка, оглавление, мягкие карточки, открытый справочник ---------- */
+.lib-note{--s:var(--sj);--s-ink:var(--sj-ink);--s-soft:var(--sj-soft);--s-line:var(--sj-line)}
+.lib-note .note-head-top{align-items:center;gap:6px}
+.lib-note-bar-t{flex:1;min-width:0;font-size:14px;line-height:18px;font-weight:750;color:var(--k-muted,var(--muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-note .cn-intro.lr-hero{position:relative;overflow:hidden;margin:6px 0 12px;padding:18px 18px 16px;border:1px solid var(--sj-line);border-radius:var(--ds-r-xl);background:var(--sj-grad);box-shadow:var(--ds-sh-1)}
+.lib-note .lr-hero:after{content:"";position:absolute;right:-30px;top:-40px;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.7),transparent 68%);pointer-events:none}
+.lr-hero-top{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* тип материала готового конспекта («Решение задач», «Лабораторные работы», «Итоги главы») — метка рядом с предметом */
+.lr-kind{min-width:0;margin-right:auto;padding:4px 10px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12.5px;line-height:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-par-kind{display:block;margin-top:3px;color:var(--sj-ink);font-size:12.5px;line-height:16px;font-weight:750}
+.lib-note .lr-hero .cn-kicker{font-size:12px;line-height:16px;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:var(--sj)}
+.lr-badge{flex:none;padding:5px 11px;border-radius:999px;background:var(--sj-deep);color:#fff;font-size:13px;line-height:16px;font-weight:850;white-space:nowrap;box-shadow:0 6px 14px rgba(20,28,64,.14)}
+.lib-note .cn-intro.lr-hero .note-title{position:relative;z-index:1;margin:10px 0 6px;font-size:26px;line-height:30px;font-weight:850;letter-spacing:-.5px;color:var(--navy);text-wrap:balance;overflow-wrap:anywhere}
+.lib-note .cn-intro.lr-hero .note-meta.lr-where{position:relative;z-index:1;margin:0;font-size:13.5px;line-height:18px;font-weight:650;color:var(--sj-ink)}
+.lib-note .lr-where .sep{margin:0 6px;color:var(--sj-accent)}
+.lr-stats{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;padding:0;list-style:none}
+.lr-stats li{padding:4px 9px;border-radius:999px;background:rgba(255,255,255,.8);border:1px solid var(--sj-line);color:var(--sj-ink);font-size:12px;line-height:15px;font-weight:700;white-space:nowrap}
+.lr-toc{margin:0 0 14px;padding:12px 10px 6px;border:1px solid var(--ds-line);border-radius:var(--ds-r-lg);background:#fff;box-shadow:var(--ds-sh-1)}
+.lr-toc-h{margin:0 6px 4px;font-size:11px;line-height:14px;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.lr-toc ol{margin:0;padding:0;list-style:none}
+.lr-toc li+li{border-top:1px solid #f0f3f8}
+.lr-toc button{width:100%;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:9px 6px;border:0;border-radius:10px;background:none;color:var(--navy);font:inherit;font-size:15px;line-height:19px;font-weight:650;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color var(--ds-t) ease}
+.lr-toc button:active{background:var(--sj-soft)}
+.lr-toc button:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.lr-toc-n{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;font-weight:850;font-variant-numeric:tabular-nums}
+.lr-toc-t{min-width:0;overflow-wrap:anywhere}
+.lib-note .cn-body.cn-v2{border-radius:var(--ds-r-xl);box-shadow:0 0 0 1px var(--ds-line),var(--ds-sh-1);padding:16px 16px 12px}
+.lib-note .cn-v2 .cn-sec{scroll-margin-top:84px}
+.lib-note .cn-v2 .cn-sec+.cn-sec{margin-top:22px;padding-top:20px}
+.lib-note .cn-h2 .cn-num{background:var(--sj-soft);color:var(--sj-ink);border-color:var(--sj-line)}
+.lib-note .cn-body .kw-date{color:var(--sj)}
+/* «Главное» и «Важно»: мягкие карточки без жирных рамок */
+.lib-note .cn-box.k-main.lead{border:1px solid #d9e7fb;border-radius:var(--ds-r);background:linear-gradient(135deg,#f5f9ff,#edf4fe);box-shadow:none}
+.lib-note .cn-v2 .cn-box.k-imp{border:1px solid #f1e2c4;border-radius:14px;background:linear-gradient(135deg,#fffaf0,#fdf3e2);box-shadow:none}
+.lib-note .cn-v2 .cn-box.k-imp .cn-box-label{color:#9a6a1f}
+.lib-note .cn-end.k-concl{border-radius:var(--ds-r-lg)}
+/* справочник: заголовок со счётчиком */
+.lr-count{padding:2px 8px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;line-height:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.lr-terms{display:grid;gap:8px;margin:0}
+.lr-term{padding:12px 14px;border:1px solid var(--ds-line);border-left:3px solid #8fcfb2;border-radius:14px;background:#fff}
+.lr-term dt{font-size:15.5px;line-height:20px;font-weight:800;overflow-wrap:anywhere}
+.lr-term dd{margin:4px 0 0;font-size:15px;line-height:1.5;color:var(--k-text,#262d55);overflow-wrap:anywhere}
+.lr-people{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.lr-person{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:start;padding:12px;border:1px solid var(--ds-line);border-radius:14px;background:#fff}
+.lr-mono{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--sj-deep);color:#fff;font-size:16px;font-weight:850;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.lr-person b{display:block;font-size:15.5px;line-height:20px;font-weight:800;overflow-wrap:anywhere}
+.lr-person p{margin:3px 0 0;font-size:14.5px;line-height:1.45;color:var(--k-text,#262d55);overflow-wrap:anywhere}
+.lr-timeline{position:relative;margin:0;padding:2px 0 0 22px;list-style:none}
+.lr-timeline:before{content:"";position:absolute;left:6px;top:10px;bottom:12px;width:2px;border-radius:2px;background:linear-gradient(var(--sj-line),var(--sj-soft))}
+.lr-timeline li{position:relative;padding:0 0 14px 4px}
+.lr-timeline li:last-child{padding-bottom:2px}
+.lr-timeline li:before{content:"";position:absolute;left:-21px;top:5px;width:12px;height:12px;border-radius:50%;background:#fff;border:3px solid var(--sj);box-sizing:border-box}
+.lib-note .lr-date{display:inline-block;padding:2px 8px;border-radius:8px;background:var(--sj-soft);color:var(--sj-ink);font-size:13px;line-height:18px;font-weight:800}
+.lr-timeline p{margin:4px 0 0;font-size:15px;line-height:1.48;color:var(--k-text,#262d55);overflow-wrap:anywhere}
+/* вопросы и ответы: карточка вопроса, ответ отделён линией и подписью */
+.lib-note .cn-qa .cn-ref{margin:8px 0 0;border:1px solid var(--ds-line);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(20,28,64,.04)}
+.lib-note .cn-qa .cn-q-n{color:var(--sj)}
+.lib-note .cn-qa .qa-a{margin:0;padding-top:10px;border-top:1px dashed var(--ds-line)}
+.lib-note .cn-qa .cn-qa-note{margin:-4px 0 4px;font-size:13px;line-height:18px;color:#5b6475}
+.lib-note .cn-qa .qa-a:before{content:"Ответ";display:block;margin-bottom:3px;font-size:11px;line-height:14px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;color:#1f9d74}
+
+/* ---------- профиль ---------- */
+.profile-screen .pf-hero{position:relative;overflow:hidden;isolation:isolate;display:flex;align-items:center;gap:16px;min-height:124px;margin-top:10px;padding:22px 18px;border:1px solid #dbeafb;border-radius:var(--ds-r-xl);background:var(--ds-hero);box-shadow:0 14px 35px rgba(10,124,244,.10)}
+.pf-hero .hero-orb{z-index:-1}
+.pf-hero .deco-hero-a{left:auto;right:22px;top:16px}
+.pf-avatar{flex:none;width:72px;height:72px;border-radius:50%;display:grid;place-items:center;background:var(--blue-grad,#0a7cf4);color:#fff;font-size:30px;font-weight:850;box-shadow:0 10px 22px rgba(10,124,244,.28),inset 0 0 0 3px rgba(255,255,255,.35)}
+.pf-id{min-width:0}
+.pf-id h2{margin:0;font-size:23px;line-height:28px;font-weight:850;letter-spacing:-.4px;color:var(--navy);overflow-wrap:anywhere}
+.pf-id p{margin:4px 0 0;font-size:13px;line-height:17px;font-weight:650;color:var(--blue-deep,var(--blue))}
+.pf-h{margin:26px 2px 10px;font-size:12px;line-height:16px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pf-tiles{display:grid;gap:10px}
+.pf-tile{width:100%;display:grid;grid-template-columns:46px minmax(0,1fr) 18px;gap:14px;align-items:center;padding:14px;border:1px solid var(--ds-line);border-radius:var(--ds-r-lg);background:linear-gradient(180deg,#fff,#fcfdff);box-shadow:var(--ds-sh-1);
+  color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform var(--ds-t-fast) var(--ease-out,ease)}
+.pf-tile:active{transform:scale(var(--ds-press))}
+.pf-tile-ico,.pf-row-ico{display:grid;place-items:center;border-radius:14px}
+.pf-tile-ico{width:46px;height:46px}
+.pf-tile.tone-blue .pf-tile-ico{background:linear-gradient(145deg,#eef6ff,#dcebff);color:var(--blue)}
+.pf-tile.tone-lav .pf-tile-ico{background:linear-gradient(145deg,#f4f0fe,#e6defc);color:var(--lav,#7a5ce6)}
+.pf-tile-text{min-width:0}
+.pf-tile-text b{display:block;font-size:16px;line-height:20px;font-weight:800}
+.pf-tile-text .meta{display:block;margin-top:2px;font-size:12.5px;line-height:16px}
+.pf-tile .chev{color:#a3aec0;display:grid;place-items:center}
+.pf-tile .chev .ui-icon{width:18px;height:18px}
+.pf-card{overflow:hidden;border:1px solid var(--ds-line);border-radius:var(--ds-r-lg);background:#fff;box-shadow:var(--ds-sh-1)}
+.pf-row{display:flex;align-items:center;gap:12px;padding:13px 14px}
+.pf-row+.pf-row{border-top:1px solid #eef2f7}
+.pf-row b{font-size:15.5px;font-weight:750}
+.pf-row-ico{width:38px;height:38px;border-radius:12px}
+.pf-row-ico.tone-mint{background:var(--mint-pale,#e4f5ee);color:var(--mint,#1f9d74)}
+.pf-row-ico.tone-gold{background:#fbf2e1;color:#a8782a}
+.pf-foot{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:30px}
+.pf-foot .bookmark-logo{width:42px;height:42px;margin:0}
+.pf-foot .bookmark-logo img{width:42px;height:42px}
+
+/* ---------- нижняя панель: матовая поверхность, отступ контента = её реальная высота ---------- */
+.tabbar{background:rgba(255,255,255,.88);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border-top:1px solid rgba(214,224,238,.9);box-shadow:0 -6px 22px rgba(20,40,90,.06);will-change:transform}
+.tabbar.leaving{pointer-events:none}
+.tab{transition:color var(--ds-t) ease}
+.tab.active{color:var(--blue-deep,var(--blue))}
+.tab.active .tab-ico{background:linear-gradient(180deg,#e9f3ff,#dbeaff);box-shadow:inset 0 0 0 1px rgba(10,124,244,.08)}
+body.has-tabbar .app{padding-bottom:calc(var(--tabbar-h) + 24px)}
+body.has-tabbar .fab{bottom:calc(var(--tabbar-h) + 18px)}
+@media (prefers-reduced-motion:reduce){.lib-coll,.lib-book,.lib-par,.pf-tile,.lr-toc button{transition:none}.lib-coll:active,.lib-book:active,.lib-par:active,.pf-tile:active{transform:none}}
+/* поправки по визуальной проверке: отступы абзацев в справочнике (перебивают общие правила .cn-v2 p), декор обложки */
+.lib-note .cn-body .lr-person p,.lib-note .cn-body .lr-timeline p{margin:3px 0 0}
+.lib-note .cn-body .lr-term dd{margin:4px 0 0}
+.lib-book-hero .lib-deco{right:-10px;top:-14px;opacity:.24}
+.lib-hint{display:flex;align-items:center;gap:8px;margin:16px 4px 0;font-size:13px;line-height:18px;color:var(--muted)}
+.lib-hint .ui-icon{flex:none;width:16px;height:16px;color:var(--blue)}
+
+/* =====================================================================================
+   ЗАДАЧА №4: цветовые акценты и сворачиваемый справочник — только готовые конспекты библиотеки (.lib-note).
+   Пять мягких тематических цветов (тон / тёмный текст / поверхность / рамка), гармонируют с главной:
+   Главное — зелёный, Важно — голубой, Термины — фиолетовый, Даты — янтарный, Личности — бирюзовый.
+   Обычный текст не раскрашивается: цвет получают только блоки, которые уже размечены в данных.
+   ===================================================================================== */
+.lib-note{
+  --lr-main:#2a9d6c;--lr-main-ink:#17694a;--lr-main-soft:#eefaf3;--lr-main-line:#cdeedc;
+  --lr-imp:#2f80e4;--lr-imp-ink:#1c5aa6;--lr-imp-soft:#eef5ff;--lr-imp-line:#d3e3fa;
+  --lr-term:#7a5ce6;--lr-term-ink:#5a3fbf;--lr-term-soft:#f5f1fe;--lr-term-line:#e3dafb;
+  --lr-date:#d48a1c;--lr-date-ink:#8a560b;--lr-date-soft:#fff7e8;--lr-date-line:#f5e0b6;
+  --lr-person:#1b9aa0;--lr-person-ink:#126a6f;--lr-person-soft:#eaf8f8;--lr-person-line:#c6ebec;
+  --lr-formula:#2f5bea;--lr-formula-ink:#1f3fae;--lr-formula-soft:#eef2fe;--lr-formula-line:#d5defc;
+}
+/* иконка подписи карточки (маска SVG, цвет = цвет подписи) */
+.lib-note .cn-box.k-main.lead .cn-box-label:before,.lib-note .cn-v2 .cn-box.k-imp .cn-box-label:before{content:"";flex:none;width:15px;height:15px;background:currentColor;-webkit-mask:var(--lr-mask) center/contain no-repeat;mask:var(--lr-mask) center/contain no-repeat}
+.lib-note .cn-box.k-main.lead .cn-box-label,.lib-note .cn-v2 .cn-box.k-imp .cn-box-label{display:flex;align-items:center;gap:6px}
+
+/* Главное: нежно-зелёная карточка с левым акцентом */
+.lib-note .cn-box.k-main.lead{--k:var(--lr-main);--k-ink:var(--lr-main-ink);--k-soft:var(--lr-main-soft);--k-line:var(--lr-main-line);
+  border:1px solid var(--lr-main-line);border-left:4px solid var(--lr-main);border-radius:var(--ds-r);background:linear-gradient(135deg,#f3fcf7,var(--lr-main-soft));box-shadow:0 1px 2px rgba(20,60,40,.04),0 6px 16px rgba(42,157,108,.07)}
+.lib-note .cn-box.k-main.lead .cn-box-label{color:var(--lr-main-ink);--lr-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3c.6 4.2 2.4 6.3 7 7-4.6.7-6.4 2.8-7 7-.6-4.2-2.4-6.3-7-7 4.6-.7 6.4-2.8 7-7Z'/%3E%3C/svg%3E")}
+/* Важно: нежно-голубая карточка с левым акцентом */
+.lib-note .cn-v2 .cn-box.k-imp{--k:var(--lr-imp);--k-ink:var(--lr-imp-ink);--k-soft:var(--lr-imp-soft);--k-line:var(--lr-imp-line);
+  border:1px solid var(--lr-imp-line);border-left:4px solid var(--lr-imp);border-radius:14px;background:linear-gradient(135deg,#f4f8ff,var(--lr-imp-soft));box-shadow:0 1px 2px rgba(20,40,90,.04),0 6px 16px rgba(47,128,228,.07)}
+.lib-note .cn-v2 .cn-box.k-imp .cn-box-label{color:var(--lr-imp-ink);--lr-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.3 5.2h2.6v7.4h-2.6Zm0 9.2h2.6V19h-2.6Z'/%3E%3C/svg%3E")}
+
+/* сворачиваемые блоки справочника: цветной левый акцент, мягкий фон, иконка, название, число, стрелка */
+.lib-note .cn-v2 .cn-ref.lr-acc{--k:var(--lr-a);--k-ink:var(--lr-a-ink);--k-soft:var(--lr-a-soft);--k-line:var(--lr-a-line);
+  margin-top:12px;border:1px solid var(--lr-a-line);border-left:4px solid var(--lr-a);border-radius:var(--ds-r);background:linear-gradient(135deg,#fff 0%,var(--lr-a-soft) 100%);box-shadow:0 1px 2px rgba(20,28,64,.04),0 6px 16px rgba(20,40,90,.05);overflow:hidden;scroll-margin-top:84px}
+.lib-note .cn-body>.cn-sec+.lr-acc{margin-top:24px}
+.lib-note .lr-acc.terms{--lr-a:var(--lr-term);--lr-a-ink:var(--lr-term-ink);--lr-a-soft:var(--lr-term-soft);--lr-a-line:var(--lr-term-line)}
+.lib-note .lr-acc.people{--lr-a:var(--lr-person);--lr-a-ink:var(--lr-person-ink);--lr-a-soft:var(--lr-person-soft);--lr-a-line:var(--lr-person-line)}
+.lib-note .lr-acc.dates{--lr-a:var(--lr-date);--lr-a-ink:var(--lr-date-ink);--lr-a-soft:var(--lr-date-soft);--lr-a-line:var(--lr-date-line)}
+.lib-note .lr-acc.formulas{--lr-a:var(--lr-formula);--lr-a-ink:var(--lr-formula-ink);--lr-a-soft:var(--lr-formula-soft);--lr-a-line:var(--lr-formula-line)}
+.lib-note .lr-formulas{display:grid;gap:10px}
+.lib-note .lr-formula{padding:10px 12px;border:1px solid var(--lr-formula-line);border-left:4px solid var(--lr-formula);border-radius:12px;background:#fff}
+.lib-note .lr-formula .formula{margin:0 0 4px;font-family:"Times New Roman",Georgia,serif;font-size:21px;line-height:27px;font-style:italic;text-align:center;color:var(--lr-formula-ink);overflow-wrap:anywhere}
+.lib-note .lr-formula p{margin:4px 0 0;font-size:15px;line-height:1.45}
+.lib-note .lr-formula .cn-vars{margin:6px 0 0;padding-left:20px;font-size:14.5px;line-height:1.45}
+.lib-note .lr-acc .cn-ref-btn{width:100%;display:flex;align-items:center;gap:12px;min-height:58px;padding:11px 14px 11px 12px;border:0;background:none;color:var(--lr-a-ink);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.lib-note .lr-acc .cn-ref-btn:active{background:rgba(255,255,255,.5)}
+.lib-note .lr-acc .cn-ref-btn:focus-visible{outline:2px solid var(--lr-a);outline-offset:-3px;border-radius:12px}
+.lr-acc-ico{flex:none;width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:#fff;color:var(--lr-a);box-shadow:0 0 0 1px var(--lr-a-line),0 3px 8px rgba(20,28,64,.06)}
+.lr-ico{width:20px;height:20px;display:block}
+.lib-note .lr-acc .cn-ref-t{font-size:17px;line-height:22px;font-weight:850;letter-spacing:-.2px;color:var(--lr-a-ink)}
+.lib-note .lr-acc .lr-count{flex:none;min-width:26px;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid var(--lr-a-line);color:var(--lr-a-ink);font-size:12.5px;line-height:17px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
+.lib-note .lr-acc .cn-ref-chev{color:var(--lr-a);width:20px;height:20px}
+.lib-note .lr-acc .cn-ref-body{padding:2px 12px 12px}
+/* содержимое: элементы в цвете своего блока */
+.lib-note .lr-acc .lr-term{border-left-color:var(--lr-term)}
+.lib-note .lr-acc .lr-term dt{color:var(--lr-term-ink)}
+.lib-note .lr-acc .lr-mono{background:linear-gradient(150deg,#39b8bd,var(--lr-person) 60%,#13797e)}
+.lib-note .lr-acc .lr-person b{color:var(--lr-person-ink)}
+.lib-note .lr-acc .lr-timeline:before{background:linear-gradient(var(--lr-date-line),var(--lr-date-soft))}
+.lib-note .lr-acc .lr-timeline li:before{border-color:var(--lr-date)}
+.lib-note .lr-acc .lr-date{background:#fff;border:1px solid var(--lr-date-line);color:var(--lr-date-ink)}
+.lib-note .lr-acc .lr-terms,.lib-note .lr-acc .lr-people{gap:8px}
+.lib-note .lr-acc .lr-timeline{padding-top:6px}
+/* оглавление: пункты справочника с тематической иконкой и числом */
+.lr-toc-ref .lr-toc-n{background:var(--lr-a-soft);color:var(--lr-a)}
+.lr-toc-ref .lr-toc-n .lr-ico{width:15px;height:15px}
+.lr-toc-ref{grid-template-columns:28px minmax(0,1fr) auto!important}
+.lr-toc-ref.terms{--lr-a:var(--lr-term);--lr-a-soft:var(--lr-term-soft);--lr-a-ink:var(--lr-term-ink)}
+.lr-toc-ref.people{--lr-a:var(--lr-person);--lr-a-soft:var(--lr-person-soft);--lr-a-ink:var(--lr-person-ink)}
+.lr-toc-ref.dates{--lr-a:var(--lr-date);--lr-a-soft:var(--lr-date-soft);--lr-a-ink:var(--lr-date-ink)}
+.lr-toc-ref.formulas{--lr-a:var(--lr-formula);--lr-a-soft:var(--lr-formula-soft);--lr-a-ink:var(--lr-formula-ink)}
+.lr-toc-c{padding:1px 7px;border-radius:999px;background:var(--lr-a-soft);color:var(--lr-a-ink);font-size:12px;line-height:16px;font-weight:800;font-variant-numeric:tabular-nums}
+
+/* =====================================================================================
+   ЗАДАЧА №5: уровень «Класс» в библиотеке. Карточка класса — в той же системе, что коллекции предметов v46:
+   градиент, декор главной, крупная цифра класса; палитры классов — голубая, мятная, лавандовая (как ореолы главной).
+   ===================================================================================== */
+.gr-a{--sj:#1666c8;--sj-ink:#0d4a96;--sj-soft:#e8f2fe;--sj-line:#d6e6fa;--sj-accent:#8ab8f5;--sj-glow:rgba(10,124,244,.08);
+  --sj-grad:linear-gradient(135deg,#eef6ff 0%,#e8f2fe 55%,#f0f4fd 100%);--sj-deep:linear-gradient(150deg,#3a95f7 0%,#1666c8 60%,#174f9e 100%)}
+.gr-b{--sj:#14855f;--sj-ink:#0b5f42;--sj-soft:#e3f4eb;--sj-line:#cdebdb;--sj-accent:#8ddbb8;--sj-glow:rgba(17,128,90,.08);
+  --sj-grad:linear-gradient(135deg,#f1fbf5 0%,#e3f4eb 55%,#eaf6f7 100%);--sj-deep:linear-gradient(150deg,#2aa676 0%,#14855f 60%,#0d6649 100%)}
+.gr-c{--sj:#6a4fd6;--sj-ink:#4c34a8;--sj-soft:#efebfd;--sj-line:#e0d8fa;--sj-accent:#b9a6f3;--sj-glow:rgba(122,92,230,.08);
+  --sj-grad:linear-gradient(135deg,#f4f0fe 0%,#efebfd 55%,#eef2fe 100%);--sj-deep:linear-gradient(150deg,#8b72f0 0%,#6a4fd6 60%,#5338b4 100%)}
+.lib-grade{position:relative;overflow:hidden;isolation:isolate;width:100%;min-height:122px;display:grid;grid-template-columns:64px minmax(0,1fr) 34px;gap:16px;align-items:center;
+  padding:18px 16px 18px 18px;border:1px solid var(--sj-line);border-radius:var(--ds-r-xl);background:var(--sj-grad);box-shadow:var(--ds-sh-2);color:var(--navy);font:inherit;text-align:left;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform var(--ds-t-fast) var(--ease-out,ease),box-shadow var(--ds-t) ease}
+.lib-grade:active{transform:scale(var(--ds-press));box-shadow:var(--ds-sh-1)}
+.lib-grade:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.lib-grade-num{width:64px;height:64px;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--sj-deep);color:#fff;box-shadow:0 10px 20px rgba(20,28,64,.16),inset 0 1px 0 rgba(255,255,255,.25)}
+.lib-grade-num b{font-size:30px;line-height:30px;font-weight:850;letter-spacing:-.5px}
+.lib-grade-num span{margin-top:2px;font-size:9.5px;line-height:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;opacity:.9}
+.lib-grade .lib-chips span{background:rgba(255,255,255,.85);border:1px solid var(--sj-line)}
+/* пустой класс: честная приглушённая карточка, без цифр, которых нет */
+.lib-grade.empty{background:linear-gradient(135deg,#fbfcfe,#f3f6fa);border-color:var(--ds-line);box-shadow:var(--ds-sh-1)}
+.lib-grade.empty .lib-grade-num{background:linear-gradient(150deg,#b9c4d6,#8f9bb3);box-shadow:none}
+.lib-grade.empty .lib-coll-meta{display:inline-block;margin-top:6px;padding:3px 9px;border-radius:999px;background:#eef1f6;color:var(--muted);font-size:12px;font-weight:750}
+.lib-grade.empty .lib-deco{opacity:.14;color:#8f9bb3}
+.lib-grade.empty .lib-coll-go{color:#8f9bb3}
+.lib-list .lib-grade+.lib-grade{margin-top:2px}
+@media (prefers-reduced-motion:reduce){.lib-grade{transition:none}.lib-grade:active{transform:none}}

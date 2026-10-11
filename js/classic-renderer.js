@@ -25,9 +25,11 @@
   const nbsp = (s) => String(s ?? "").replace(ONE_LETTER, "$1$2 ").replace(ONE_LETTER, "$1$2 ");
 
   function inline(s) {
-    return esc(nbsp(s))
+    const h = esc(nbsp(s))
       .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\[(d|t|p|f):([^\]\n]+?)\]/g, (_, k, v) => '<span class="' + INLINE[k] + '">' + v + "</span>");
+    // готовые конспекты библиотеки: обозначения с индексом в тексте (A_п, Q_отд, η_max) — нижним индексом
+    return libSubs ? h.replace(/([0-9A-Za-zА-Яа-яЁёΑ-Ωα-ω'′)])_([0-9A-Za-zА-Яа-яЁё]+)/g, "$1<sub>$2</sub>") : h;
   }
 
   const titled = (b, fallback) => (b.title ? inline(b.title) : fallback);
@@ -41,13 +43,17 @@
     return "<" + tag + ' class="cn-list">' + items.map((x) => "<li>" + inline(x) + "</li>").join("") + "</" + tag + ">";
   };
   const sub = (title) => (title ? '<h3 class="cn-h3">' + inline(title) + "</h3>" : "");
+  // готовые конспекты библиотеки: индекс после «_» в формулах (Q_отд, N_потерь) — нижним индексом; в конспектах по фото
+  // формулы выводятся как прежде (флаг ставит body() на время вывода готового конспекта)
+  let libSubs = false;
+  const fx = (s) => (libSubs ? esc(s).replace(/_([0-9A-Za-zА-Яа-яЁё]+)/g, "<sub>$1</sub>") : esc(s));
   const variables = (vars) =>
     vars.length
       ? '<ul class="cn-vars">' +
         vars
           .map(
             (v) =>
-              '<li><span class="formula-inline">' + esc(v.symbol) + "</span> — " + esc(v.name) +
+              '<li><span class="formula-inline">' + fx(v.symbol) + "</span> — " + esc(v.name) +
               (v.unit ? ", " + esc(v.unit) : "") + "</li>",
           )
           .join("") +
@@ -84,7 +90,7 @@
           (b.effects.length ? '<p class="cn-lbl">Следствия</p>' + list(b.effects) : ""));
       case "FORMULA":
         return kcard("formula", "Формула",
-          '<div class="formula">' + esc(b.expression) + "</div>" + (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables));
+          '<div class="formula">' + fx(b.expression) + "</div>" + (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables));
     }
     return null;
   }
@@ -132,7 +138,7 @@
           "formulas",
           "head",
           "Формула",
-          '<div class="formula">' + esc(b.expression) + "</div>" +
+          '<div class="formula">' + fx(b.expression) + "</div>" +
             (b.text ? "<p>" + inline(b.text) + "</p>" : "") + variables(b.variables),
         );
       case "PROCESS":
@@ -162,7 +168,70 @@
   }
 
   /** Вводный блок: предмет, название, тема и строка метаданных — компактно, чтобы материал был виден сразу. */
-  function head(c) {
+  // числа справочника для шапки готового конспекта: «4 раздела · 6 терминов» — только то, что есть в данных
+  const ruPlural = (n, one, few, many) => n + " " + (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
+  const v2Sections = (c) => c.sections.filter((s) => !(s.heading && FIGURE_CAPTION.test(plainText(s.heading))));
+  // номер и заголовок раздела — так же, как в body(): номер из учебника («2. …») или по порядку
+  const numbered = (secs) => {
+    let num = 0;
+    return secs.map((s) => {
+      const m = /^\s*(\d{1,2})\s*[.)]\s+(\S.*)$/.exec(s.heading || "");
+      num = m ? Number(m[1]) : num + 1;
+      return { num, title: m ? m[2] : s.heading || "" };
+    });
+  };
+
+  // справочник готового конспекта: иконка (inline SVG, цвет — currentColor) и название по типу
+  const LR_ICON = {
+    terms: '<path d="M5 4.5h11a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z"/><path d="M5 18a2 2 0 0 1 2-2h11M9 8.5h5M9 11.5h3"/>',
+    people: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    dates: '<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+    formulas: '<path d="M15 4.5h-3.2a2 2 0 0 0-2 1.7L8.2 17.8a2 2 0 0 1-2 1.7H5"/><path d="M7 10h7M14 13l5 5M19 13l-5 5"/>',
+  };
+  const lrIcon = (k) =>
+    '<svg class="lr-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + LR_ICON[k] + "</svg>";
+  const lrRefs = (c) =>
+    [
+      ["terms", "Термины", c.glossary.terms.length],
+      ["people", c.meta.subject === "history" ? "Исторические личности" : "Личности", c.glossary.people.length],
+      ["dates", "Важные даты", c.glossary.dates.length],
+      ["formulas", "Формулы", c.glossary.formulas.length],
+    ].filter((x) => x[2]);
+
+  /** Шапка готового конспекта библиотеки: предмет, номер параграфа, название, глава · учебник, состав, оглавление. */
+  function libraryHead(c, opts) {
+    const m = c.meta, g = c.glossary;
+    const badge = m.paragraph || m.tagline[m.tagline.length - 1] || "";
+    const where = [m.tagline[0], opts.book].filter((x) => x && x !== badge).map(esc).join('<span class="sep">·</span>');
+    const secs = v2Sections(c);
+    const stats = [
+      secs.length && ruPlural(secs.length, "раздел", "раздела", "разделов"),
+      g.terms.length && ruPlural(g.terms.length, "термин", "термина", "терминов"),
+      g.people.length && ruPlural(g.people.length, "личность", "личности", "личностей"),
+      g.dates.length && ruPlural(g.dates.length, "дата", "даты", "дат"),
+      g.formulas.length && ruPlural(g.formulas.length, "формула", "формулы", "формул"),
+      c.selfCheck.length && ruPlural(c.selfCheck.length, "вопрос", "вопроса", "вопросов"),
+    ].filter(Boolean);
+    const refs = lrRefs(c);
+    const toc = secs.length > 1 || refs.length
+      ? '<nav class="lr-toc" aria-label="Разделы параграфа"><div class="lr-toc-h">В параграфе</div><ol>' +
+        numbered(secs).filter((x) => x.title).map((x) => '<li><button type="button" data-jump="lr-s' + x.num + '"><span class="lr-toc-n">' + x.num + '</span><span class="lr-toc-t">' + inline(x.title) + "</span></button></li>").join("") +
+        refs.map(([k, t, n]) => '<li><button type="button" class="lr-toc-ref ' + k + '" data-jump="lr-' + k + '"><span class="lr-toc-n">' + lrIcon(k) + '</span><span class="lr-toc-t">' + t + '</span><span class="lr-toc-c">' + n + "</span></button></li>").join("") +
+        "</ol></nav>"
+      : "";
+    return (
+      '<header class="cn-intro lr-hero"><div class="lr-hero-top"><span class="cn-kicker">' + esc(m.subjectLabel) + "</span>" +
+      (m.materialType ? '<span class="lr-kind">' + esc(m.materialType) + "</span>" : "") +
+      (badge ? '<span class="lr-badge">' + esc(badge) + "</span>" : "") + "</div>" +
+      '<h1 class="note-title">' + esc(m.title) + "</h1>" +
+      (where ? '<div class="note-meta lr-where">' + where + "</div>" : "") +
+      (stats.length ? '<ul class="lr-stats">' + stats.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "") +
+      "</header>" + toc
+    );
+  }
+
+  function head(c, opts) {
+    if (opts?.layout === "library" && c.meta.format === "classic-2") return libraryHead(c, opts);
     const m = c.meta;
     const lead = m.topic && m.topic !== m.title ? '<p class="cn-lead">' + esc(m.topic) + "</p>" : "";
     return (
@@ -199,12 +268,16 @@
    * основная часть по разделам → Термины → Личности → Даты → Формулы → Важно → Вывод → Вопросы и ответы.
    * Пустые справочные блоки не выводятся.
    */
-  function body(c) {
+  function body(c, opts) {
     const g = c.glossary;
     const v2 = c.meta.format === "classic-2";
+    const lib = v2 && opts?.layout === "library";
+    libSubs = lib;
     let h = '<article class="cn-body' + (v2 ? " cn-v2" : "") + '">';
     if (c.warnings.length) h += '<p class="note-warning">' + c.warnings.map(esc).join("<br>") + "</p>";
-    if (v2 && c.lead) h += kcard("main", "Главное", "<p>" + inline(c.lead) + "</p>", "lead");
+    // готовый конспект библиотеки: «Главное» — введение и ключевые пункты (remember) в одной зелёной карточке в начале
+    const leadPoints = lib && c.remember.length ? list(c.remember) : "";
+    if (v2 && c.lead) h += kcard("main", "Главное", "<p>" + inline(c.lead) + "</p>" + leadPoints, "lead");
     let num = 0;
     c.sections.forEach((s, i) => {
       if (!v2) {
@@ -222,7 +295,7 @@
       const m = /^\s*(\d{1,2})\s*[.)]\s+(\S.*)$/.exec(s.heading || "");
       num = m ? Number(m[1]) : num + 1;
       const title = m ? m[2] : s.heading;
-      h += '<section class="cn-sec">';
+      h += '<section class="cn-sec"' + (lib ? ' id="lr-s' + num + '"' : "") + ">";
       if (title) h += '<h2 class="cn-h2"><span class="cn-num">' + num + '</span><span class="cn-h2-t">' + inline(title) + "</span></h2>";
       h += s.blocks.map((b) => block(b, true)).join("") + "</section>";
     });
@@ -247,14 +320,17 @@
       // Пустые блоки не выводятся.
       const pair = (a, b) => '<div class="cn-pair"><div class="cn-pair-k">' + a + '</div><div class="cn-pair-v">' + b + "</div></div>";
       const t = (s) => '<span class="cn-ref-t">' + s + "</span>";
+      if (lib) h += libraryRef(c);
+      else {
       if (g.terms.length) h += ref("terms", t("Термины"), g.terms.map((x) => pair('<span class="kw-def">' + esc(x.term) + "</span>", inline(x.definition))).join(""));
       if (g.people.length) h += ref("people", t("Личности"), g.people.map((x) => pair('<span class="kw-person">' + esc(x.name) + "</span>", inline(x.role))).join(""));
       if (g.dates.length) h += ref("dates", t("Даты"), g.dates.map((x) => pair('<span class="kw-date">' + esc(x.date) + "</span>", inline(x.event))).join(""));
-      if (g.formulas.length) h += ref("formulas", t("Формулы"), formulas);
-      if (c.remember.length) h += openCard("imp", "Важно", remember);
+      }
+      if (g.formulas.length && !lib) h += ref("formulas", t("Формулы"), formulas);
+      if (c.remember.length && !(lib && c.lead)) h += openCard("imp", "Важно", remember);
       if (c.conclusion) h += openCard("concl", "Вывод", "<p>" + inline(c.conclusion) + "</p>");
       if (c.selfCheck.length)
-        h += '<section class="cn-qa"><h2 class="cn-qa-h">Вопросы и ответы</h2>' +
+        h += '<section class="cn-qa"><h2 class="cn-qa-h">' + (lib && c.meta.selfCheckTitle ? esc(c.meta.selfCheckTitle) : "Вопросы и ответы") + "</h2>" + (lib && c.meta.selfCheckNote ? '<p class="cn-qa-note">' + esc(c.meta.selfCheckNote) + "</p>" : "") +
           c.selfCheck
             .map((x, i) =>
               ref("cn-q", '<span class="cn-q-n">' + (i + 1) + '.</span><span class="cn-q-t">' + inline(x.q) + "</span>",
@@ -275,6 +351,33 @@
     return h + "</article>";
   }
 
+  /**
+   * Справочник готового конспекта библиотеки: «Термины», «Исторические личности», «Важные даты» — отдельные
+   * сворачиваемые блоки (по умолчанию свёрнуты) с иконкой, названием, числом элементов и стрелкой.
+   * Раскрытие — тот же механизм, что у справочника конспектов по фото (data-ref, aria-expanded/aria-controls).
+   * Внутри: термины — карточки, личности — компактные карточки, даты — временная шкала в порядке источника.
+   * Текст тот же, что в данных; свёрнутый блок остаётся в документе целиком.
+   */
+  function libraryRef(c) {
+    const g = c.glossary;
+    const inner = {
+      terms: () => '<dl class="lr-terms">' + g.terms.map((x) => '<div class="lr-term"><dt class="kw-def">' + esc(x.term) + "</dt><dd>" + inline(x.definition) + "</dd></div>").join("") + "</dl>",
+      people: () =>
+        '<ul class="lr-people">' +
+        g.people.map((x) => '<li class="lr-person"><span class="lr-mono" aria-hidden="true">' + esc(x.name.trim().charAt(0)) + '</span><div><b class="kw-person">' + esc(x.name) + "</b><p>" + inline(x.role) + "</p></div></li>").join("") +
+        "</ul>",
+      dates: () => '<ol class="lr-timeline">' + g.dates.map((x) => '<li><span class="kw-date lr-date">' + esc(x.date) + "</span><p>" + inline(x.event) + "</p></li>").join("") + "</ol>",
+      // формулы (физика и др.): карточка — формула, что она выражает, обозначения с единицами
+      formulas: () => '<div class="lr-formulas">' + g.formulas.map((f) => '<div class="lr-formula"><div class="formula">' + fx(f.expression) + "</div>" + (f.meaning ? "<p>" + inline(f.meaning) + "</p>" : "") + variables(f.variables) + "</div>").join("") + "</div>",
+    };
+    return lrRefs(c)
+      .map(([k, title, n]) =>
+        '<section class="cn-ref lr-acc ' + k + '" id="lr-' + k + '"><h2 class="cn-ref-h"><button type="button" class="cn-ref-btn" id="lr-' + k + '-btn" data-ref aria-expanded="false" aria-controls="lr-' + k + '-panel">' +
+        '<span class="lr-acc-ico">' + lrIcon(k) + '</span><span class="cn-ref-t">' + title + '</span><span class="lr-count">' + n + "</span>" + CHEVRON + "</button></h2>" +
+        '<div class="cn-ref-panel" id="lr-' + k + '-panel" role="region" aria-labelledby="lr-' + k + '-btn"><div class="cn-ref-inner"><div class="cn-ref-body">' + inner[k]() + "</div></div></div></section>")
+      .join("");
+  }
+
   /** Подсказка для поиска по конспекту из его же данных: «Поиск: §7, Северная война, Ништадтский мир…» */
   function searchHint(c) {
     const words = [];
@@ -287,5 +390,11 @@
   }
 
   K.modes = K.modes || {};
-  K.modes.classic = { id: "classic", label: "Конспект", render: (c) => ({ head: head(c), body: body(c), searchHint: searchHint(c) }) };
+  K.modes.classic = {
+    id: "classic", label: "Конспект",
+    render: (c, opts) => {
+      libSubs = c.meta.format === "classic-2" && opts?.layout === "library";
+      return { head: head(c, opts), body: body(c, opts), searchHint: searchHint(c) };
+    },
+  };
 })();

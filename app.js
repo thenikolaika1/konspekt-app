@@ -5,9 +5,10 @@
  *
  * Данные: K.store (js/store.js). Конспект: StudyContent (js/study-content.js),
  * отрисовка — K.modes.classic (js/classic-renderer.js). Генерация — K.generator.
+ * Библиотека готовых конспектов (без AI) — K.library (js/library.js).
  */
 (() => {
-  const { esc, study, store, images, generator, modes, cloud } = window.K;
+  const { esc, study, store, images, generator, modes, cloud, library } = window.K;
   const root = document.querySelector("#app"),
     cam = document.querySelector("#cameraInput"),
     gallery = document.querySelector("#galleryInput");
@@ -40,6 +41,10 @@
     draftBookmark: { icon: "book", color: BM_COLORS[0] },
     editBookmarkId: null,
     bookmarkForNote: null,
+    // библиотека: выбранные предмет, учебник и параграф (каталог — K.library)
+    lib: { gradeId: null, subjectId: null, bookId: null, paragraphId: null },
+    // вкладка нижней панели, из которой открыт текущий раздел (для общих экранов: «Все конспекты», закладки)
+    tab: "home",
     // ранний доступ: "off" — без Supabase (mock); "unknown" — сервер ещё не ответил или нет связи (приложение работает как обычно);
     // "ok" — доступ есть, info — ответ get_my_access(); "none" — сервер ответил, что доступа нет
     access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null },
@@ -53,6 +58,7 @@
       atom: '<ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/>',
       camera: '<path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/>',
       user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
+      home: '<path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6.5H9V21H4.5a1 1 0 0 1-1-1z"/>',
       dots: '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>',
       doc: '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/>',
       gallery: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 5"/>',
@@ -134,9 +140,12 @@
     } else go("home", false);
   };
 
+  // корень раздела нижней панели, открытый вкладкой: «назад» не нужен — разделы переключает панель
+  const tabRoot = () => !S.history.length && ["home", "library", "profile"].includes(S.screen);
   const head = (title, sub, more = false, stacked = false) =>
-    '<div class="screen-head' + (stacked ? " stacked" : "") + '"><button class="back" data-back aria-label="Назад">' + icon("back") +
-    '</button><div class="head-text"><h1>' +
+    '<div class="screen-head' + (stacked ? " stacked" : "") + (tabRoot() ? " tab-root" : "") + '">' +
+    (tabRoot() ? "" : '<button class="back" data-back aria-label="Назад">' + icon("back") + "</button>") +
+    '<div class="head-text"><h1>' +
     esc(title) +
     "</h1>" +
     (sub ? '<div class="sub">' + esc(sub) + "</div>" : "") +
@@ -372,7 +381,7 @@
         .join("") +
       '<button class="bm" data-go="bookmarks"><div class="bm-icon kt tone-more">' +
       bmGlyph("more") +
-      '</div><span>Ещё</span></button></div><div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() + '<div class="hero-label">' + icon("sparkle") + "AI КОНСПЕКТ</div>" +
+      '</div><span>Ещё</span></button></div>' + libraryEntry() + '<div class="hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() + '<div class="hero-label">' + icon("sparkle") + "AI КОНСПЕКТ</div>" +
       heroBody() +
       art("scan") +
       '</div><div class="section-row"><h2>Недавние</h2><button class="link" data-go="all-notes">Все ›</button></div>' +
@@ -380,6 +389,171 @@
         ? '<div class="note-list">' + notes.slice(0, 3).map(noteCard).join("") + "</div>"
         : emptyState("Здесь появятся твои конспекты", "Создай первый конспект из страниц учебника")) +
       "</div>"
+    );
+  }
+
+  // ---------- библиотека готовых конспектов ----------
+  // Предмет → Учебник → Параграф → Конспект. Готовый конспект открывается из каталога: AI не вызывается.
+
+  const LIB_STEPS = ["Класс", "Предмет", "Учебник", "Параграф"];
+  // где пользователь в каталоге: пройденные шаги, текущий и будущие
+  const libPath = (at) =>
+    '<ol class="lib-path" aria-label="Путь в библиотеке">' +
+    LIB_STEPS.map((t, i) => '<li class="' + (i < at ? "done" : i === at ? "current" : "") + '"' + (i === at ? ' aria-current="step"' : "") + ">" + t + "</li>").join("") +
+    "</ol>";
+  const libList = (rows, emptyTitle, emptyText) => (rows.length ? '<div class="lib-list">' + rows.join("") + "</div>" : emptyState(emptyTitle, emptyText));
+  const paragraphLabel = (p) => (p.number ? "§ " + p.number + ". " : "") + p.title;
+  // палитра коллекции — по ключу предмета (тот же список, что у конспектов по фото); неизвестный предмет — нейтральная
+  const subjClass = (id) => "subj-" + (study.SUBJECTS[id] ? id : "other");
+  const readyCount = (subjectId, bookId) => library.readyCount({ subjectId, bookId });
+  const chaptersOf = (subjectId, bookId) => new Set(library.paragraphs(subjectId, bookId).map((p) => p.chapter).filter(Boolean)).size;
+  // класс учебника: поле grade или «8 класс» в названии — только из данных каталога
+  const gradeOf = (b) => String(b.grade || (/(\d{1,2})\s*класс/i.exec(b.title || "") || [])[1] || "").replace(/\D+/g, "");
+  // профили учебника (необязательные): названия из каталога; издание — только если указано
+  const bookFacts = (b) => [b.edition || "", ...(b.profiles || []).map((id) => library.profile(id)?.title || "")].filter(Boolean);
+  // декор коллекции: те же искры и квадраты, что на главной, в цвете предмета (currentColor задаёт CSS)
+  const LIB_DECO = deco("lib-deco", 120, 90, spark(96, 24, 12, "currentColor") + square(108, 66, 8, "var(--sj-accent)", 18) + dot(80, 12, 3, "var(--sj-accent)") + spark(84, 74, 5, "currentColor"));
+  // стилизованная обложка учебника: корешок, цифра класса, строки «текста» — без выдуманного названия или авторов
+  const libCover = (b, size) => {
+    const g = gradeOf(b);
+    return (
+      '<span class="lib-cover ' + (size || "") + '" aria-hidden="true"><span class="lib-cover-spine"></span>' +
+      (g ? '<span class="lib-cover-grade">' + esc(g) + '</span><span class="lib-cover-lbl">класс</span>' : '<span class="lib-cover-ico">' + icon("book") + "</span>") +
+      '<span class="lib-cover-lines"></span></span>'
+    );
+  };
+  // палитра класса — по порядку классов (голубая, мятная, лавандовая — как ореолы главной)
+  const gradeTone = (id) => "gr-" + "abc"[Math.max(0, library.grades().findIndex((g) => g.id === id)) % 3];
+  const SOON = "Скоро появятся конспекты";
+
+  function libraryEntry() {
+    return (
+      '<div class="section-row"><h2>Библиотека</h2></div><button class="lib-entry" data-go="library"><span class="lib-tile">' + icon("book") +
+      '</span><span class="lib-row-text"><b>Готовые конспекты</b><span class="meta">Выбери класс, предмет и учебник</span></span><span class="chev">' +
+      icon("chev") + "</span></button>"
+    );
+  }
+
+  // Библиотека → классы. Класс без учебников показывается честно: «Скоро появятся конспекты»
+  function libraryScreen() {
+    const list = library.grades();
+    const card = (g) => {
+      const subs = library.subjectsIn(g.id), ready = library.readyCount({ gradeId: g.id });
+      const meta = subs.length ? [plural(subs.length, "предмет", "предмета", "предметов"), ready ? notesCount(ready) : ""].filter(Boolean).join(" · ") : SOON;
+      return (
+        '<button class="lib-grade ' + gradeTone(g.id) + (subs.length ? "" : " empty") + '" data-lib-grade="' + esc(g.id) + '">' + LIB_DECO +
+        '<span class="lib-grade-num" aria-hidden="true"><b>' + esc(g.id) + "</b><span>класс</span></span>" +
+        '<span class="lib-coll-text"><b>' + esc(g.title) + '</b><span class="lib-coll-meta">' + esc(meta) + "</span>" +
+        (subs.length ? '<span class="lib-chips">' + subs.map((s) => "<span>" + esc(s.title) + "</span>").join("") + "</span>" : "") +
+        '</span><span class="lib-coll-go">' + icon("chev") + "</span></button>"
+      );
+    };
+    return (
+      app("lib-screen") + DECO.head() + head("Библиотека", "Готовые конспекты по учебникам", false, true) + libPath(0) +
+      libList(list.map(card), "Здесь скоро появятся готовые конспекты", "Выбери класс, предмет и учебник — конспект откроется сразу, без фото и ожидания.") +
+      (library.readyCount() ? '<p class="lib-hint">' + icon("sparkle") + "Готовые конспекты открываются сразу — без фото и ожидания.</p>" : "") +
+      "</div>"
+    );
+  }
+
+  // Класс → предметы этого класса
+  function libraryGrade() {
+    const g = library.grade(S.lib.gradeId);
+    if (!g) return libraryScreen();
+    const card = (s) => {
+      const books = library.books(s.id, g.id), ready = library.readyCount({ gradeId: g.id, subjectId: s.id });
+      const meta = [plural(books.length, "учебник", "учебника", "учебников"), ready ? notesCount(ready) : ""].filter(Boolean).join(" · ");
+      return (
+        '<button class="lib-coll ' + subjClass(s.id) + '" data-lib-subject="' + esc(s.id) + '">' + LIB_DECO +
+        '<span class="lib-coll-ico">' + icon(study.subject(s.id).icon) + '</span><span class="lib-coll-text"><b>' + esc(s.title) + "</b>" +
+        '<span class="lib-coll-meta">' + esc(meta) + "</span></span>" + '<span class="lib-coll-go">' + icon("chev") + "</span></button>"
+      );
+    };
+    return (
+      app("lib-screen " + gradeTone(g.id)) + head(g.title, "Предметы", false, true) + libPath(1) +
+      libList(library.subjectsIn(g.id).map(card), SOON, "Учебники и готовые конспекты для этого класса пока готовятся. Свой конспект можно создать по фото.") +
+      "</div>"
+    );
+  }
+
+  // Предмет → учебники (в выбранном классе; один предмет может иметь несколько учебников)
+  function librarySubject() {
+    const s = library.subject(S.lib.subjectId);
+    if (!s) return libraryGrade();
+    const g = library.grade(S.lib.gradeId);
+    const card = (b) => {
+      const ready = readyCount(s.id, b.id), ch = chaptersOf(s.id, b.id);
+      const stats = [ready ? notesCount(ready) : "", ch ? plural(ch, "глава", "главы", "глав") : "", ...bookFacts(b)].filter(Boolean);
+      return (
+        '<button class="lib-book ' + subjClass(s.id) + '" data-lib-book="' + esc(b.id) + '">' + libCover(b) +
+        '<span class="lib-book-text"><span class="lib-kicker">' + esc(s.title) + "</span><b>" + esc(b.title) + "</b>" +
+        (b.authors || b.publisher ? '<span class="lib-book-authors">' + esc([b.authors, b.publisher].filter(Boolean).join(" · ")) + "</span>" : "") +
+        (stats.length ? '<span class="lib-chips">' + stats.map((x) => "<span>" + esc(x) + "</span>").join("") + "</span>" : "") +
+        '</span><span class="chev">' + icon("chev") + "</span></button>"
+      );
+    };
+    return (
+      app("lib-screen " + subjClass(s.id)) + head(s.title, g ? g.title + " · учебники" : "Учебники", false, true) + libPath(2) +
+      libList(library.books(s.id, g?.id).map(card), "Учебники скоро появятся", "Мы готовим конспекты по этому предмету.") +
+      "</div>"
+    );
+  }
+
+  function libraryBook() {
+    const s = library.subject(S.lib.subjectId);
+    const b = library.book(S.lib.subjectId, S.lib.bookId);
+    if (!s || !b) return librarySubject();
+    const list = library.paragraphs(s.id, b.id);
+    const ready = readyCount(s.id, b.id), ch = chaptersOf(s.id, b.id);
+    // параграфы по главам (chapter), в порядке каталога
+    const groups = [];
+    list.forEach((p) => {
+      const last = groups[groups.length - 1];
+      if (last && last.chapter === (p.chapter || "")) last.items.push(p);
+      else groups.push({ chapter: p.chapter || "", items: [p] });
+    });
+    // номер параграфа — отдельной меткой, название — крупно; без номера (итоги главы) — значок
+    const row = (p) =>
+      '<button class="lib-par' + (p.content ? "" : " soon") + '" data-lib-paragraph="' + esc(p.id) + '" aria-label="' + esc(paragraphLabel(p)) + '">' +
+      '<span class="lib-par-num' + (p.number ? "" : " extra") + '">' + (p.number ? "§&nbsp;" + esc(p.number) : icon("sparkle")) + "</span>" +
+      '<span class="lib-par-title">' + esc(p.title) + (p.kind ? '<span class="lib-par-kind">' + esc(p.kind) + "</span>" : "") + "</span>" +
+      (p.content ? '<span class="chev">' + icon("chev") + "</span>" : '<span class="lib-soon">Скоро</span>') + "</button>";
+    const hero =
+      '<div class="lib-book-hero">' + LIB_DECO + libCover(b, "big") + '<div class="lib-book-text"><span class="lib-kicker">' + esc(s.title) + "</span><b>" + esc(b.title) + "</b>" +
+      (b.authors || b.publisher ? '<span class="lib-book-authors">' + esc([b.authors, b.publisher].filter(Boolean).join(" · ")) + "</span>" : "") +
+      '<span class="lib-chips">' + [ready ? notesCount(ready) : "", ch ? plural(ch, "глава", "главы", "глав") : "", ...bookFacts(b)].filter(Boolean).map((x) => "<span>" + esc(x) + "</span>").join("") + "</span></div></div>";
+    return (
+      app("lib-screen lib-book-screen " + subjClass(s.id)) + head(b.title, "Параграфы", false, true) + libPath(3) +
+      (list.length
+        ? hero +
+          groups
+            .map((g) =>
+              (g.chapter ? '<div class="lib-group-row"><h2 class="lib-group">' + esc(g.chapter) + '</h2><span class="lib-group-n">' + g.items.length + "</span></div>" : "") +
+              '<div class="lib-list lib-pars">' + g.items.map(row).join("") + "</div>")
+            .join("")
+        : libList([], "Параграфы скоро появятся", "Мы готовим конспекты по этому учебнику.")) +
+      "</div>"
+    );
+  }
+
+  // готовый конспект: сохранённый материал тем же просмотрщиком, что и конспекты по фото; AI не вызывается
+  function libraryParagraph() {
+    const p = library.paragraph(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
+    if (!p || !p.content) return libraryBook();
+    const b = library.book(S.lib.subjectId, S.lib.bookId);
+    let view;
+    try {
+      // данные каталога проходят ту же проверку, что и ответ AI: только схема StudyContent, текст экранируется при выводе
+      view = modes.classic.render(study.normalize(p.content), { layout: "library", book: b?.title || "" });
+    } catch {
+      return libraryBook();
+    }
+    return (
+      app("note-view lib-note nt-" + esc(p.content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
+      '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
+      '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>" +
+      '<div class="cn-doc">' + view.head + view.body + "</div>" +
+      '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
   }
 
@@ -510,7 +684,7 @@
   let topTick = 0;
   function updateToTop() {
     topTick = 0;
-    const btn = S.screen === "note" && root.querySelector(".to-top");
+    const btn = (S.screen === "note" || S.screen === "library-paragraph") && root.querySelector(".to-top");
     if (!btn) return;
     const show = scrollY > Math.max(600, innerHeight * 1.2);
     if (btn.classList.contains("show") !== show) {
@@ -545,23 +719,23 @@
     );
   }
 
+  // «Я»: только то, что есть на самом деле — локальный профиль, число конспектов и закладок на устройстве, помощь и «о приложении»
   function profile() {
+    const notes = store.listNotes().length, marks = store.listBookmarks().length;
+    const tile = (go, ico, tone, title, meta) =>
+      '<button class="pf-tile tone-' + tone + '" data-go="' + go + '"><span class="pf-tile-ico">' + icon(ico) + '</span><span class="pf-tile-text"><b>' + title +
+      '</b><span class="meta">' + meta + '</span></span><span class="chev">' + icon("chev") + "</span></button>";
+    const info = (ico, tone, title) => '<div class="pf-row"><span class="pf-row-ico tone-' + tone + '">' + icon(ico) + "</span><b>" + title + "</b></div>";
     return (
-      app() +
+      app("profile-screen") + DECO.head() +
       head("Профиль", "") +
-      '<div class="profile-top"><div class="avatar">Н</div><div><h2>Николай</h2><p>Локальный профиль</p></div></div><h3>Приложение</h3><div class="profile-card"><div class="profile-row"><div class="setting-icon">' +
-      icon("doc") +
-      "</div><div><b>Конспекты</b><div class=\"meta\">" +
-      store.listNotes().length +
-      ' сохранено на устройстве</div></div></div><div class="profile-row"><div class="setting-icon">' +
-      icon("bookmark") +
-      "</div><div><b>Закладки</b><div class=\"meta\">" +
-      store.listBookmarks().length +
-      ' создано</div></div></div></div><h3>Настройки</h3><div class="settings-card"><div class="setting"><div class="setting-icon">' +
-      icon("help") +
-      '</div><b>Помощь</b></div><div class="setting"><div class="setting-icon">' +
-      icon("info") +
-      '</div><b>О приложении</b></div></div><div class="footer-brand">Konspekt by NK</div></div>'
+      '<section class="pf-hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() +
+      '<div class="pf-avatar" aria-hidden="true">Н</div><div class="pf-id"><h2>Николай</h2><p>Локальный профиль</p></div></section>' +
+      '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
+      tile("all-notes", "doc", "blue", "Конспекты", notes + " сохранено на устройстве") +
+      tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
+      '</div><h3 class="pf-h">Настройки</h3><div class="pf-card">' + info("help", "mint", "Помощь") + info("info", "gold", "О приложении") + "</div>" +
+      '<div class="footer-brand pf-foot">' + logo() + "<span>Konspekt by NK</span></div></div>"
     );
   }
 
@@ -700,6 +874,11 @@
     "new-bookmark": newBookmark,
     profile,
     error,
+    library: libraryScreen,
+    "library-grade": libraryGrade,
+    "library-subject": librarySubject,
+    "library-book": libraryBook,
+    "library-paragraph": libraryParagraph,
   };
 
   // ---------- обложки конспектов без мигания ----------
@@ -750,7 +929,7 @@
 
   // ---------- движение: переходы экранов, листы, перестройка списков ----------
   // Длительности и кривые — те же, что в CSS (--motion-*, --ease-*).
-  const MOTION = { screen: 260, screenOut: 220, sheet: 300, sheetOut: 220, modalOut: 160 };
+  const MOTION = { screen: 230, screenOut: 200, sheet: 300, sheetOut: 220, modalOut: 160, tabbar: 200 };
   const EASE_OUT = "cubic-bezier(.16,1,.3,1)";
   const EASE_STD = "cubic-bezier(.2,0,0,1)";
   const SCRIM = 0.32; // непрозрачность затемнения под листом
@@ -813,12 +992,12 @@
   // камера — отдельный «слой»: мягко поднимается снизу и так же уходит вниз
   const CAMERA_MOTION = {
     camera: {
-      in: [{ opacity: 0, transform: "translate3d(0,18px,0) scale(.985)" }, { opacity: 1, transform: "none" }], inMs: 380,
-      out: [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.985)" }], outMs: 300,
+      in: [{ opacity: 0, transform: "translate3d(0,14px,0)" }, { opacity: 1, transform: "none" }], inMs: 240,
+      out: [{ opacity: 1, transform: "none" }, { opacity: 1, transform: "none" }], outMs: 240, // уходящий экран стоит на месте, камера поднимается поверх
     },
     "camera-back": {
-      in: [{ opacity: 0, transform: "scale(.99)" }, { opacity: 1, transform: "none" }], inMs: 340,
-      out: [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translate3d(0,18px,0) scale(.985)" }], outMs: 280,
+      in: [{ opacity: 0, transform: "scale(.99)" }, { opacity: 1, transform: "none" }], inMs: 220,
+      out: [{ opacity: 1, transform: "none" }, { opacity: 1, transform: "translate3d(0,10px,0)" }], outMs: 220,
     },
   };
 
@@ -838,7 +1017,7 @@
           : [{ opacity: 0, transform: "translate3d(" + X + "px,0,0)" }, { opacity: 1, transform: "none" }];
     el.animate(incoming, { duration: dir === "rise" ? 320 : MOTION.screen, easing: EASE_OUT });
     if (!ghost) return;
-    const out = dir === "rise" ? [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.99)" }] : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translate3d(" + -X / 2 + "px,0,0)" }];
+    const out = dir === "rise" ? [{ opacity: 1, transform: "none" }, { opacity: 1, transform: "scale(.99)" }] : [{ opacity: 1, transform: "none" }, { opacity: 1, transform: "translate3d(" + -X / 2 + "px,0,0)" }];
     const a = ghost.firstElementChild.animate(out, { duration: MOTION.screenOut, easing: EASE_STD, fill: "forwards" });
     a.finished.catch(() => {}).then(() => ghost.remove());
   }
@@ -872,6 +1051,112 @@
     a.finished.catch(() => {}).then(done);
   }
 
+  // ---------- нижняя панель: четыре раздела поверх той же навигации S.screen / go() ----------
+  // Панель — постоянный элемент вне экрана: при смене экрана не перерисовывается и не анимируется вместе с ним.
+  // На полноэкранных экранах (приветствие, камера, обработка, чтение конспекта, формы) панели нет.
+  const TABS = [
+    { id: "home", label: "Главная", icon: "home", screen: "home" },
+    { id: "library", label: "Библиотека", icon: "book", screen: "library" },
+    { id: "photo", label: "Фото", icon: "camera", screen: "camera" },
+    { id: "me", label: "Я", icon: "user", screen: "profile" },
+  ];
+  // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  let tabbar = null;
+
+  function currentTab() {
+    if (!(S.screen in TAB_OF) || S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
+    const own = TAB_OF[S.screen];
+    if (own) S.tab = own;
+    return own || S.tab;
+  }
+
+  // отступ под панелью = её настоящая высота (вместе с safe-area), а не подобранное число
+  const syncTabbarHeight = () => tabbar && !tabbar.hidden && document.documentElement.style.setProperty("--tabbar-h", Math.ceil(tabbar.getBoundingClientRect().height) + "px");
+  let tabbarAnim = null;
+  let tabbarReady = false; // первый показ — без анимации
+  function showTabbar(show) {
+    const was = !tabbar.hidden && !tabbar.classList.contains("leaving");
+    document.body.classList.toggle("has-tabbar", show);
+    if (show === was) return;
+    tabbarAnim?.cancel();
+    tabbarAnim = null;
+    tabbar.classList.remove("leaving");
+    const moving = !calm() && tabbarReady;
+    if (show) {
+      tabbar.hidden = false;
+      syncTabbarHeight();
+      if (moving) tabbarAnim = tabbar.animate([{ transform: "translate3d(-50%,100%,0)" }, { transform: "translate3d(-50%,0,0)" }], { duration: MOTION.tabbar, easing: EASE_OUT });
+      return;
+    }
+    if (!moving) return void (tabbar.hidden = true);
+    // уходит вниз вместе с открытием полноэкранного экрана (камера, чтение), а не исчезает мгновенно
+    tabbar.classList.add("leaving");
+    tabbarAnim = tabbar.animate([{ transform: "translate3d(-50%,0,0)" }, { transform: "translate3d(-50%,100%,0)" }], { duration: MOTION.tabbar, easing: EASE_STD, fill: "forwards" });
+    tabbarAnim.finished.then(() => { tabbar.hidden = true; tabbar.classList.remove("leaving"); tabbarAnim?.cancel(); tabbarAnim = null; }).catch(() => {});
+  }
+
+  function renderTabbar() {
+    const active = currentTab();
+    if (!tabbar) {
+      tabbar = document.createElement("nav");
+      tabbar.className = "tabbar";
+      tabbar.hidden = true;
+      tabbar.setAttribute("aria-label", "Разделы");
+      tabbar.innerHTML = TABS.map((t) => '<button class="tab" data-tab="' + t.id + '"><span class="tab-ico">' + icon(t.icon) + "</span><span>" + t.label + "</span></button>").join("");
+      root.append(tabbar);
+      if (window.ResizeObserver) new ResizeObserver(syncTabbarHeight).observe(tabbar);
+    }
+    showTabbar(!!active);
+    tabbarReady = true;
+    tabbar.querySelectorAll(".tab").forEach((b) => {
+      const on = b.dataset.tab === active;
+      b.classList.toggle("active", on);
+      if (on) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+  }
+
+  // камеру нельзя открыть без доступа и после «закончились» (это не защита лимита: её делает сервер)
+  const cameraBlocked = () => S.access.state === "none" || limitReached();
+
+  const tabState = {}; // вкладка → { screen, history, lib, y }: где пользователь был в этом разделе
+  function openTab(id) {
+    const t = TABS.find((x) => x.id === id);
+    if (!t) return;
+    // «Фото» — тот же вход в существующий генератор, что и кнопка «Сфотографировать»; «назад» вернёт в раздел
+    if (t.id === "photo") return cameraBlocked() ? render() : go("camera");
+    const here = currentTab();
+    if (here === t.id) {
+      // повторное нажатие: в глубине раздела — к его корню, на корне — к началу
+      if (S.screen === t.screen && !S.history.length) return scrollTo({ top: 0, behavior: calm() ? "auto" : "smooth" });
+      S.history = [];
+      navDir = "back";
+      lockNav();
+      S.screen = t.screen;
+      S.sheet = null;
+      render();
+      return scrollTo(0, 0);
+    }
+    // уходим из раздела — запоминаем, где были; возвращаемся — на то же место, без прыжка к началу
+    if (here) tabState[here] = { screen: S.screen, history: S.history.slice(), lib: { ...S.lib }, y: scrollY };
+    const saved = tabState[t.id];
+    S.tab = t.id;
+    if (!saved || !SCREENS[saved.screen]) {
+      S.history = [];
+      return go(t.screen, false);
+    }
+    navDir = "fade";
+    lockNav();
+    scrollMem[S.screen] = scrollY;
+    S.history = saved.history.slice();
+    S.lib = { ...saved.lib };
+    S.screen = saved.screen;
+    S.sheet = null;
+    render();
+    scrollTo(0, saved.y);
+  }
+
   function render() {
     const dir = calm() ? null : navDir;
     navDir = null;
@@ -902,6 +1187,7 @@
       lastScreenHtml = html;
     }
     firstPaint = false;
+    renderTabbar();
     S.pages.forEach((p) => seenPages.add(p));
 
     // лист / окно: открытие, смена содержимого без повторной анимации, закрытие
@@ -1311,6 +1597,18 @@
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
       return scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
     }
+    if ((x = el("[data-jump]"))) {
+      const target = document.getElementById(x.dataset.jump);
+      if (!target) return;
+      // пункт ведёт к свёрнутому блоку справочника: сначала раскрываем его (заголовок блока при этом не сдвигается), затем прокручиваем
+      if (target.classList.contains("cn-ref")) {
+        if (!target.classList.contains("open")) toggleRef(target, true);
+        target.querySelector("[data-ref]")?.focus({ preventScroll: true }); // клавиатура и экранный диктор — сразу на открытом блоке
+      }
+      const bar = root.querySelector(":scope > .app .note-bar");
+      const y = target.getBoundingClientRect().top + scrollY - (bar ? bar.getBoundingClientRect().height : 0) - 12;
+      return scrollTo({ top: Math.max(0, y), behavior: calm() ? "auto" : "smooth" });
+    }
     if ((x = el("[data-sheet]"))) {
       if (x.dataset.sheet === "add") return openSheet({ type: "add", id: S.sheet?.id || S.noteId });
       if (x.dataset.sheet === "bookmark") return openSheet({ type: "bookmark", id: S.bookmarkId });
@@ -1401,11 +1699,34 @@
     if (el("[data-process]")) return startGeneration();
     if (el("[data-retry]")) return S.gen.mode === "note" && S.gen.noteId ? resumeGeneration(S.gen.noteId) : startGeneration();
 
+    // нижняя панель
+    if ((x = el("[data-tab]"))) return openTab(x.dataset.tab);
+
+    // библиотека: предмет → учебник → параграф
+    if ((x = el("[data-lib-grade]"))) {
+      S.lib = { gradeId: x.dataset.libGrade, subjectId: null, bookId: null, paragraphId: null };
+      return go("library-grade");
+    }
+    if ((x = el("[data-lib-subject]"))) {
+      S.lib = { gradeId: S.lib.gradeId, subjectId: x.dataset.libSubject, bookId: null, paragraphId: null };
+      return go("library-subject");
+    }
+    if ((x = el("[data-lib-book]"))) {
+      S.lib = { ...S.lib, bookId: x.dataset.libBook, paragraphId: null };
+      return go("library-book");
+    }
+    if ((x = el("[data-lib-paragraph]"))) {
+      const p = library.paragraph(S.lib.subjectId, S.lib.bookId, x.dataset.libParagraph);
+      if (!p || !p.content) return; // конспект ещё не готов: строка помечена «Скоро»
+      S.lib = { ...S.lib, paragraphId: p.id };
+      return go("library-paragraph");
+    }
+
     // навигация
     if ((x = el("[data-go]"))) {
       const to = x.dataset.go;
       // без доступа и после «закончились» камеры на главной нет (это не защита лимита: её делает сервер)
-      if (to === "camera" && (S.access.state === "none" || limitReached())) return render();
+      if (to === "camera" && cameraBlocked()) return render();
       if (to === "new-bookmark") {
         S.editBookmarkId = null;
         S.bookmarkForNote = null;
@@ -1524,7 +1845,7 @@
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
   const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem]";
   let busy = false;
-  const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],.fab";
+  const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],[data-lib-grade],[data-lib-subject],[data-lib-book],[data-lib-paragraph],[data-tab],.fab";
   root.addEventListener("click", (e) => {
     const now = performance.now();
     if (now < suppressClickUntil) return;
