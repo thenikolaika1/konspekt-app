@@ -40,9 +40,15 @@ Dashboard: Edge Functions → Deploy a new function → Via Editor → имя `a
 Источник истины — `private.user_entitlements` (quota у каждого пользователя своя) и `private.usage_ledger`
 (одна строка на операцию: reserved → consumed | released). Числа лимита в коде нет.
 
-- Выпустить коды (локально, открытые коды в SQL не попадают):
-  `node tools/ff-invite-codes.mjs --count 5 --quota 5 --label "F&F"` → раздать коды, выполнить напечатанный SQL.
-  Новые коды можно выпускать с другим quota — уже активированные права это не меняет.
+- Выпустить коды F&F (локально, открытые коды в SQL не попадают) — всегда `--quota 1` (одна успешная генерация)
+  и `--expires` = конец окна F&F:
+  `node tools/ff-invite-codes.mjs --count 5 --quota 1 --label "F&F" --expires 2026-10-19T00:00:00+03:00` → раздать коды, выполнить напечатанный SQL.
+  quota запоминается у каждого кода при выпуске; уже активированные права новые коды не меняют.
+- Запасные коды на случай потери анонимного аккаунта — так же, с `--quota 1` и отдельной меткой (`--label "F&F запас"`).
+  Восстанавливать доступ кодом, а не `admin_set_entitlement`: она по умолчанию выдаёт ручное право (`manual`),
+  на которое не действуют окно F&F и лимит запусков.
+- Ввод кода: регистр, пробелы, дефисы и кириллические буквы-двойники не важны («КМРТ» = «KMPT»;
+  миграция 20261011120500 — применять после 20261011120000 и до миграций аналитики).
 - Квота конкретного пользователя (в том числе свой тестовый доступ):
   `select private.admin_set_entitlement('<user_id>', 10);`
 - Поднять всем BETA не ниже N: `select private.admin_raise_beta_quota(10);` (только повышает).
@@ -55,7 +61,8 @@ Dashboard: Edge Functions → Deploy a new function → Via Editor → имя `a
 
 - Окно F&F для прав по кодам приглашения: `beta_starts_at` … `beta_ends_at` (2026-10-12 00:00 — 2026-10-19 00:00 МСК).
   Вне окна генерация отклоняется (`ACCESS_EXPIRED`), `get_my_access` показывает 0. Ручные права (`admin_set_entitlement`) окном не ограничены.
-- Коды F&F: `node tools/ff-invite-codes.mjs --count <N> --quota 1 --label "F&F" --expires 2026-10-19T00:00:00+03:00`.
+- Коды F&F: `node tools/ff-invite-codes.mjs --count <N> --quota 1 --label "F&F" --expires 2026-10-19T00:00:00+03:00`
+  (`--quota 1` обязательно; `--expires` — тот же момент, что `beta_ends_at`, если окно перенесено — новый срок).
 - `max_pages` — страниц в запросе (4); `max_user_starts` — запусков AI на пользователя F&F, включая неудачные (3);
   `max_in_flight` — одновременных генераций (3).
 - Глобальный бюджет: `max_total_starts` (после миграции 0 — AI выключен, пока не задан явно), `total_starts` — счётчик.

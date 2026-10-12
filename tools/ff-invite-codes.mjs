@@ -7,7 +7,8 @@
 // Печатает:
 //   1) открытые коды — раздать людям лично (никуда не коммитить, не вставлять в SQL);
 //   2) SQL только с sha256 кодов — выполнить в Supabase SQL Editor.
-// Нормализация совпадает с private.invite_code_hash(): регистр, пробелы и дефисы не важны.
+// Нормализация совпадает с private.invite_code_normalize() (миграция 20261011120500): регистр, пробелы,
+// дефисы и кириллические буквы-двойники (КМРТ = KMPT) не важны.
 // quota задаётся при выпуске и сохраняется у каждого кода; числа по умолчанию нет.
 
 import { createHash, randomInt } from "node:crypto";
@@ -29,18 +30,28 @@ if (!Number.isInteger(count) || count < 1 || count > 200 || !Number.isInteger(qu
   process.exit(1);
 }
 
-// 29 символов без похожих (0/O, 1/I/L, U/V): 12 символов ≈ 58 бит — перебор невозможен
+// 29 символов без похожих (0/O, 1/I/L, U/V): 12 символов ≈ 58 бит — перебор невозможен.
+// Кириллические двойники латинских букв (А, В, С, Е, Н, К, М, Р, Т, Х, У, З→3) при вводе принимаются,
+// поэтому алфавит прежний: уже выпущенные коды остаются действительными.
 const ALPHABET = "ABCDEFGHJKMNPQRSTWXYZ23456789";
+const CYRILLIC = "АВСЕНКМОРТХУЗавсенкмортхуз";
+const LATIN = "ABCEHKMOPTXY3abcehkmoptxy3";
 const code = () => {
   let s = "";
   for (let i = 0; i < 12; i++) s += ALPHABET[randomInt(ALPHABET.length)];
   return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`;
 };
-const normalize = (c) => c.toUpperCase().replace(/[^0-9A-Z]/g, "");
+// как private.invite_code_normalize: двойники → латиница, затем только [0-9A-Z]
+const normalize = (c) => [...c].map((ch) => { const i = CYRILLIC.indexOf(ch); return i < 0 ? ch : LATIN[i]; }).join("").toUpperCase().replace(/[^0-9A-Z]/g, "");
 const hash = (c) => createHash("sha256").update(normalize(c), "utf8").digest("hex");
 const sqlText = (v) => (v === null ? "null" : `'${String(v).replace(/'/g, "''")}'`);
 
-const codes = Array.from({ length: count }, code);
+// без повторов внутри выпуска (повтор почти невероятен, но в базе он упал бы на первичном ключе)
+const codes = [];
+while (codes.length < count) {
+  const c = code();
+  if (normalize(c).length === 12 && !codes.includes(c)) codes.push(c);
+}
 console.log("# Коды (раздать лично; не сохранять в репозиторий и не вставлять в SQL):");
 for (const c of codes) console.log(c);
 console.log("\n-- SQL для Supabase SQL Editor (только хэши):");
