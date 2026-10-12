@@ -146,7 +146,10 @@ function normBlock(raw: Json, i: string): Obj | null {
       out.ordered = !!b.ordered;
       return (out.items as string[]).length ? out : null;
     case "TABLE":
-      out.headers = strs(b.headers);
+      // пустой заголовок — позиция столбца (например, угловая ячейка над подписями строк), его не выбрасываем:
+      // иначе остальные заголовки сдвигаются влево. Совсем без текста — таблица без шапки.
+      out.headers = arr(b.headers).map(str);
+      if (!(out.headers as string[]).some(Boolean)) out.headers = [];
       out.rows = arr(b.rows)
         .map((r) => arr(r).map(str))
         .filter((r) => r.some(Boolean));
