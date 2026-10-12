@@ -1553,6 +1553,11 @@ button.profile-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2
 .pf-hero .hero-orb{z-index:-1}
 .pf-hero .deco-hero-a{left:auto;right:22px;top:16px}
 .pf-avatar{flex:none;width:72px;height:72px;border-radius:50%;display:grid;place-items:center;background:var(--blue-grad,#0a7cf4);color:#fff;font-size:30px;font-weight:850;box-shadow:0 10px 22px rgba(10,124,244,.28),inset 0 0 0 3px rgba(255,255,255,.35)}
+.pf-avatar svg{width:36px;height:36px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* «Пример» — демонстрационные конспекты из первого запуска, чтобы их не принимали за свои */
+.note-example{display:inline-block;flex:none;padding:2px 7px;border-radius:8px;background:#fff4dc;color:#8a5a00;font-size:11px;font-weight:800;letter-spacing:.2px;margin-right:4px}
+.note-example-bar{display:flex;align-items:center;gap:8px;margin:6px 0 12px;padding:9px 12px;border:1px solid #f1dfb5;border-radius:12px;background:#fffaf0;color:#6b4a0c;font-size:13px;line-height:18px}
+.note-example-bar .note-example{margin:0}
 .pf-id{min-width:0}
 .pf-id h2{margin:0;font-size:23px;line-height:28px;font-weight:850;letter-spacing:-.4px;color:var(--navy);overflow-wrap:anywhere}
 .pf-id p{margin:4px 0 0;font-size:13px;line-height:17px;font-weight:650;color:var(--blue-deep,var(--blue))}

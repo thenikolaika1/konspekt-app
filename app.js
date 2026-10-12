@@ -267,13 +267,20 @@
     );
   }
 
+  // демонстрационные конспекты, которые приложение кладёт при первом запуске (store.seed): не созданы пользователем
+  const isExample = (n) => n?.source?.kind === "demo";
+  const exampleTag = '<span class="note-example">Пример</span>';
+
   function noteCard(n) {
     const sub = study.subject(n.subject);
     // облачный конспект, который ещё создаётся или не получился: статус вместо предмета
     const pending = !n.content;
     const meta = pending
       ? '<span class="note-status' + (n.status === "processing" ? "" : " failed") + '">' + (n.status === "processing" ? "Создаётся…" : "Не удалось") + "</span> · " + esc(formatTime(n.createdAt))
-      : '<span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt));
+      : isExample(n)
+        ? // у примера дата — момент первого запуска, а не создания: вместо неё метка (и строка помещается на 320 px)
+          exampleTag + '<span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel || sub.label) + "</span>"
+        : '<span class="pill ' + sub.pill + " s-" + esc(n.subject) + '">' + esc(n.subjectLabel || sub.label) + "</span> · " + esc(formatTime(n.createdAt));
     const preview = pending ? (n.status === "processing" ? "Конспект появится здесь, когда будет готов" : "Нажми, чтобы попробовать снова") : n.preview;
     return (
       '<div class="note-card' + (pending ? " is-" + (n.status === "processing" ? "processing" : "failed") : "") + '" data-note="' + esc(n.id) + '">' +
@@ -674,6 +681,7 @@
       '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
       '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div>' +
       '<div class="cn-doc" id="noteDoc">' +
+      (isExample(n) ? '<p class="note-example-bar">' + exampleTag + "Так выглядит готовый конспект. Этот пример создан приложением, а не тобой.</p>" : "") +
       view.head +
       view.body +
       "</div>" +
@@ -720,9 +728,13 @@
     );
   }
 
-  // «Я»: только то, что есть на самом деле — локальный профиль, число конспектов и закладок на устройстве, помощь и «о приложении»
+  // «Я»: только то, что есть на самом деле — анонимный профиль этого устройства (без имени), где хранятся конспекты, закладки, помощь и «о приложении»
   function profile() {
-    const notes = store.listNotes().length, marks = store.listBookmarks().length;
+    const all = store.listNotes(), marks = store.listBookmarks().length;
+    // честно по месту хранения: облачные — в облаке, примеры и старые локальные — только на этом устройстве
+    const cloud = all.filter((n) => n.remote).length, examples = all.filter(isExample).length;
+    const local = all.length - cloud - examples;
+    const notesMeta = [cloud ? "в облаке: " + cloud : "", local ? "на устройстве: " + local : "", examples ? "примеры: " + examples : ""].filter(Boolean).join(" · ") || "пока нет";
     const tile = (go, ico, tone, title, meta) =>
       '<button class="pf-tile tone-' + tone + '" data-go="' + go + '"><span class="pf-tile-ico">' + icon(ico) + '</span><span class="pf-tile-text"><b>' + title +
       '</b><span class="meta">' + meta + '</span></span><span class="chev">' + icon("chev") + "</span></button>";
@@ -731,9 +743,9 @@
       app("profile-screen") + DECO.head() +
       head("Профиль", "") +
       '<section class="pf-hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() +
-      '<div class="pf-avatar" aria-hidden="true">Н</div><div class="pf-id"><h2>Николай</h2><p>Локальный профиль</p></div></section>' +
+      '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id"><h2>Участник</h2><p>Анонимный профиль на этом устройстве</p></div></section>' +
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
-      tile("all-notes", "doc", "blue", "Конспекты", notes + " сохранено на устройстве") +
+      tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
       '</div><h3 class="pf-h">Настройки</h3><div class="pf-card">' + info("help", "mint", "Помощь") + info("info", "gold", "О приложении") + "</div>" +
       '<div class="footer-brand pf-foot">' + logo() + "<span>Konspekt by NK</span></div></div>"
