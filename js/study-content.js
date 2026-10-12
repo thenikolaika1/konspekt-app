@@ -149,7 +149,10 @@
         out.ordered = !!b.ordered;
         return out.items.length ? out : null;
       case "TABLE":
-        out.headers = strs(b.headers);
+        // пустой заголовок — это позиция столбца (угловая ячейка над подписями строк), его не выбрасываем:
+        // иначе остальные заголовки сдвигаются влево. Совсем без текста — таблица без шапки.
+        out.headers = arr(b.headers).map(str);
+        if (!out.headers.some(Boolean)) out.headers = [];
         out.rows = arr(b.rows).map((r) => arr(r).map(str)).filter((r) => r.some(Boolean));
         return out.rows.length ? out : null;
       case "REMEMBER":

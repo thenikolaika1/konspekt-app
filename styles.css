@@ -1271,6 +1271,8 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 .cn-v2 .note-table.stack tr{border-bottom-color:var(--c2-line)}
 .cn-v2 .note-table.stack td{font-size:15.5px}
 .cn-v2 .note-table.stack td:first-child{font-size:16.5px;color:var(--c2-ink)}
+/* узкий телефон (320 px): длинные слова в таблицах переносятся по слогам, шапка без разрядки — таблица помещается без прокрутки */
+@media (max-width:360px){.cn-v2 .note-table th,.cn-v2 .note-table td{-webkit-hyphens:auto;hyphens:auto}.cn-v2 .note-table th{letter-spacing:0}}
 .cn-v2 .note-table.stack td[data-label]::before{color:var(--info-ink)}
 
 /* сворачиваемые справочные блоки и вопросы: [ Термины ⌄ ]

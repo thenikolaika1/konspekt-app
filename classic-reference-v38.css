@@ -25,7 +25,7 @@
 .cn-v2 .k-ex{background:#faf4ec;border-color:#9a673e}.cn-v2 .k-ex .cn-box-label{color:#9a673e}
 
 /* Таблица — отдельный учебный блок, а не жёлтая карточка. */
-.cn-v2 .table-wrap{margin:14px 0;border:1px solid #dfe6ee;border-radius:11px;overflow:hidden;background:#fff}
+.cn-v2 .table-wrap{margin:14px 0;border:1px solid #dfe6ee;border-radius:11px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;background:#fff}
 .cn-v2 .note-table{width:100%;border-collapse:collapse;font-size:13px}
 .cn-v2 .note-table th{background:#f2f7fd;color:#244469;font-weight:800;text-align:left}
 .cn-v2 .note-table th,.cn-v2 .note-table td{padding:9px 10px;border-bottom:1px solid #e7ebf0}
