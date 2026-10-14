@@ -1,6 +1,6 @@
 /**
  * Edge Function analyze-pages: фотографии страниц (private bucket temp-pages) → AI-провайдер
- * (основной GigaChat-2-Max, резервные OpenRouter и Z.AI — см. providers.ts) → StudyContent v1 → public.notes.content.
+ * (основной GigaChat-2-Max, резервный Z.AI — см. providers.ts) → StudyContent v1 → public.notes.content.
  *
  * Запрос: POST { note_id, paths[] } с заголовком Authorization: Bearer <JWT пользователя>.
  * Ответ сразу 202 { status: "processing" }; сама генерация идёт в фоне (EdgeRuntime.waitUntil),

@@ -2,7 +2,7 @@
  * AI-провайдеры для analyze-pages: единый вызов «сообщения → текст ответа модели».
  *
  * Порядок провайдеров задаётся PROVIDER_ORDER: первый — основной, остальные — резервные.
- * Сейчас: GigaChat (GigaChat-2-Max) → OpenRouter (qwen/qwen3.8-27b:free) → Z.AI (glm-4.6v-flash).
+ * Сейчас: GigaChat (GigaChat-2-Max) → Z.AI (glm-4.6v-flash); OpenRouter временно исключён (см. PROVIDER_ORDER).
  *
  * Переключение на резервный провайдер происходит только при ошибке самого провайдера:
  * HTTP-ошибка (429, 5xx, 4xx — в том числе «нет доступного бесплатного vision-endpoint»),
@@ -87,8 +87,12 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
   },
 };
 
-/** Основной провайдер — первый; при его ошибке пробуются следующие по порядку. */
-export const PROVIDER_ORDER: ProviderId[] = ["gigachat", "openrouter", "zai"];
+/**
+ * Основной провайдер — первый; при его ошибке пробуются следующие по порядку.
+ * OpenRouter временно исключён: qwen/qwen3.8-27b:free снята с бесплатного доступа (HTTP 404 «unavailable for free»,
+ * 06.10 и 14.10.2026), а платную версию не подключаем. Описание в PROVIDERS оставлено — вернуть, добавив id сюда.
+ */
+export const PROVIDER_ORDER: ProviderId[] = ["gigachat", "zai"];
 
 export const GIGACHAT = {
   oauthUrl: "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
@@ -100,15 +104,24 @@ export const GIGACHAT = {
   cleanupMs: 8_000,
   /** сколько страниц загружать в Files API одновременно: быстрее последовательной загрузки, без нагрузки на лимиты */
   uploadConcurrency: 3,
-  /** лимит одного HTTP upload в Files API; stage может состоять из нескольких волн по uploadConcurrency */
-  uploadRequestMaxMs: 18_000,
+  /**
+   * лимит одного HTTP upload в Files API; stage может состоять из нескольких волн по uploadConcurrency.
+   * Удачные загрузки волны — 3–12 с (логи 02–09.10.2026); зависшая не завершалась и за 105 с, поэтому вместо
+   * долгого ожидания — уже с запасом лимит и один повтор (uploadAttempts) новым запросом.
+   */
+  uploadRequestMaxMs: 25_000,
+  /** попыток на одну страницу: повтор — только после таймаута или сетевой ошибки, не после ответа с ошибкой */
+  uploadAttempts: 2,
 };
 
 export const TIMEOUTS = {
-  /** основной провайдер ждём не дольше этого, чтобы резервному осталось время (GigaChat-2-Max с полным промптом — до ~100 с) */
-  primaryMaxMs: 75_000,
-  /** сколько времени оставить резервным провайдерам, если основной завис (Z.AI отвечал за ~24 с) */
-  fallbackReserveMs: 55_000,
+  /**
+   * основной провайдер ждём не дольше этого (GigaChat-2-Max: загрузка 3–12 с на волну, chat 22–53 с).
+   * Вмещает загрузку с одним повтором (до 25 + 25 с) и chat; бюджет функции — BUDGET_MS = 140 с в index.ts.
+   */
+  primaryMaxMs: 100_000,
+  /** сколько времени оставить резервному провайдеру, если основной завис (Z.AI отвечал за 24–30 с) */
+  fallbackReserveMs: 30_000,
   /** сколько оставить последнему провайдеру, если завис промежуточный резервный */
   lastReserveMs: 25_000,
   /** меньше этого — вызов не начинаем */
@@ -415,7 +428,19 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     console.warn("[analyze-pages] ai provider=gigachat model=" + p.model + " stage=" + stage + " status=" + status + " ms=" + (Date.now() - started) + " images=" + pages);
     return new ProviderError(codeForStatus(status), stage + " HTTP " + status + " " + body.slice(0, 200), "gigachat", status);
   };
+  // зависший или оборванный upload повторяем новым запросом (файл с тем же содержимым; id берётся из ответа повтора)
   const upload = async (url: string, n: number) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await uploadOnce(url, n);
+      } catch (e) {
+        const retryable = !ctrl.signal.aborted && (!(e instanceof ProviderError) || e.code === "AI_TIMEOUT");
+        if (!retryable || attempt >= GIGACHAT.uploadAttempts) throw e;
+        console.warn("[analyze-pages] ai provider=gigachat stage=upload retry page=" + n + ": " + (e instanceof ProviderError ? e.detail : "network error"));
+      }
+    }
+  };
+  const uploadOnce = async (url: string, n: number) => {
     const uploadCtrl = new AbortController();
     const abortUpload = () => uploadCtrl.abort();
     if (ctrl.signal.aborted) abortUpload();

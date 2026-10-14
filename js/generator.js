@@ -70,13 +70,18 @@
     }
   }
 
-  async function cloudGenerate(pages, opts) {
+  const newJob = (key) => ({ key, noteId: K.uid(), created: false, paths: new Map() });
+
+  async function cloudGenerate(pages, opts, restarted = false) {
     const key = keyOf(pages);
     // другой набор страниц — новая генерация; незавершённая прежняя note без результата убирается
     if (!current || current.key !== key) {
       const old = current && K.store.getNote(current.noteId);
       if (old && old.status === "failed") K.store.deleteNote(old.id).catch(() => {});
-      current = { key, noteId: K.uid(), created: false, paths: new Map() };
+      current = newJob(key);
+    } else if (current.created && !K.store.getNote(current.noteId)) {
+      // прежнюю note удалили (вместе с её фото) — повтор начинается с новой note и новой загрузки
+      current = newJob(key);
     }
     const job = current;
     const stage = opts.onStage || (() => {});
@@ -97,7 +102,15 @@
     }
 
     stage("analyze");
-    await start(job.noteId, paths);
+    try {
+      await start(job.noteId, paths);
+    } catch (e) {
+      // сервер не нашёл note (удалена на другом устройстве или после синхронизации): AI по ней не запускался.
+      // Один раз начинаем заново — новая note, фото загружаются снова; второй NOT_FOUND — ошибка без повторов
+      if (e.message !== "NOT_FOUND" || restarted || current !== job) throw e;
+      current = newJob(key);
+      return cloudGenerate(pages, opts, true);
+    }
     const n = settle(await cloud.waitForNote(job.noteId, opts));
     if (current === job) current = null;
     return n;
