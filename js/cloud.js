@@ -72,15 +72,18 @@
 
   // iOS/Safari после закрытия камеры иногда возвращает Load failed или подвисает.
   // Повторяем только идемпотентные операции и только когда ответа сервера не было; без сети не повторяем.
-  async function retryNetwork(fn, attempts = 3) {
+  // Ответ Supabase иногда теряется по дороге (запись сделана, ответа нет; шлюз отдаёт 520) и связь возвращается
+  // не сразу: 5 попыток с паузами 1, 2, 4, 8 с — около 15 с ожидания между попытками сверх таймаутов запросов.
+  const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+  async function retryNetwork(fn) {
     for (let i = 0; ; i++) {
       try {
         return await fn();
       } catch (e) {
-        if (!e.transient || navigator.onLine === false || i === attempts - 1) throw e;
+        if (!e.transient || navigator.onLine === false || i >= RETRY_DELAYS_MS.length) throw e;
         // исходная ошибка — только в консоль, пользователю показывается код
         console.warn("[cloud] no server response, retry " + (i + 1) + ":", e.message, String(e.cause?.message || ""));
-        await sleep(500 * 2 ** i);
+        await sleep(RETRY_DELAYS_MS[i]);
       }
     }
   }
