@@ -1609,15 +1609,19 @@ button.profile-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2
 .info-faq details[open] summary .chev{transform:rotate(90deg)}
 .info-faq p{margin:0;padding:0 14px 14px}
 .info-errors div{padding:12px 14px}
-.about-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:26px 20px 8px}
+.about-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:26px 20px 22px}
 .about-card .bookmark-logo{width:72px;height:72px;margin:0}
 .about-card .bookmark-logo img{width:72px;height:72px}
 .about-card h2{margin:14px 0 0;font-size:22px;line-height:28px;font-weight:850;letter-spacing:-.3px;color:var(--navy)}
-.about-card>p{margin:6px 0 0;max-width:290px;font-size:14.5px;line-height:20px;color:var(--muted)}
-.about-meta{align-self:stretch;margin:20px 0 0;padding:0}
-.about-meta div{display:flex;justify-content:space-between;gap:12px;padding:13px 2px;border-top:1px solid #eef2f7;font-size:15px;line-height:20px}
-.about-meta dt{color:var(--muted);font-weight:650}
-.about-meta dd{margin:0;color:var(--navy);font-weight:800;text-align:right}
+.about-lead{margin:8px 0 0;max-width:310px;font-size:15px;line-height:22px;color:var(--muted)}
+.about-points{margin-top:12px}
+.about-point{display:grid;grid-template-columns:38px minmax(0,1fr);gap:12px;align-items:start;padding:14px}
+.about-point+.about-point{border-top:1px solid #eef2f7}
+.about-point p{margin:0;font-size:15px;line-height:22px;color:var(--navy)}
+.pf-row-ico.tone-blue{background:var(--blue-pale);color:var(--blue)}
+.pf-row-ico.tone-lav{background:#f1ecfd;color:var(--lav,#7a5ce6)}
+.about-credit{margin:26px 0 8px;text-align:center;font-size:13.5px;line-height:18px;font-weight:700;letter-spacing:.01em;color:var(--muted)}
+.about-credit:before{content:"";display:block;width:32px;height:3px;margin:0 auto 12px;border-radius:2px;background:var(--ds-line)}
 @media (prefers-reduced-motion:reduce){.info-faq summary .chev,.pf-row{transition:none}}
 
 /* ---------- нижняя панель: матовая поверхность, отступ контента = её реальная высота ---------- */

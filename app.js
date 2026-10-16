@@ -15,8 +15,6 @@
 
   // Friends & Family: не больше 4 страниц (сервер проверяет тот же лимит — private.ai_limits.max_pages)
   const MAX_PAGES = 4;
-  // номер сборки для «О приложении» — тот же ?v=, что в index.html (одно место для смены версии)
-  const APP_VERSION = ((document.currentScript || {}).src || "").match(/[?&]v=(\d+)/)?.[1] || "";
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
@@ -789,14 +787,18 @@
     );
   }
 
-  // «О приложении»: название, описание, автор, версия
+  // «О приложении»: логотип, название, описание, автор (номер сборки пользователю не показываем — он только в ?v= и кэше)
   function about() {
+    const point = (ico, tone, text) => '<div class="about-point"><span class="pf-row-ico tone-' + tone + '">' + icon(ico) + "</span><p>" + text + "</p></div>";
     return (
       app("about-screen") + DECO.head() +
       head("О приложении", "") +
-      '<section class="about-card pf-card">' + logo() + "<h2>Konspekt by NK</h2><p>Приложение для создания учебных конспектов с помощью ИИ</p>" +
-      '<dl class="about-meta"><div><dt>Автор</dt><dd>Капустин Николай</dd></div>' +
-      (APP_VERSION ? "<div><dt>Версия</dt><dd>" + esc(APP_VERSION) + "</dd></div>" : "") + "</dl></section></div>"
+      '<section class="about-card pf-card">' + logo() + "<h2>Konspekt by NK</h2>" +
+      '<p class="about-lead">Konspekt by NK — приложение, которое помогает школьникам учиться быстрее и удобнее с помощью искусственного интеллекта.</p></section>' +
+      '<div class="pf-card about-points">' +
+      point("camera", "blue", "Просто сфотографируй страницы учебника, и ИИ создаст понятный, структурированный конспект с самой важной информацией.") +
+      point("book", "lav", "Сохраняй конспекты в библиотеке, повторяй материал и готовься к урокам, самостоятельным и контрольным работам.") +
+      '</div><p class="about-credit">Создано Капустиным Николаем</p></div>'
     );
   }
 
