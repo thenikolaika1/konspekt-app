@@ -1585,6 +1585,40 @@ button.profile-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2
 .pf-foot{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:30px}
 .pf-foot .bookmark-logo{width:42px;height:42px;margin:0}
 .pf-foot .bookmark-logo img{width:42px;height:42px}
+/* v55: «Помощь» и «О приложении» — строки настроек стали кнопками, экраны в стиле профиля */
+.pf-row{width:100%;border:0;background:none;font:inherit;color:var(--navy);text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:background var(--ds-t-fast)}
+.pf-row:active{background:#f4f7fb}
+.pf-row .chev{margin-left:auto;color:#a3aec0}
+.pf-row .chev .ui-icon{width:18px;height:18px}
+.help-screen .pf-h:first-of-type,.about-screen .about-card{margin-top:8px}
+.info-steps{list-style:none;margin:0;padding:4px 0}
+.info-steps li{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:12px 14px}
+.info-steps li+li{border-top:1px solid #eef2f7}
+.info-num{display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:var(--blue-pale);color:var(--blue);font-size:14px;font-weight:850}
+.info-steps b,.info-errors b{display:block;font-size:15px;line-height:20px;font-weight:800;color:var(--navy)}
+.info-steps p,.info-errors p,.info-text p,.info-faq p{margin:3px 0 0;font-size:14px;line-height:20px;color:var(--muted)}
+.info-tip{display:flex;gap:10px;align-items:flex-start;margin:10px 2px 0;font-size:13.5px;line-height:19px;color:var(--muted)}
+.info-tip .ui-icon{flex:0 0 auto;width:18px;height:18px;color:var(--blue)}
+.info-text{padding:12px 14px}
+.info-text p+p{margin-top:10px}
+.info-faq details+details,.info-errors div+div{border-top:1px solid #eef2f7}
+.info-faq summary{display:flex;align-items:center;gap:10px;padding:13px 14px;font-size:15px;line-height:20px;font-weight:750;color:var(--navy);cursor:pointer;list-style:none;-webkit-tap-highlight-color:transparent}
+.info-faq summary::-webkit-details-marker{display:none}
+.info-faq summary .chev{margin-left:auto;color:#a3aec0;transition:transform var(--ds-t)}
+.info-faq summary .chev .ui-icon{width:18px;height:18px}
+.info-faq details[open] summary .chev{transform:rotate(90deg)}
+.info-faq p{margin:0;padding:0 14px 14px}
+.info-errors div{padding:12px 14px}
+.about-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:26px 20px 8px}
+.about-card .bookmark-logo{width:72px;height:72px;margin:0}
+.about-card .bookmark-logo img{width:72px;height:72px}
+.about-card h2{margin:14px 0 0;font-size:22px;line-height:28px;font-weight:850;letter-spacing:-.3px;color:var(--navy)}
+.about-card>p{margin:6px 0 0;max-width:290px;font-size:14.5px;line-height:20px;color:var(--muted)}
+.about-meta{align-self:stretch;margin:20px 0 0;padding:0}
+.about-meta div{display:flex;justify-content:space-between;gap:12px;padding:13px 2px;border-top:1px solid #eef2f7;font-size:15px;line-height:20px}
+.about-meta dt{color:var(--muted);font-weight:650}
+.about-meta dd{margin:0;color:var(--navy);font-weight:800;text-align:right}
+@media (prefers-reduced-motion:reduce){.info-faq summary .chev,.pf-row{transition:none}}
 
 /* ---------- нижняя панель: матовая поверхность, отступ контента = её реальная высота ---------- */
 .tabbar{background:rgba(255,255,255,.88);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border-top:1px solid rgba(214,224,238,.9);box-shadow:0 -6px 22px rgba(20,40,90,.06);will-change:transform}

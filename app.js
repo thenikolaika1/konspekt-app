@@ -15,6 +15,8 @@
 
   // Friends & Family: не больше 4 страниц (сервер проверяет тот же лимит — private.ai_limits.max_pages)
   const MAX_PAGES = 4;
+  // номер сборки для «О приложении» — тот же ?v=, что в index.html (одно место для смены версии)
+  const APP_VERSION = ((document.currentScript || {}).src || "").match(/[?&]v=(\d+)/)?.[1] || "";
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
@@ -738,7 +740,9 @@
     const tile = (go, ico, tone, title, meta) =>
       '<button class="pf-tile tone-' + tone + '" data-go="' + go + '"><span class="pf-tile-ico">' + icon(ico) + '</span><span class="pf-tile-text"><b>' + title +
       '</b><span class="meta">' + meta + '</span></span><span class="chev">' + icon("chev") + "</span></button>";
-    const info = (ico, tone, title) => '<div class="pf-row"><span class="pf-row-ico tone-' + tone + '">' + icon(ico) + "</span><b>" + title + "</b></div>";
+    const info = (go, ico, tone, title) =>
+      '<button class="pf-row" data-go="' + go + '"><span class="pf-row-ico tone-' + tone + '">' + icon(ico) + "</span><b>" + title +
+      '</b><span class="chev">' + icon("chev") + "</span></button>";
     return (
       app("profile-screen") + DECO.head() +
       head("Профиль", "") +
@@ -747,8 +751,52 @@
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
       tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
-      '</div><h3 class="pf-h">Настройки</h3><div class="pf-card">' + info("help", "mint", "Помощь") + info("info", "gold", "О приложении") + "</div>" +
+      '</div><h3 class="pf-h">Настройки</h3><div class="pf-card">' + info("help", "help", "mint", "Помощь") + info("about", "info", "gold", "О приложении") + "</div>" +
       '<div class="footer-brand pf-foot">' + logo() + "<span>Konspekt by NK</span></div></div>"
+    );
+  }
+
+  // «Помощь»: только то, что приложение действительно умеет; формулировки ошибок — как на экране ошибки (GEN_ERRORS)
+  function help() {
+    const steps = [
+      ["Открой камеру", "Вкладка «Фото» внизу или кнопка «Сфотографировать» на главной."],
+      ["Сними страницы", "Страницы одной темы по порядку — до " + MAX_PAGES + " за раз. Можно выбрать готовые снимки из галереи."],
+      ["Нажми «Создать конспект»", "ИИ прочитает страницы и составит конспект. Обычно это занимает пару минут."],
+      ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
+    ];
+    const faq = [
+      ["Сколько конспектов можно создать?", "В раннем доступе число конспектов ограничено. Сколько осталось, видно на главном экране."],
+      ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
+      ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
+      ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
+      ["Где хранятся мои конспекты?", "Они привязаны к анонимному профилю на этом устройстве. Если очистить данные браузера или сменить устройство, доступ к ним может пропасть."],
+      ["Тратит ли библиотека лимит?", "Нет. Готовые конспекты библиотеки открываются без кода приглашения и без ограничений."],
+    ];
+    const errs = ["NETWORK", "UNREADABLE_PAGES", "AI_TIMEOUT", "AI_RATE_LIMITED", "TOO_MANY_PAGES", "AI_PAUSED", "LIMIT_REACHED", "ACCESS_EXPIRED"];
+    return (
+      app("help-screen") + DECO.head() +
+      head("Помощь", "Как пользоваться приложением") +
+      '<h3 class="pf-h">Конспект по фотографиям</h3><ol class="pf-card info-steps">' +
+      steps.map((s, i) => '<li><span class="info-num">' + (i + 1) + "</span><div><b>" + esc(s[0]) + "</b><p>" + esc(s[1]) + "</p></div></li>").join("") +
+      '</ol><p class="info-tip">' + icon("sparkle") + "<span>Снимай страницу целиком, ровно и при хорошем свете — так текст прочитается точнее.</span></p>" +
+      '<h3 class="pf-h">Библиотека</h3><div class="pf-card info-text"><p>Готовые конспекты по учебникам: вкладка «Библиотека» → класс → предмет → учебник → параграф. Сейчас там история и физика за 8 класс.</p>' +
+      "<p>Свои конспекты — в разделе «Я» → «Конспекты». Через «⋯» у конспекта его можно добавить в закладку, переименовать или удалить.</p></div>" +
+      '<h3 class="pf-h">Частые вопросы</h3><div class="pf-card info-faq">' +
+      faq.map((q) => "<details><summary>" + esc(q[0]) + '<span class="chev">' + icon("chev") + "</span></summary><p>" + esc(q[1]) + "</p></details>").join("") +
+      '</div><h3 class="pf-h">Ошибки и ограничения</h3><div class="pf-card info-errors">' +
+      errs.map((c) => "<div><b>" + esc(GEN_ERRORS[c][0]) + "</b><p>" + esc(GEN_ERRORS[c][1]) + "</p></div>").join("") +
+      "</div></div>"
+    );
+  }
+
+  // «О приложении»: название, описание, автор, версия
+  function about() {
+    return (
+      app("about-screen") + DECO.head() +
+      head("О приложении", "") +
+      '<section class="about-card pf-card">' + logo() + "<h2>Konspekt by NK</h2><p>Приложение для создания учебных конспектов с помощью ИИ</p>" +
+      '<dl class="about-meta"><div><dt>Автор</dt><dd>Капустин Николай</dd></div>' +
+      (APP_VERSION ? "<div><dt>Версия</dt><dd>" + esc(APP_VERSION) + "</dd></div>" : "") + "</dl></section></div>"
     );
   }
 
@@ -890,6 +938,8 @@
     note,
     "new-bookmark": newBookmark,
     profile,
+    help,
+    about,
     error,
     library: libraryScreen,
     "library-grade": libraryGrade,
@@ -1078,7 +1128,7 @@
     { id: "me", label: "Я", icon: "user", screen: "profile" },
   ];
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
-  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
   let tabbar = null;
 
   function currentTab() {
