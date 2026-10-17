@@ -16,7 +16,9 @@ param(
   [string]$ProjectUrl = 'https://ohdeykbkgimvwstkwuuf.supabase.co',
   [string]$FunctionUrl = '',
   [string]$ApiKey = '',
-  [string]$Code = ''
+  [string]$Code = '',
+  # код уже погашен этим тестом: только проверки без регистрации (пустой запрос, неверный код, USED, хук)
+  [switch]$AfterUse
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,17 +52,24 @@ $id = 'KN-' + (RandStr 6); $key = RandStr 20; $id2 = 'KN-' + (RandStr 6)
 $email = 'id-' + $id.ToLower() + '@id.konspekt.invalid'
 $password = 'Kn-2.' + $key
 
+# HTTP через HttpClient: тело ответа читается одинаково для 2xx и 4xx в Windows PowerShell 5.1 и PowerShell 7
+# (Invoke-WebRequest в 5.1 при ошибке HTTP не отдаёт тело ответа — проверки видели только код статуса)
+Add-Type -AssemblyName System.Net.Http
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+$http = [System.Net.Http.HttpClient]::new()
+$http.Timeout = [TimeSpan]::FromSeconds(30)
 function Call([string]$method, [string]$url, $body, [hashtable]$headers = @{}) {
-  $json = if ($null -eq $body) { $null } else { $body | ConvertTo-Json -Compress }
+  $req = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($method), $url)
+  foreach ($k in $headers.Keys) { [void]$req.Headers.TryAddWithoutValidation($k, [string]$headers[$k]) }
+  $json = if ($null -eq $body) { '{}' } else { $body | ConvertTo-Json -Compress }
+  $req.Content = [System.Net.Http.StringContent]::new($json, [System.Text.Encoding]::UTF8, 'application/json')
   try {
-    $r = Invoke-WebRequest -UseBasicParsing -Method $method -Uri $url -Headers $headers -ContentType 'application/json' -Body $json
-    $j = $null; try { $j = $r.Content | ConvertFrom-Json } catch { }
-    return @{ s = [int]$r.StatusCode; j = $j }
+    $res = $http.SendAsync($req).GetAwaiter().GetResult()
+    $txt = $res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    $j = $null; try { $j = $txt | ConvertFrom-Json } catch { }
+    return @{ s = [int]$res.StatusCode; j = $j }
   } catch {
-    $resp = $_.Exception.Response
-    $s = if ($resp) { [int]$resp.StatusCode } else { 0 }
-    $j = $null; try { $j = $_.ErrorDetails.Message | ConvertFrom-Json } catch { }
-    return @{ s = $s; j = $j }
+    return @{ s = 0; j = $null }
   }
 }
 $pass = 0; $fail = 0
@@ -70,12 +79,24 @@ function Check([bool]$ok, [string]$name, [string]$got) {
 $fn = @{}; $auth = @{ apikey = $ApiKey }
 $err = { param($r) "$($r.s) $(if ($r.j) { $r.j | ConvertTo-Json -Compress } else { '' })" }
 
-Say ("Тестовый ID: " + $id + "   (ключ не показывается)")
+if (-not $AfterUse) { Say ("Тестовый ID: " + $id + "   (ключ не показывается)") }
 # 1. отказы без траты кода
 $r = Call POST $FunctionUrl @{} $fn
 Check ($r.s -eq 400 -and $r.j.error -eq 'BAD_REQUEST') 'пустой запрос → BAD_REQUEST' (& $err $r)
 $r = Call POST $FunctionUrl @{ code = ('ZZZZ-' + (RandStr 4) + '-' + (RandStr 4)); id = $id; key = $key } $fn
 Check ($r.s -eq 400 -and $r.j.error -eq 'INVALID') 'неверный код → INVALID' (& $err $r)
+if ($AfterUse) {
+  # код уже погашен: другой ID → USED (новый аккаунт не создаётся), обычная регистрация → отказ хука
+  $r = Call POST $FunctionUrl @{ code = $Code; id = $id2; key = $key } $fn
+  Check ($r.s -eq 409 -and $r.j.error -eq 'USED') 'погашенный код с другим ID → USED' (& $err $r)
+  $r = Call POST "$ProjectUrl/auth/v1/signup" @{ email = ('id-' + $id2.ToLower() + '@id.konspekt.invalid'); password = ('Kn-2.' + (RandStr 20)) } $auth
+  Check ($r.s -eq 403 -or $r.s -eq 400 -or $r.s -eq 422) 'обычная регистрация технического email → отказ' (& $err $r)
+  $key = $null; $password = $null
+  Say ''
+  if ($fail -eq 0) { Say ("ПРОВЕРКА ОТКАЗОВ OK: $pass из $pass (регистрация не выполнялась)") 'Green' }
+  else { Say ("ПРОВЕРКА ОТКАЗОВ: ошибок $fail из $($pass + $fail). Пришлите строки FAIL (без кода).") 'Red'; exit 1 }
+  exit 0
+}
 # 2. регистрация по коду
 $r = Call POST $FunctionUrl @{ code = $Code; id = $id; key = $key } $fn
 $registered = ($r.s -eq 200 -and $r.j.status -eq 'ok' -and $r.j.id -eq $id)
