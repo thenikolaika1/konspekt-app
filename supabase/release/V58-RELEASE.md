@@ -10,22 +10,18 @@
 ## 0. Подготовка (ничего не меняет)
 
 1. Ветка и коммит: `git fetch; git checkout ff-invite-register; git log -1` — ожидаемый коммит указан в отчёте выпуска.
-2. **Резервная копия production — обязательно, делает владелец** (у Claude нет пароля базы и сетевого доступа
-   к ней; снимок через SQL не заменяет копию). База ~12 МБ, занимает 1–2 минуты. Переменные — из п. 3.
-   1. Версия: `pg_dump --version` — **17.x или новее** (сервер — PostgreSQL 17.6; более старый `pg_dump` откажется).
-   2. Полная копия (все схемы, включая `auth` и `storage`):
-      `pg_dump -Fc -f konspekt-before-v58-full.dump`
-   3. Копия данных приложения — её проще всего вернуть точечно:
-      `pg_dump -Fc --data-only -t 'public.*' -t 'private.*' -t 'analytics.*' -t auth.users -t auth.identities -f konspekt-before-v58-data.dump`
-      (только `-t`: при совмещении `-n` и `-t` pg_dump сохраняет лишь таблицы из `-t`)
-   4. Проверка, что копии читаются: `pg_restore -l konspekt-before-v58-full.dump | Measure-Object -Line` (сотни строк)
-      и `pg_restore -l konspekt-before-v58-data.dump | Select-String "TABLE DATA"` (есть notes, user_entitlements,
-      usage_ledger, ai_generations, app_events, users).
-   5. По желанию — пробное восстановление на своём компьютере (не в production): `createdb konspekt_check` →
-      `pg_restore -d konspekt_check --no-owner --no-acl konspekt-before-v58-full.dump` (предупреждения о ролях
-      Supabase допустимы) → `psql -d konspekt_check -c "select count(*) from public.notes"` = 3.
-   6. Dashboard → Database → Backups: посмотреть, есть ли автоматические копии на тарифе (дополнительно, не вместо).
-   Файлы хранить вне репозитория и не пересылать: в них данные пользователей.
+2. **Резервная копия production — обязательно, делает владелец** (тариф Free: автоматических копий нет; у Claude
+   нет пароля базы и сетевого доступа к ней). Нужны только PostgreSQL 17 Command Line Tools. База ~12 МБ, 1–2 минуты.
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\supabase\release\backup-before-v58.ps1 -DbHost <host Session pooler>
+   ```
+   Host — Dashboard → **Connect** → Session pooler: часть строки после `@` и до `:5432`. Пароль базы скрипт спрашивает
+   скрыто и стирает в конце. Скрипт только читает базу и делает в `Документы\konspekt-backup-<дата>`:
+   `konspekt-full.dump` (вся база: схемы, функции, RLS, `auth`, `storage`, данные), `konspekt-data.dump` (данные
+   `public`, `private`, `analytics`, `auth.users`, `auth.identities`), `README.txt` (размеры, SHA-256, число строк).
+   Проверка встроена: число строк 10 ключевых таблиц в обеих копиях = в базе (до/после копирования).
+   Итог — зелёная строка **«КОПИЯ ГОТОВА И ПРОВЕРЕНА»**; красная «СТОП» — выпуск не начинать.
+   Папку скопировать во второе место (флешка или личное облако); не в репозиторий и не в общие чаты.
 3. Переменные подключения к базе (Session pooler из Dashboard → Connect), пароль вводится только у вас:
    `$env:PGHOST='…'; $env:PGPORT='5432'; $env:PGUSER='postgres.ohdeykbkgimvwstkwuuf'; $env:PGDATABASE='postgres'; $env:PGSSLMODE='require'`
 4. Supabase CLI вошёл в аккаунт: `supabase login` (если ещё не).
@@ -117,3 +113,21 @@ psql -X -v ON_ERROR_STOP=1 -f .\supabase\release\v58-window.sql
 | Функция | `supabase functions delete register-invite` | — |
 | Хук | Dashboard → Authentication → Hooks → Before User Created → выключить; затем по желанию `drop function public.hook_before_user_created(jsonb);` | — |
 | База | `psql -X -v ON_ERROR_STOP=1 -f .\supabase\release\v58-rollback.sql` | выданные права `beta_invite`, аккаунты, погашенные коды |
+
+## Восстановление из копии (`backup-before-v58.ps1`)
+
+Проверено на копии production-подобной базы (данные совпали побайтно, включая хэши ключей в `auth.users`).
+
+- **Данные повреждены, проект жив** (типичный случай): откатить шаги по таблице выше, затем вернуть таблицу
+  (перед этим очистить её): `pg_restore --data-only -n private -t user_entitlements -d postgres konspekt-data.dump`
+  (`-n <схема> -t <таблица>` можно повторять). Переменные подключения — как в п. 0.3.
+- **Проект потерян**: новый проект Supabase (PostgreSQL 17) → переменные подключения к нему → по порядку:
+  1. `psql -X -c "create schema private; create schema analytics;"`
+  2. `pg_restore --no-owner --data-only -n auth -t users -t identities --exit-on-error -d postgres konspekt-data.dump`
+  3. `pg_restore --no-owner -n public -n private -n analytics --exit-on-error -d postgres konspekt-full.dump`
+  Проверено: пользователи (с хэшами ключей — ученики входят прежними ID и ключом), конспекты, права, журнал квот,
+  генерации, лимиты, аналитика, политики RLS, функции и права на таблицы совпадают с исходной базой.
+  Затем — хук и настройки Auth (п. 1, 2а), Edge Functions и их секреты (в копии базы их нет), новый адрес
+  и publishable-ключ проекта — в `js/cloud.js`.
+- `konspekt-full.dump` — полный снимок для разбора и восстановления объектов, которых нет в миграциях
+  (`pg_restore -l` — список; `pg_restore -f out.sql konspekt-full.dump` — SQL-текст).

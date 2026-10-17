@@ -8,6 +8,7 @@
 
 | Файл | Что делает | Меняет базу? |
 |---|---|---|
+| `backup-before-v58.ps1` | резервная копия перед v58 (полная + данные) с проверкой числа строк | нет (только чтение) |
 | `apply-ff-migrations.ps1` | применяет 5 миграций по порядку, каждую отдельной транзакцией, с проверками до и после | да (кроме `-CheckOnly`) |
 | `precheck.sql` | база в ожидаемом состоянии до миграций | нет |
 | `status.sql` | какие из 5 миграций уже применены | нет |
@@ -110,7 +111,8 @@ $env:PGHOST='АДРЕС'; $env:PGPORT='5432'; $env:PGUSER='postgres.ohdeykbkgimv
 
 Точный порядок выпуска и откат — `V58-RELEASE.md`. Кратко (каждый шаг — только с разрешения владельца):
 
-1. Резервная копия production.
+1. Резервная копия production: `powershell -ExecutionPolicy Bypass -File .\supabase\release\backup-before-v58.ps1 -DbHost АДРЕС`
+   → «КОПИЯ ГОТОВА И ПРОВЕРЕНА». Восстановление — `V58-RELEASE.md`, раздел «Восстановление из копии».
 2. Миграция: `psql -X --single-transaction -v ON_ERROR_STOP=1 -f .\supabase\migrations\20261018120000_ff_invite_registration.sql`,
    затем `psql -X -f .\supabase\release\v58-check.sql` — все `ok = true`.
 3. Функция: `supabase functions deploy register-invite --project-ref ohdeykbkgimvwstkwuuf --no-verify-jwt`
