@@ -25,7 +25,7 @@
   let userPromise = null;
 
   // ---------- аккаунт участника: ID + ключ ----------
-  // ID и ключ выдаёт организатор (supabase/release/ff-accounts.ps1). Supabase Auth хранит служебный логин:
+  // ID и ключ создаются при регистрации по приглашению (Edge Function register-invite). Supabase Auth хранит служебный логин:
   // email из ID в недоставляемой зоне .invalid и пароль из ключа (bcrypt на стороне Auth); сами мы ключ не храним.
   // Алфавит без неоднозначных символов (нет 0/O, 1/I/L); ввод не «исправляется» — только регистр, пробелы и дефисы.
   const ID_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -405,16 +405,6 @@
   }
 
   /**
-   * Активация кода приглашения для текущего пользователя: { result: activated | already_active | invalid, access }.
-   * Код уходит только в теле запроса; здесь он не сохраняется и не пишется в журнал.
-   */
-  async function redeemInvite(code) {
-    await ensureUser();
-    const data = await callRpc("redeem_beta_invite", { p_code: code }, "REDEEM_FAILED");
-    return { result: data?.result || "invalid", access: data?.access || null };
-  }
-
-  /**
    * Аналитика (js/analytics.js): пакет событий в RPC public.track. Пользователя сервер берёт из JWT.
    * keepalive — при уходе страницы: supabase-js так не умеет, поэтому прямой запрос с последним токеном
    * (нет токена — не отправляем, события останутся в очереди до следующего запуска).
@@ -510,6 +500,96 @@
     return uid;
   }
 
+  // ---------- самостоятельная регистрация по приглашению (v58) ----------
+  // ID и ключ генерирует приложение и хранит до подтверждения «Я сохранил» (konspekt.register): повтор после
+  // потерянного ответа или перезапуска продолжает ту же регистрацию на сервере, а не создаёт второй аккаунт.
+  const PENDING = "konspekt.register";
+  const REGISTER_TIMEOUT_MS = cfg.registerTimeoutMs || 30_000;
+  function randomChars(n) {
+    // равномерно по алфавиту из 31 символа: байты ≥ 248 (= 31 × 8) отбрасываются
+    let out = "";
+    while (out.length < n) {
+      for (const b of crypto.getRandomValues(new Uint8Array(n * 2))) if (b < 248 && out.length < n) out += ID_ALPHABET[b % 31];
+    }
+    return out;
+  }
+  const newId = () => "KN-" + randomChars(ID_LEN);
+  const setPending = (v) => {
+    try {
+      v ? localStorage.setItem(PENDING, JSON.stringify(v)) : localStorage.removeItem(PENDING);
+    } catch (e) {}
+  };
+  /** Незавершённая или ещё не подтверждённая регистрация этого устройства: { code, id, key, done } или null. */
+  const pendingRegistration = () => {
+    const p = readJson(PENDING);
+    return p && normalizeId(p.id) && normalizeKey(p.key) ? p : null;
+  };
+  const clearPendingRegistration = () => setPending(null);
+
+  async function callRegister(body) {
+    const t = timeoutController(REGISTER_TIMEOUT_MS);
+    try {
+      const { data, error } = await sb().functions.invoke("register-invite", { body, signal: t.signal });
+      if (!error) return data;
+      if (noResponse(error)) throw connectionError(error.context || error, t.timedOut());
+      let code = "";
+      try {
+        code = (await error.context?.json())?.error || "";
+      } catch (e) {}
+      const e = new Error(code || "TEMPORARY");
+      if (!code || code === "TEMPORARY") e.transient = true;
+      throw e;
+    } finally {
+      t.done();
+    }
+  }
+
+  /**
+   * Регистрация по коду приглашения → { id, key, signedIn }. Код, ID и ключ сохраняются на устройстве до ответа
+   * сервера; повтор (двойное нажатие, сбой связи, перезапуск) — тот же ID и ключ. ID занят — новый ID.
+   * Ошибки: INVALID, EXPIRED, USED, BUSY, RATE_LIMITED, NETWORK, CONNECTION_LOST, SERVER_TIMEOUT, TEMPORARY.
+   */
+  async function registerWithInvite(rawCode) {
+    const code = String(rawCode || "").trim().slice(0, 64);
+    if (!code) throw new Error("INVALID");
+    let p = pendingRegistration();
+    if (p && p.done) return finishRegistration(p);
+    if (!p || p.code !== code) p = { code, id: newId(), key: randomChars(KEY_LEN), done: false };
+    setPending(p);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await retryNetwork(() => callRegister({ code: p.code, id: p.id, key: p.key }));
+        break;
+      } catch (e) {
+        if (e.message === "ID_TAKEN" && attempt < 3) {
+          p.id = newId();
+          setPending(p);
+          continue;
+        }
+        // код отклонён окончательно — данные этой попытки больше не нужны; при сбое связи остаются для повтора
+        if (["INVALID", "EXPIRED", "USED", "BAD_REQUEST"].includes(e.message)) setPending(null);
+        throw e.message === "BAD_REQUEST" ? new Error("INVALID") : e;
+      }
+    }
+    p.done = true;
+    setPending(p);
+    return finishRegistration(p);
+  }
+
+  /** Аккаунт создан: вход по его ID и ключу (без сети — позже, данные остаются на экране «Сохрани»). */
+  async function finishRegistration(p) {
+    let signedIn = getAccount().id === normalizeId(p.id);
+    if (!signedIn) {
+      try {
+        await signInWithId(p.id, p.key);
+        signedIn = true;
+      } catch (e) {
+        console.warn("[register] sign in after registration:", e.message);
+      }
+    }
+    return { id: normalizeId(p.id), key: p.key, signedIn };
+  }
+
   /** После потери сессии участника: явно продолжить гостем (прежний гость устройства или новый анонимный). */
   function continueAsGuest() {
     setFlag(null);
@@ -518,7 +598,8 @@
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
-    startAnalysis, waitForNote, getAccess, redeemInvite, track,
+    startAnalysis, waitForNote, getAccess, track,
     peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
+    registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };
 })();

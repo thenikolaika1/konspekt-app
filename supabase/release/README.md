@@ -97,24 +97,34 @@ $env:PGHOST='АДРЕС'; $env:PGPORT='5432'; $env:PGUSER='postgres.ohdeykbkgimv
 настройки и собранная аналитика). Вернуть нормализацию после шага 3 — выполнить файл миграции
 `20261011120500` тем же способом.
 
-## Аккаунты участников: вход по ID и ключу (сайт v57)
+## v58: регистрация учеников по одноразовым приглашениям
 
-Каждому участнику — свой ID (`KN-XXXXXX`) и отдельный ключ (20 символов). Алфавит без O, I, L, 0, 1.
-Приложение ничего не заменяет само: ID и ключ вводятся как выданы (регистр, пробелы и дефисы не важны).
+Ученик вводит личный код → приложение создаёт ID (`KN-XXXXXX`) и секретный ключ → Edge Function `register-invite`
+создаёт аккаунт Supabase Auth (технический email `id-kn-…@id.konspekt.invalid`, писем нет) и выдаёт право
+`beta_invite`, quota 1 (одна успешная генерация; попытки — `ai_limits.max_user_starts = 3`). Организатор выпускает
+только коды и **не видит ключей учеников**; аккаунты вручную не создаются.
 
-1. Создать аккаунты (Supabase Auth, Admin API). Ключ `service_role` — из Dashboard → Project Settings → API;
-   скрипт спросит его скрыто (или возьмёт из `$env:KONSPEKT_SERVICE_ROLE_KEY`) и нигде не сохранит.
-   Папка результатов — **вне репозитория** (скрипт откажется работать внутри него):
+Файлы: миграция `migrations/20261018120000_ff_invite_registration.sql`, функция `functions/register-invite`,
+`v58-check.sql` (проверка, только чтение), `v58-window.sql` (окно F&F), `v58-rollback.sql` (откат).
 
-   ```powershell
-   .\supabase\release\ff-accounts.ps1 -Count 12 -OutDir C:\Users\me\Documents\ff-accounts
-   ```
+Порядок выпуска (каждый шаг — только с разрешения владельца):
 
-   Результат: `ff-accounts-*.csv` (ID, ключ, uid — **секрет**, раздать каждому его строку лично),
-   `entitlements-*.sql` и `verify-*.sql` (только uid и ID, без ключей).
-2. Выполнить `entitlements-*.sql` (SQL Editor или `psql -X -v ON_ERROR_STOP=1 -f …`). Ожидается
-   `NOTICE: OK: N участникам назначено beta_invite, quota 1`. SQL проверяет результат сам и откатывается, если
-   аккаунт не найден, у пользователя уже есть право (у существующего права `source` не меняется) или итог не совпал.
-3. Выполнить `verify-*.sql`: N строк, у всех `ok = true`.
+1. Резервная копия production.
+2. Миграция: `psql -X --single-transaction -v ON_ERROR_STOP=1 -f .\supabase\migrations\20261018120000_ff_invite_registration.sql`,
+   затем `psql -X -f .\supabase\release\v58-check.sql` — все `ok = true`.
+3. Функция: `supabase functions deploy register-invite --project-ref ohdeykbkgimvwstkwuuf --no-verify-jwt`
+   (вызывается без входа; права service_role — только внутри функции). Секреты не нужны: `SUPABASE_URL` и ключ
+   service_role Supabase передаёт сам.
+4. Supabase Auth (Dashboard → Authentication): провайдер Email включён (вход по паролю); анонимные входы включены
+   (гостевой режим); «Allow new users to sign up» включено — без него не работают анонимные входы.
+   Аккаунты учеников создаёт только функция, поэтому «Confirm email» на них не влияет (лучше оставить включённым).
+5. Сайт v58 (слияние в `main` → GitHub Pages).
+6. Коды: `node tools/ff-invite-codes.mjs --count 15 --quota 1 --label "F&F" --expires 2026-10-24T00:00:00+03:00`
+   — открытые коды раздать лично (никуда не сохранять в репозиторий), SQL с хэшами выполнить в SQL Editor.
+   Проверка: `select * from private.invite_status();` (выпущено / погашено / в процессе / аккаунтов).
+7. Окно F&F 19–23.10 (МСК): `v58-window.sql`. **AI остаётся выключенным** (`max_total_starts = 0`) до отдельного
+   решения владельца и подтверждения контроля расходов.
 
-Окно F&F для `beta_invite` и общие лимиты задаются в `private.ai_limits` отдельно; скрипт их не меняет.
+Ограничения: один код — одно право и не больше одного аккаунта с правом; один человек с двумя кодами получит два
+аккаунта (без сбора персональных данных это не проверить — коды раздаются лично, по одному). Частота: 10 неудачных
+попыток с IP за час или 30 любых за 10 минут → «Слишком много попыток». Потерянный ключ не восстанавливается.

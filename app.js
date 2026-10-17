@@ -352,11 +352,47 @@
       app("welcome access") +
       logo() +
       brand() +
-      '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
-      '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
-      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button>' +
-      (idLogin ? '<button class="text-action" data-go="login">У меня есть ID и ключ</button>' : "") +
-      "</div>"
+      "<h1>Ранний доступ</h1>" + registerForm() + "</div>"
+    );
+  }
+
+  // форма регистрации по приглашению: на экране раннего доступа и на отдельном экране из «Я»
+  function registerForm() {
+    const p = idLogin ? cloud.pendingRegistration() : null;
+    const resume = p && !p.done;
+    return (
+      '<p class="register-lead">Введи личный код приглашения. Мы создадим аккаунт и выдадим личный ID и секретный ключ — по ним можно войти с любого устройства.</p>' +
+      '<div class="invite-form">' +
+      '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения"' +
+      (resume ? ' value="' + esc(p.code) + '"' : "") + ">" +
+      '<p class="invite-error" role="alert">' + (resume ? "Регистрация не завершилась. Нажми «Создать аккаунт» ещё раз." : "") + "</p></div>" +
+      '<button class="primary" data-register>Создать аккаунт</button>' +
+      '<button class="text-action" data-go="login">У меня есть ID и ключ</button>'
+    );
+  }
+
+  function register() {
+    return app("register-screen access") + head("Регистрация", "По личному приглашению") + registerForm() + "</div>";
+  }
+
+  // ID и ключ после регистрации: показываются, пока ученик не подтвердит, что сохранил их
+  function credentials() {
+    const p = idLogin ? cloud.pendingRegistration() : null;
+    if (!p || !p.done) return home();
+    const key = p.key.replace(/(.{5})(?=.)/g, "$1-");
+    const row = (label, value, what) =>
+      '<div class="cred-row"><span class="cred-label">' + label + '</span><b class="cred-value" id="cred-' + what + '">' + esc(value) +
+      '</b><button class="cred-copy" data-copy="' + what + '">Копировать</button></div>';
+    return (
+      app("credentials-screen") +
+      '<div class="screen-head"><div class="head-text"><h1>Аккаунт создан</h1><div class="sub">Сохрани ID и ключ</div></div></div>' +
+      '<div class="cred-card">' + row("ID", p.id, "id") + row("Секретный ключ", key, "key") +
+      '<button class="secondary wide" data-copy="all">Скопировать ID и ключ</button><p class="cred-copied" role="status"></p></div>' +
+      '<div class="cred-warn"><b>Сохрани их прямо сейчас</b> — запиши или сохрани в заметках. Они нужны, чтобы войти на другом устройстве или после выхода. ' +
+      "Восстановить ключ нельзя. Никому не показывай ключ.</div>" +
+      '<label class="cred-check"><input type="checkbox" id="credSaved"> Я сохранил ID и ключ</label>' +
+      '<p class="cred-error" role="alert"></p>' +
+      '<button class="primary wide" data-cred-done disabled>Продолжить</button></div>'
     );
   }
 
@@ -767,7 +803,10 @@
         '<div class="account-card"><p>Вход по ID на этом устройстве завершён. Конспекты не потеряны — войди снова тем же ID и ключом.</p>' + msg +
         '<button class="primary wide" data-go="login">Войти</button><button class="text-action" data-guest>Продолжить без входа</button></div>'
       );
-    return '<div class="account-card"><button class="secondary wide" data-go="login">Войти по ID и ключу</button></div>';
+    return (
+      '<div class="account-card"><button class="primary wide" data-go="register">Создать аккаунт по приглашению</button>' +
+      '<button class="text-action" data-go="login">У меня есть ID и ключ</button></div>'
+    );
   }
 
   function login() {
@@ -1000,6 +1039,8 @@
     "new-bookmark": newBookmark,
     profile,
     login,
+    register,
+    credentials,
     help,
     about,
     error,
@@ -1190,7 +1231,7 @@
     { id: "me", label: "Я", icon: "user", screen: "profile" },
   ];
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
-  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
   let tabbar = null;
 
   function currentTab() {
@@ -1737,44 +1778,103 @@
     refreshAccess().then(() => syncCloud());
   }
 
-  const REDEEM_ERRORS = {
+  const REGISTER_ERRORS = {
     INVALID: "Код не подошёл. Проверь его и попробуй ещё раз.",
+    EXPIRED: "Срок действия этого кода закончился.",
+    USED: "Этот код уже использован. Если аккаунт создавал ты — войди по ID и ключу.",
+    BUSY: "Этот код сейчас регистрируется на другом устройстве. Попробуй через 15 минут.",
+    RATE_LIMITED: "Слишком много попыток. Подожди немного и попробуй снова.",
     NETWORK: "Нет подключения к интернету. Проверь подключение и попробуй ещё раз.",
     CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
     SERVER_TIMEOUT: "Сервер не ответил вовремя. Попробуй ещё раз через минуту.",
-    AUTH_FAILED: "Не удалось подключиться к серверу. Попробуй ещё раз.",
+    TEMPORARY: "Сервер временно недоступен. Попробуй ещё раз через минуту.",
+    SIGNED_IN: "Ты уже вошёл в аккаунт. Чтобы создать новый, сначала выйди.",
+    BUSY_GENERATION: "Сейчас создаётся конспект. Дождись результата и попробуй снова.",
   };
 
-  // Экран кода не перерисовывается во время проверки, чтобы не потерять введённый код при ошибке.
-  function redeemUi(busy, message) {
-    const btn = root.querySelector("[data-redeem]");
+  // Экран кода не перерисовывается во время регистрации, чтобы не потерять введённый код при ошибке.
+  function registerUi(busy, message) {
+    const btn = root.querySelector("[data-register]");
     const err = root.querySelector(".invite-error");
     if (btn) {
       btn.disabled = busy;
-      btn.textContent = busy ? "Проверяем…" : "Активировать";
+      btn.textContent = busy ? "Создаём аккаунт…" : "Создать аккаунт";
     }
     if (err) err.textContent = message || "";
   }
 
-  async function redeemCode() {
+  async function registerCode() {
     const field = root.querySelector("#inviteCode");
     const code = field?.value.trim();
     if (!code) return field?.focus();
-    redeemUi(true, "");
-    let res;
+    if (account().kind === "participant") return registerUi(false, REGISTER_ERRORS.SIGNED_IN);
+    if (generationBusy()) return registerUi(false, REGISTER_ERRORS.BUSY_GENERATION);
+    registerUi(true, "");
     try {
-      res = await cloud.redeemInvite(code);
+      await window.K.analytics?.settle?.();
+      await cloud.registerWithInvite(code);
     } catch (e) {
-      // сам код в журнал не попадает — только код ошибки
-      console.warn("[access] redeem failed", e.message);
-      return redeemUi(false, REDEEM_ERRORS[e.message] || "Что-то пошло не так. Попробуй ещё раз.");
+      // ни код, ни ID, ни ключ в журнал не попадают — только код ошибки
+      console.warn("[register] failed", e.message);
+      return registerUi(false, REGISTER_ERRORS[e.message] || REGISTER_ERRORS.TEMPORARY);
     }
-    if (res.result !== "activated" && res.result !== "already_active") return redeemUi(false, REDEEM_ERRORS.INVALID);
-    field.value = ""; // открытый код больше нигде не хранится
-    if (res.access) setAccess(res.access, true);
-    await refreshAccess(); // перечитываем доступ с сервера; без связи остаётся ответ активации
-    if (S.access.state === "none") return redeemUi(false, "Не удалось проверить доступ. Попробуй ещё раз.");
+    field.value = "";
+    showCredentials();
+  }
+
+  function showCredentials() {
+    const uid = cloud.peekUid();
+    if (uid) onUserChange(uid);
+    S.history = [];
+    S.sheet = null;
+    S.screen = "credentials";
     render();
+    scrollTo(0, 0);
+  }
+
+  async function copyCredentials(what) {
+    const p = cloud.pendingRegistration();
+    if (!p) return;
+    const key = p.key.replace(/(.{5})(?=.)/g, "$1-");
+    const text = what === "id" ? p.id : what === "key" ? key : "Konspekt by NK\nID: " + p.id + "\nКлюч: " + key;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch (e) {
+      // без доступа к буферу: выделяем текст, чтобы скопировать вручную
+      const el = root.querySelector(what === "key" ? "#cred-key" : "#cred-id");
+      if (el) getSelection()?.selectAllChildren(el);
+    }
+    const out = root.querySelector(".cred-copied");
+    if (out) out.textContent = ok ? (what === "all" ? "ID и ключ скопированы" : "Скопировано") : "Не удалось скопировать — выдели текст и скопируй вручную";
+  }
+
+  async function credentialsDone() {
+    const p = cloud.pendingRegistration();
+    const err = root.querySelector(".cred-error");
+    if (!root.querySelector("#credSaved")?.checked) return;
+    if (!p) return go("home", false);
+    const btn = root.querySelector("[data-cred-done]");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Входим…";
+    }
+    const res = await cloud.finishRegistration(p);
+    if (!res.signedIn) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Продолжить";
+      }
+      if (err) err.textContent = "Аккаунт создан, но войти пока не удалось. Проверь интернет и нажми «Продолжить» ещё раз.";
+      return;
+    }
+    cloud.clearPendingRegistration(); // ключ больше не хранится на устройстве
+    onUserChange(cloud.peekUid());
+    S.history = [];
+    S.tab = "home";
+    go("home", false);
+    refreshAccess().then(() => syncCloud());
   }
 
   // ---------- events ----------
@@ -1820,7 +1920,10 @@
     if (el("[data-close]")) return closeSheet();
     if (el("[data-back]")) return back();
 
-    if (el("[data-redeem]")) return redeemCode();
+    if (t.id === "credSaved") return onInput({ target: t });
+    if (el("[data-register]")) return registerCode();
+    if ((x = el("[data-copy]"))) return copyCredentials(x.dataset.copy);
+    if (el("[data-cred-done]")) return credentialsDone();
     if (el("[data-login]")) return doLogin();
     if (el("[data-signout]")) return doSignOut();
     if (el("[data-guest]")) return continueAsGuest();
@@ -2069,6 +2172,10 @@
   }
 
   function onInput(e) {
+    if (e.target.id === "credSaved") {
+      const btn = root.querySelector("[data-cred-done]");
+      if (btn) btn.disabled = !e.target.checked;
+    }
     if (e.target.id === "inNoteSearch") findInNote(e.target.value);
     if (e.target.id === "noteSearch") filterList("#allList", store.listNotes(), e.target.value);
     if (e.target.id === "bmSearch") filterList("#bmList", store.notesInBookmark(S.bookmarkId), e.target.value);
@@ -2076,7 +2183,7 @@
 
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
-    if (e.key === "Enter" && e.target.id === "inviteCode") root.querySelector("[data-redeem]")?.click();
+    if (e.key === "Enter" && e.target.id === "inviteCode") root.querySelector("[data-register]")?.click();
     if (e.key === "Enter" && e.target.id === "loginId") root.querySelector("#loginKey")?.focus();
     if (e.key === "Enter" && e.target.id === "loginKey") root.querySelector("[data-login]")?.click();
     if (e.key === "Enter" && e.target.id === "inNoteSearch") {
@@ -2088,7 +2195,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem],[data-login],[data-signout],[data-guest]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-register],[data-cred-done],[data-login],[data-signout],[data-guest]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],[data-lib-grade],[data-lib-subject],[data-lib-book],[data-lib-paragraph],[data-tab],.fab";
   root.addEventListener("click", (e) => {
@@ -2164,6 +2271,11 @@
   // Главную рисуем, когда известен доступ (не дольше ACCESS_WAIT_MS): иначе у пользователя без доступа мелькнёт
   // обычный экран. Не дождались (медленная сеть, офлайн) — обычный экран, доступ подставится, когда придёт ответ.
   const ACCESS_WAIT_MS = 1500;
+  // регистрация завершена, но ученик ещё не подтвердил, что сохранил ID и ключ — сначала этот экран
+  if (idLogin && cloud.pendingRegistration()?.done) {
+    S.screen = "credentials";
+    S.first = false;
+  }
   if (idLogin) cloud.onUser(onUserChange);
   const firstAccess = refreshAccess();
   store

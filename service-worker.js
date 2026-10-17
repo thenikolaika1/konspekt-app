@@ -5,7 +5,7 @@
  * При смене VERSION старые кэши удаляются — смешения старых и новых файлов нет.
  * VERSION меняется вместе с ?v= в index.html.
  */
-const VERSION = "konspekt-v57";
+const VERSION = "konspekt-v58";
 
 self.addEventListener("install", () => self.skipWaiting());
 
