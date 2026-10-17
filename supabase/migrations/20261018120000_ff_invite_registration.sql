@@ -86,11 +86,12 @@ begin
     return jsonb_build_object('result', 'bad_request');
   end if;
 
-  -- частота: не больше 10 неудачных попыток за час и 30 любых за 10 минут с одного IP
+  -- частота: не больше 30 неудачных попыток за час и 60 любых за 10 минут с одного IP (класс за одним IP школы —
+  -- несколько учеников с опечатками не должны блокировать остальных; перебор 12-символьных кодов всё равно невозможен)
   if (select count(*) from private.register_attempts
-       where ip_hash = p_ip_hash and not ok and created_at > pg_catalog.now() - interval '1 hour') >= 10
+       where ip_hash = p_ip_hash and not ok and created_at > pg_catalog.now() - interval '1 hour') >= 30
      or (select count(*) from private.register_attempts
-          where ip_hash = p_ip_hash and created_at > pg_catalog.now() - interval '10 minutes') >= 30 then
+          where ip_hash = p_ip_hash and created_at > pg_catalog.now() - interval '10 minutes') >= 60 then
     return jsonb_build_object('result', 'rate_limited');
   end if;
 
