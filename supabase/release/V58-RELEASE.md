@@ -4,7 +4,7 @@
 (`private.ai_limits.max_total_starts` остаётся 0). Команды — PowerShell на компьютере владельца, в папке репозитория
 на ветке `ff-invite-register`.
 
-Порядок важен: **база → функция → проверка → сайт → коды → окно**. Сайт v58 без функции не сможет регистрировать;
+Порядок важен: **база → хук → функция → проверка → сайт → коды → окно**. Сайт v58 без функции не сможет регистрировать;
 функция без миграции отвечает «Сервер временно недоступен».
 
 ## 0. Подготовка (ничего не меняет)
@@ -26,14 +26,24 @@
 | Password requirements | любые | пароль `Kn-2.` + 20 символов: строчные, заглавные, цифры, символы, 25 знаков |
 | Rate limits → sign-ups and sign-ins | ≥ 30 за 5 мин на IP (по умолчанию 30) | если весь класс за одним IP школы, при 15+ учениках одновременно — поднять до 60–100 |
 
-## 2. База данных (миграция v58)
+## 2. База данных (две миграции v58)
 
 ```powershell
 psql -X --single-transaction -v ON_ERROR_STOP=1 -f .\supabase\migrations\20261018120000_ff_invite_registration.sql
+psql -X --single-transaction -v ON_ERROR_STOP=1 -f .\supabase\migrations\20261018130000_ff_signup_hook.sql
 psql -X -f .\supabase\release\v58-check.sql
 ```
 Ожидается: все строки `ok = t`; `invite_status` — 0 кодов. Любая ошибка — транзакция откатывается целиком,
 ничего не меняется; дальше не идти.
+
+## 2а. Запрет регистрации в обход приглашений (хук Auth)
+
+Dashboard → Authentication → Hooks → **Before User Created** → Postgres → схема `public`, функция
+`hook_before_user_created` → Save. После этого стандартная регистрация email+паролем (`/auth/v1/signup`) отвечает 403;
+анонимные входы (гости) и создание аккаунтов функцией `register-invite` (Admin API хук не вызывает) работают.
+Проверка без создания пользователя: Dashboard → Hooks показывает хук включённым; `v58-check.sql` — строки хука `ok = t`.
+Если хук на тарифе недоступен: оставить «Confirm email» включённым — такие аккаунты не смогут войти и не получат права
+(письма на `.invalid` не доставляются), но строки в `auth.users` появляться смогут.
 
 ## 3. Edge Function
 
@@ -87,4 +97,5 @@ psql -X -v ON_ERROR_STOP=1 -f .\supabase\release\v58-window.sql
 | Коды | `delete from private.beta_invites where redeemed_at is null and label = 'F&F 19-23.10';` | погашенные коды и аккаунты |
 | Сайт | `git revert` слияния в `main` → Pages соберёт v56; открытые копии вернутся к v56 при возврате в приложение | в v56 нет входа по ID — зарегистрированные ученики войти не смогут до повторного выпуска |
 | Функция | `supabase functions delete register-invite` | — |
+| Хук | Dashboard → Authentication → Hooks → Before User Created → выключить; затем по желанию `drop function public.hook_before_user_created(jsonb);` | — |
 | База | `psql -X -v ON_ERROR_STOP=1 -f .\supabase\release\v58-rollback.sql` | выданные права `beta_invite`, аккаунты, погашенные коды |

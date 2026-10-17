@@ -16,6 +16,15 @@ select 'таблицы регистрации закрыты для API',
 union all
 select 'redeem_beta_invite отключена', pg_get_functiondef('public.redeem_beta_invite(text)'::regprocedure) like '%registration_required%'
 union all
+select 'функция хука регистрации есть и доступна только Auth',
+       has_function_privilege('supabase_auth_admin', 'public.hook_before_user_created(jsonb)', 'execute')
+       and not has_function_privilege('anon', 'public.hook_before_user_created(jsonb)', 'execute')
+       and not has_function_privilege('authenticated', 'public.hook_before_user_created(jsonb)', 'execute')
+union all
+select 'хук: аноним — пропуск, email — 403',
+       public.hook_before_user_created('{"user":{"is_anonymous":true}}') = '{}'::jsonb
+       and (public.hook_before_user_created('{"user":{"is_anonymous":false,"email":"x@example.com"}}') -> 'error' ->> 'http_code') = '403'
+union all
 select 'AI выключен (max_total_starts = 0)', (select max_total_starts = 0 from private.ai_limits)
 union all
 select 'manual-права не изменены (2 × quota 100)', (select count(*) = 2 from private.user_entitlements where source = 'manual' and quota = 100);

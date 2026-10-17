@@ -104,10 +104,11 @@ $env:PGHOST='АДРЕС'; $env:PGPORT='5432'; $env:PGUSER='postgres.ohdeykbkgimv
 `beta_invite`, quota 1 (одна успешная генерация; попытки — `ai_limits.max_user_starts = 3`). Организатор выпускает
 только коды и **не видит ключей учеников**; аккаунты вручную не создаются.
 
-Файлы: миграция `migrations/20261018120000_ff_invite_registration.sql`, функция `functions/register-invite`,
+Файлы: миграции `migrations/20261018120000_ff_invite_registration.sql` и `20261018130000_ff_signup_hook.sql`
+(хук Auth: регистрация только по приглашению), функция `functions/register-invite`,
 `v58-check.sql` (проверка, только чтение), `v58-window.sql` (окно F&F), `v58-rollback.sql` (откат).
 
-Порядок выпуска (каждый шаг — только с разрешения владельца):
+Точный порядок выпуска и откат — `V58-RELEASE.md`. Кратко (каждый шаг — только с разрешения владельца):
 
 1. Резервная копия production.
 2. Миграция: `psql -X --single-transaction -v ON_ERROR_STOP=1 -f .\supabase\migrations\20261018120000_ff_invite_registration.sql`,

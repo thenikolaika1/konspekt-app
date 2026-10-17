@@ -8,7 +8,7 @@
  * RATE_LIMITED, BAD_REQUEST, TEMPORARY).
  *
  * Шаги (миграция 20261018120000): register_invite_begin (резерв кода под блокировкой) → пользователь Supabase Auth
- * (Admin API, метка резерва в user_metadata) → register_invite_finish (право + погашение одной транзакцией).
+ * (Admin API, метка резерва в app_metadata) → register_invite_finish (право + погашение одной транзакцией).
  * Admin API и транзакция БД — не одна транзакция; согласованность держат резерв и метка (см. миграцию).
  *
  * Функция вызывается без входа (verify_jwt = false): клиент ещё не имеет аккаунта. Права service_role — только здесь.
@@ -79,6 +79,8 @@ Deno.serve(async (req) => {
   }
   const H = { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" };
 
+  // запрос регистрации — несколько десятков байт; большое тело не читаем вовсе
+  if (Number(req.headers.get("content-length") || "0") > 1000) return json(413, { error: "BAD_REQUEST" }, cors);
   let body: { code?: unknown; id?: unknown; key?: unknown };
   try {
     const text = await req.text();
@@ -93,7 +95,8 @@ Deno.serve(async (req) => {
   if (!code || code.length > 64 || !ID.test(id) || !KEY.test(secret)) return json(400, { error: "BAD_REQUEST" }, cors);
 
   // IP только как хэш с секретной солью (ограничение частоты); сам IP не хранится
-  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+  // IP клиента — из заголовка, который ставит прокси Supabase (клиент его не подменит); запасной — x-forwarded-for
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
   const ipHash = await sha256Hex("konspekt-register:" + key.slice(-16) + ":" + ip);
 
   const timed = (init: RequestInit) => ({ ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -147,7 +150,9 @@ Deno.serve(async (req) => {
         email: emailOf(id),
         password: PASSWORD_PREFIX + secret,
         email_confirm: true,
-        user_metadata: { kn_id: id, kn_reservation: reservation },
+        user_metadata: { kn_id: id },
+        // метка резерва — в app_metadata: её меняет только сервер, пользователь подделать не может
+        app_metadata: { kn_reservation: reservation },
       });
       if (created.status === 200 || created.status === 201) {
         userId = String(created.data.id || "");

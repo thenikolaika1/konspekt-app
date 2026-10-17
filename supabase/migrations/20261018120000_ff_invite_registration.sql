@@ -9,7 +9,7 @@
 -- Атомарность. Supabase Auth Admin API и транзакция PostgreSQL — НЕ одна транзакция, поэтому:
 --   1) register_invite_begin — под блокировкой строки кода резервирует его за одним ID (private.invite_registrations);
 --      повтор с тем же ID продолжает ту же регистрацию (resume), с другим ID — отказ, пока резерв свежий;
---   2) пользователь Auth создаётся с меткой резерва в user_metadata.kn_reservation — по ней повтор после потерянного
+--   2) пользователь Auth создаётся с меткой резерва в app_metadata.kn_reservation (её пишет только сервер) — по ней повтор после потерянного
 --      ответа находит «своего» пользователя, а не создаёт второго;
 --   3) register_invite_finish — одна транзакция: проверка резерва и пользователя → право → погашение кода → резерв удалён.
 -- Пока шаг 3 не выполнен, у пользователя нет права (AI недоступен) — такой аккаунт безопасен. Зависший резерв
@@ -40,6 +40,7 @@ create table private.register_attempts (
   created_at timestamptz not null default now()
 );
 create index register_attempts_ip_time on private.register_attempts (ip_hash, created_at);
+create index register_attempts_time on private.register_attempts (created_at);
 
 alter table private.invite_registrations enable row level security;
 alter table private.register_attempts    enable row level security;
@@ -86,6 +87,9 @@ begin
     return jsonb_build_object('result', 'bad_request');
   end if;
 
+  -- журнал попыток нужен только за последний час — старое удаляется
+  delete from private.register_attempts where created_at < pg_catalog.now() - interval '1 day';
+
   -- частота: не больше 30 неудачных попыток за час и 60 любых за 10 минут с одного IP (класс за одним IP школы —
   -- несколько учеников с опечатками не должны блокировать остальных; перебор 12-символьных кодов всё равно невозможен)
   if (select count(*) from private.register_attempts
@@ -127,9 +131,13 @@ begin
       -- тот же ID: продолжаем ту же регистрацию (двойное нажатие, повтор, перезапуск браузера)
       update private.invite_registrations set updated_at = pg_catalog.now() where code_hash = v_hash;
       select u.id into v_uid from auth.users u
-       where u.email = v_email and u.raw_user_meta_data ->> 'kn_reservation' = v_reg.reservation::text;
+       where u.email = v_email and u.raw_app_meta_data ->> 'kn_reservation' = v_reg.reservation::text;
       v_out := jsonb_build_object('result', 'resume', 'reservation', v_reg.reservation, 'user_id', v_uid);
-    elsif found and v_reg.updated_at > pg_catalog.now() - STALE then
+    elsif found and v_reg.updated_at > pg_catalog.now() - STALE
+          -- резерв, чей ID уже занят чужим аккаунтом, завершиться не может — его не ждём
+          and not exists (select 1 from auth.users u
+                           where u.email = private.kn_email(v_reg.kn_id)
+                             and coalesce(u.raw_app_meta_data ->> 'kn_reservation', '') <> v_reg.reservation::text) then
       v_out := jsonb_build_object('result', 'busy');
     else
       -- ID уже занят другим аккаунтом — клиент сгенерирует другой
@@ -139,7 +147,7 @@ begin
         if found then
           -- брошенный резерв другого устройства: его пользователь (если создан) без права — удалить
           select u.id into v_orphan from auth.users u
-           where u.raw_user_meta_data ->> 'kn_reservation' = v_reg.reservation::text
+           where u.raw_app_meta_data ->> 'kn_reservation' = v_reg.reservation::text
              and not exists (select 1 from private.user_entitlements e where e.user_id = u.id);
           delete from private.invite_registrations where code_hash = v_hash;
         end if;
@@ -189,7 +197,7 @@ begin
   -- пользователь — именно созданный этим резервом и с этим ID
   if not exists (select 1 from auth.users u
                   where u.id = p_user_id and u.email = private.kn_email(v_reg.kn_id)
-                    and u.raw_user_meta_data ->> 'kn_reservation' = p_reservation::text
+                    and u.raw_app_meta_data ->> 'kn_reservation' = p_reservation::text
                     and not u.is_anonymous) then
     return jsonb_build_object('result', 'invalid_state');
   end if;
