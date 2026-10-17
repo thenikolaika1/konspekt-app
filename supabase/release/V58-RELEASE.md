@@ -11,9 +11,21 @@
 
 1. Ветка и коммит: `git fetch; git checkout ff-invite-register; git log -1` — ожидаемый коммит указан в отчёте выпуска.
 2. **Резервная копия production — обязательно, делает владелец** (у Claude нет пароля базы и сетевого доступа
-   к ней; снимок через SQL не заменяет копию):
-   `pg_dump -Fc -f konspekt-before-v58.dump` (переменные из п. 3), проверка: `pg_restore -l konspekt-before-v58.dump | Select-Object -First 5`
-   — список объектов не пустой. Файл хранить вне репозитория (в нём данные пользователей).
+   к ней; снимок через SQL не заменяет копию). База ~12 МБ, занимает 1–2 минуты. Переменные — из п. 3.
+   1. Версия: `pg_dump --version` — **17.x или новее** (сервер — PostgreSQL 17.6; более старый `pg_dump` откажется).
+   2. Полная копия (все схемы, включая `auth` и `storage`):
+      `pg_dump -Fc -f konspekt-before-v58-full.dump`
+   3. Копия данных приложения — её проще всего вернуть точечно:
+      `pg_dump -Fc --data-only -t 'public.*' -t 'private.*' -t 'analytics.*' -t auth.users -t auth.identities -f konspekt-before-v58-data.dump`
+      (только `-t`: при совмещении `-n` и `-t` pg_dump сохраняет лишь таблицы из `-t`)
+   4. Проверка, что копии читаются: `pg_restore -l konspekt-before-v58-full.dump | Measure-Object -Line` (сотни строк)
+      и `pg_restore -l konspekt-before-v58-data.dump | Select-String "TABLE DATA"` (есть notes, user_entitlements,
+      usage_ledger, ai_generations, app_events, users).
+   5. По желанию — пробное восстановление на своём компьютере (не в production): `createdb konspekt_check` →
+      `pg_restore -d konspekt_check --no-owner --no-acl konspekt-before-v58-full.dump` (предупреждения о ролях
+      Supabase допустимы) → `psql -d konspekt_check -c "select count(*) from public.notes"` = 3.
+   6. Dashboard → Database → Backups: посмотреть, есть ли автоматические копии на тарифе (дополнительно, не вместо).
+   Файлы хранить вне репозитория и не пересылать: в них данные пользователей.
 3. Переменные подключения к базе (Session pooler из Dashboard → Connect), пароль вводится только у вас:
    `$env:PGHOST='…'; $env:PGPORT='5432'; $env:PGUSER='postgres.ohdeykbkgimvwstkwuuf'; $env:PGDATABASE='postgres'; $env:PGSSLMODE='require'`
 4. Supabase CLI вошёл в аккаунт: `supabase login` (если ещё не).
