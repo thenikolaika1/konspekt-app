@@ -7,7 +7,7 @@
 --
 -- Хук Auth «Before User Created» вызывается при signup, анонимном входе, OAuth/SSO/Web3, приглашении по email —
 -- и НЕ вызывается при создании пользователя через Admin API (так создаёт аккаунты Edge Function register-invite).
--- Функция ниже пропускает только анонимных пользователей; всё остальное — 403.
+-- Функция ниже пропускает анонимных пользователей и аккаунты register-invite (метка в app_metadata); всё остальное — 403.
 --
 -- Включение (владелец): Dashboard → Authentication → Hooks → Before User Created → Postgres →
 -- схема public, функция hook_before_user_created. Без включения хука функция ни на что не влияет.
@@ -20,7 +20,13 @@ stable
 set search_path = ''
 as $$
 begin
+  -- гость (анонимный вход) — пропускаем
   if coalesce((event -> 'user' ->> 'is_anonymous')::boolean, false) then
+    return '{}'::jsonb;
+  end if;
+  -- аккаунт ученика, который создаёт register-invite: метка резерва в app_metadata (её задаёт только сервер; при обычной
+  -- регистрации пользователь может задать лишь user_metadata). Нужна, если Auth вызовет хук и для Admin API.
+  if coalesce(event -> 'user' -> 'app_metadata' ->> 'kn_reservation', '') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
     return '{}'::jsonb;
   end if;
   return jsonb_build_object('error', jsonb_build_object(

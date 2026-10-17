@@ -21,9 +21,11 @@ select 'функция хука регистрации есть и доступ�
        and not has_function_privilege('anon', 'public.hook_before_user_created(jsonb)', 'execute')
        and not has_function_privilege('authenticated', 'public.hook_before_user_created(jsonb)', 'execute')
 union all
-select 'хук: аноним — пропуск, email — 403',
+select 'хук: аноним и аккаунт register-invite — пропуск; email и поддельная метка в user_metadata — 403',
        public.hook_before_user_created('{"user":{"is_anonymous":true}}') = '{}'::jsonb
        and (public.hook_before_user_created('{"user":{"is_anonymous":false,"email":"x@example.com"}}') -> 'error' ->> 'http_code') = '403'
+       and public.hook_before_user_created('{"user":{"is_anonymous":false,"app_metadata":{"kn_reservation":"0b4a5c1e-8d2f-4e6a-9b1c-2d3e4f5a6b7c"}}}') = '{}'::jsonb
+       and (public.hook_before_user_created('{"user":{"is_anonymous":false,"user_metadata":{"kn_reservation":"0b4a5c1e-8d2f-4e6a-9b1c-2d3e4f5a6b7c"}}}') -> 'error' ->> 'http_code') = '403'
 union all
 select 'AI выключен (max_total_starts = 0)', (select max_total_starts = 0 from private.ai_limits)
 union all
