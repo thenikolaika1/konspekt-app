@@ -24,6 +24,80 @@
   let client = null;
   let userPromise = null;
 
+  // ---------- аккаунт участника: ID + ключ ----------
+  // ID и ключ выдаёт организатор (supabase/release/ff-accounts.ps1). Supabase Auth хранит служебный логин:
+  // email из ID в недоставляемой зоне .invalid и пароль из ключа (bcrypt на стороне Auth); сами мы ключ не храним.
+  // Алфавит без неоднозначных символов (нет 0/O, 1/I/L); ввод не «исправляется» — только регистр, пробелы и дефисы.
+  const ID_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const ID_LEN = 6;
+  const KEY_LEN = 20;
+  const LOGIN_DOMAIN = "@id.konspekt.invalid";
+  // на этом устройстве выполнен вход по ID: без сессии не создаём молча нового анонимного пользователя
+  const ACCOUNT = "konspekt.account";
+  const AUTH_KEY = enabled ? "sb-" + new URL(cfg.supabaseUrl).hostname.split(".")[0] + "-auth-token" : "";
+
+  const clean = (v) => String(v || "").toUpperCase().replace(/[\s-]/g, "");
+  const inAlphabet = (s) => [...s].every((c) => ID_ALPHABET.includes(c));
+  /** «kn-7f3kq9», «7F3KQ9» → «KN-7F3KQ9»; иначе null. */
+  function normalizeId(input) {
+    let s = clean(input);
+    if (s.length === ID_LEN + 2 && s.startsWith("KN")) s = s.slice(2);
+    return s.length === ID_LEN && inAlphabet(s) ? "KN-" + s : null;
+  }
+  /** Ключ: 20 символов алфавита, группы через дефис необязательны; иначе null. */
+  function normalizeKey(input) {
+    const s = clean(input);
+    return s.length === KEY_LEN && inAlphabet(s) ? s : null;
+  }
+  const idLogin = (id, key) => ({ email: "id-" + id.toLowerCase() + LOGIN_DOMAIN, password: "Kn-2." + key });
+  const idFromEmail = (email) => {
+    const m = /^id-(kn-[a-z0-9]+)@id\.konspekt\.invalid$/.exec(String(email || "").toLowerCase());
+    return m ? normalizeId(m[1]) : null;
+  };
+
+  const readJson = (k) => {
+    try {
+      return JSON.parse(localStorage.getItem(k) || "null");
+    } catch (e) {
+      return null;
+    }
+  };
+  const getFlag = () => readJson(ACCOUNT);
+  // анонимная сессия гостя на время входа по ID (тот же уровень защиты, что и сама сессия в localStorage)
+  const GUEST = "konspekt.guest";
+  const setGuest = (v) => {
+    try {
+      v ? localStorage.setItem(GUEST, JSON.stringify(v)) : localStorage.removeItem(GUEST);
+    } catch (e) {}
+  };
+  const setFlag = (v) => {
+    try {
+      v ? localStorage.setItem(ACCOUNT, JSON.stringify(v)) : localStorage.removeItem(ACCOUNT);
+    } catch (e) {}
+  };
+  /** Сохранённая сессия этого устройства (без сети и без запросов): { id, email } пользователя или null. */
+  const peekSession = () => {
+    const s = AUTH_KEY && readJson(AUTH_KEY);
+    return s && (s.currentSession || s);
+  };
+  function peekUser() {
+    const s = peekSession();
+    const u = s && s.user;
+    return u && u.id ? { id: u.id, email: u.email || "" } : null;
+  }
+  const peekUid = () => peekUser()?.id || null;
+
+  // смена пользователя (вход, выход, потеря сессии): store и аналитика переключают свои данные на его uid
+  const userListeners = [];
+  let lastUid;
+  function notifyUser(uid) {
+    if (uid === lastUid) return;
+    lastUid = uid;
+    // вне обработчика onAuthStateChange: подписчики могут обращаться к Supabase
+    setTimeout(() => userListeners.forEach((fn) => fn(uid)), 0);
+  }
+  const onUser = (fn) => userListeners.push(fn);
+
   // последний токен сессии — для отправки аналитики при уходе со страницы (fetch keepalive, без await)
   let lastToken = "";
   function sb() {
@@ -31,7 +105,14 @@
     client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
     });
-    client.auth.onAuthStateChange((_event, session) => (lastToken = session?.access_token || ""));
+    client.auth.onAuthStateChange((_event, session) => {
+      lastToken = session?.access_token || "";
+      // токен истёк, а обновить не удалось (нет сети, 5xx): supabase-js сообщает «нет сессии», но хранит её —
+      // пользователь тот же, его данные на устройстве остаются. Сменился — только если сессии нет и в хранилище
+      const uid = session?.user?.id || peekUid();
+      if (!uid) userPromise = null;
+      notifyUser(uid);
+    });
     return client;
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -97,12 +178,26 @@
         // здесь потерял бы все конспекты пользователя, поэтому — ошибка, повтор позже с тем же пользователем.
         // Без ошибки сессии нет совсем, либо сервер отверг токен и gotrue сам удалил сессию.
         if (error && error.name === "AuthRetryableFetchError") throw fail("AUTH_FAILED", error);
+        // участник этого устройства потерял сессию (ключ сменили, сессия отозвана): не подменяем его новым
+        // анонимным аккаунтом — приложение попросит войти снова или явно продолжить без входа
+        if (getFlag()) throw new Error("SIGNED_OUT");
+        // гость этого устройства, который входил по ID и вышел: возвращаем его прежний анонимный аккаунт
+        const guest = readJson(GUEST);
+        if (guest && guest.refresh_token) {
+          const r = await sb().auth.refreshSession({ refresh_token: guest.refresh_token });
+          if (r.data?.user) {
+            setGuest(null);
+            return r.data.user;
+          }
+          if (r.error && r.error.name === "AuthRetryableFetchError") throw fail("AUTH_FAILED", r.error);
+          setGuest(null); // токен отозван или устарел — дальше обычный новый гость
+        }
         const res = await sb().auth.signInAnonymously();
         if (res.error || !res.data?.user) throw fail("AUTH_FAILED", res.error);
         return res.data.user;
       })().catch((e) => {
         userPromise = null;
-        throw ["NETWORK", "CONNECTION_LOST", "AUTH_FAILED"].includes(e.message) ? e : fail("AUTH_FAILED", e);
+        throw ["NETWORK", "CONNECTION_LOST", "AUTH_FAILED", "SIGNED_OUT"].includes(e.message) ? e : fail("AUTH_FAILED", e);
       });
     }
     return userPromise;
@@ -340,5 +435,90 @@
     return res.json();
   }
 
-  K.cloud = { enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos, startAnalysis, waitForNote, getAccess, redeemInvite, track };
+  /**
+   * Аккаунт на этом устройстве (без запросов): participant — вошли по ID; signedOut — входили по ID, но сессии
+   * больше нет; guest — анонимный пользователь или ещё никого.
+   */
+  function getAccount() {
+    const u = enabled ? peekUser() : null;
+    const id = u && idFromEmail(u.email);
+    if (id) return { kind: "participant", id, uid: u.id };
+    const flag = getFlag();
+    // uid — того, кто входил (для очистки его копий на устройстве); сессии у него сейчас нет
+    if (flag && !u) return { kind: "signedOut", id: flag.id || "", uid: flag.uid || null };
+    return { kind: "guest", id: "", uid: u ? u.id : null };
+  }
+
+  /**
+   * Вход по ID и ключу. Неверный ID, неверный ключ и неверный формат — одна ошибка BAD_CREDENTIALS
+   * (по ответу нельзя понять, существует ли ID). Ключ уходит только в запрос Supabase Auth и нигде не сохраняется.
+   * Тот же ID → тот же auth.uid() на любом устройстве. → { id, uid }
+   */
+  async function signInWithId(rawId, rawKey) {
+    const id = normalizeId(rawId);
+    const key = normalizeKey(rawKey);
+    if (!id || !key) throw new Error("BAD_CREDENTIALS");
+    const login = idLogin(id, key);
+    const prev = peekSession();
+    let res;
+    try {
+      res = await sb().auth.signInWithPassword(login);
+    } catch (e) {
+      throw connectionError(e);
+    }
+    const { data, error } = res;
+    if (error || !data?.user) {
+      if (noResponse(error, error?.status)) throw connectionError(error);
+      if (error?.status === 429 || error?.code === "over_request_rate_limit") throw new Error("RATE_LIMITED");
+      if (error?.code === "invalid_credentials" || error?.status === 400) throw new Error("BAD_CREDENTIALS");
+      throw fail("AUTH_FAILED", error);
+    }
+    if (idFromEmail(data.user.email) !== id) {
+      await sb().auth.signOut({ scope: "local" }).catch(() => {});
+      throw new Error("AUTH_FAILED");
+    }
+    // гостя запоминаем, чтобы после выхода вернуть его конспекты и закладки (не создавать нового)
+    if (prev && prev.refresh_token && prev.user && !idFromEmail(prev.user.email) && prev.user.id !== data.user.id)
+      setGuest({ uid: prev.user.id, refresh_token: prev.refresh_token });
+    setFlag({ id, uid: data.user.id });
+    userPromise = Promise.resolve(data.user);
+    notifyUser(data.user.id);
+    return { id, uid: data.user.id };
+  }
+
+  /** Выход только на этом устройстве. Дальше устройство — гость: прежний (если он был) или новый анонимный. */
+  async function signOut() {
+    const uid = peekUid();
+    let error = null;
+    try {
+      ({ error } = await sb().auth.signOut({ scope: "local" }));
+    } catch (e) {
+      error = e;
+    }
+    // supabase-js без ответа сервера (офлайн) сессию не удаляет — убираем её с устройства сами:
+    // выход на этом устройстве должен сработать и без сети (на сервере эта сессия остаётся до её отзыва)
+    if (error || peekUid() === uid) {
+      try {
+        localStorage.removeItem(AUTH_KEY);
+      } catch (e) {}
+    }
+    setFlag(null);
+    userPromise = null;
+    lastToken = ""; // без ответа сервера supabase-js не сообщает о выходе — токен для keepalive убираем сами
+    notifyUser(null);
+    if (error && !noResponse(error, error.status)) console.warn("[account] sign out:", error.code || error.status || "error");
+    return uid;
+  }
+
+  /** После потери сессии участника: явно продолжить гостем (прежний гость устройства или новый анонимный). */
+  function continueAsGuest() {
+    setFlag(null);
+    userPromise = null;
+  }
+
+  K.cloud = {
+    enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
+    startAnalysis, waitForNote, getAccess, redeemInvite, track,
+    peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
+  };
 })();

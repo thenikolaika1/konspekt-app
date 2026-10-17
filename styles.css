@@ -1736,3 +1736,17 @@ body.has-tabbar .fab{bottom:calc(var(--tabbar-h) + 18px)}
 .lib-grade.empty .lib-coll-go{color:#8f9bb3}
 .lib-list .lib-grade+.lib-grade{margin-top:2px}
 @media (prefers-reduced-motion:reduce){.lib-grade{transition:none}.lib-grade:active{transform:none}}
+/* v57: вход по ID и ключу */
+.account-card{margin:16px 0 0;padding:16px;border:1px solid var(--ds-line,var(--line));border-radius:var(--ds-r-lg,18px);background:#fff;box-shadow:var(--ds-sh-1,none);text-align:center}
+.account-card p{margin:0 0 12px;font-size:13.5px;line-height:1.45;color:var(--muted);text-align:left}
+.account-card .account-msg{margin:0 0 10px;min-height:0;color:var(--wine);font-weight:650}
+.account-card .account-msg:empty{display:none}
+.account-card .wide{width:100%;padding:14px;font-size:15.5px}
+.login-form{margin-top:8px}
+.login-field{background:#fff;font-size:17px;font-weight:650;letter-spacing:1px;color:var(--navy);height:52px}
+.login-field::placeholder{color:#b5bfcf;font-weight:500;letter-spacing:.5px}
+.login-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.12)}
+.login-error{min-height:20px;margin:12px 0;font-size:14px;line-height:20px;color:var(--wine)}
+.login-form .primary:disabled{opacity:.7}
+.login-note{margin:14px 2px 0;font-size:12.5px;line-height:1.45;color:var(--muted);text-align:center}
+.access .text-action{margin-top:16px}

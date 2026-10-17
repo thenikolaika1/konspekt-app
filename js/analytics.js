@@ -10,6 +10,10 @@
  * Сессия просмотра — непрерывное пребывание на экране параграфа: уход на другой экран, вкладку или параграф
  * её завершает; фон до RESUME_MS — та же сессия, дольше — новая (и событие app_resume).
  * Отключение: K.config.analytics = false.
+ *
+ * Очередь у каждого пользователя своя (konspekt.analytics.v1:<uid>) и отправляется только с его сессией:
+ * события одного аккаунта не уходят от имени другого. Накопленное без пользователя (первый запуск до входа)
+ * получает первый вошедший; очередь прежних версий — пользователь сохранённой сессии этого устройства.
  */
 (() => {
   const K = (window.K = window.K || {});
@@ -17,7 +21,9 @@
   const cloud = K.cloud;
   const enabled = cfg.analytics !== false && !!(cloud && cloud.enabled && cloud.track);
 
-  const QKEY = "konspekt.analytics.v1";
+  const LEGACY = "konspekt.analytics.v1";
+  const NONE = "none";
+  const qkey = (uid) => LEGACY + ":" + (uid || NONE);
   const TICK_MS = 5_000; // шаг учёта времени
   const FLUSH_MS = 60_000; // отправка накопленного, пока есть изменения
   const IDLE_MS = 120_000; // без касаний дольше — время не считается
@@ -41,17 +47,42 @@
   }
 
   // очередь: события приложения и последнее состояние каждой сессии просмотра (v — версия, sv — отправленная)
-  function load() {
+  function read(k) {
     try {
-      const x = JSON.parse(localStorage.getItem(QKEY) || "null");
+      const x = JSON.parse(localStorage.getItem(k) || "null");
       if (x && Array.isArray(x.ev) && x.views && typeof x.views === "object") return x;
     } catch (e) {}
-    return { ev: [], views: {} };
+    return null;
   }
-  let q = load();
+  const drop = (k) => {
+    try {
+      localStorage.removeItem(k);
+    } catch (e) {}
+  };
+  /** Очередь пользователя; без своей — забирает очередь без владельца (и общую очередь прежних версий). */
+  function load(uid, legacyToo) {
+    const own = read(qkey(uid));
+    const q0 = own || { ev: [], views: {} };
+    const sources = [];
+    if (legacyToo) sources.push(LEGACY);
+    if (uid) sources.push(qkey(null));
+    for (const k of sources) {
+      const x = read(k);
+      if (!x) continue;
+      q0.ev = [...q0.ev, ...x.ev].slice(-MAX_EVENTS);
+      Object.assign(q0.views, x.views);
+      try {
+        localStorage.setItem(qkey(uid), JSON.stringify(q0));
+        drop(k);
+      } catch (e) {}
+    }
+    return q0;
+  }
+  let owner = (enabled && cloud.peekUid()) || null; // чья очередь сейчас открыта
+  let q = load(owner, true);
   const save = () => {
     try {
-      localStorage.setItem(QKEY, JSON.stringify(q));
+      localStorage.setItem(qkey(owner), JSON.stringify(q));
     } catch (e) {}
   };
 
@@ -107,6 +138,10 @@
   /** Отправка очереди. keepalive — при уходе страницы: результат неизвестен, очередь не очищается (повтор безопасен). */
   async function flush(keepalive) {
     if (!enabled || (!keepalive && flushing && Date.now() - flushing < FLUSH_STUCK_MS)) return;
+    // только своей сессией: нет пользователя или сессия уже другого — ждём bind()
+    if (!owner || cloud.peekUid() !== owner) return;
+    const mine = q;
+    const mineOwner = owner;
     const views = Object.values(q.views).filter((x) => x.v !== x.sv);
     const batch = [
       ...q.ev.map((e) => ({ t: "ev", id: e.id, k: e.k, b: BUILD })),
@@ -122,15 +157,20 @@
     const sent = new Map(batch.map((x) => [x.id, x.t === "view" ? q.views[x.id]?.v : 0]));
     try {
       await cloud.track(batch);
-      q.ev = q.ev.filter((e) => !sent.has(e.id));
+      // пока шла отправка, очередь могла смениться (выход): отмечаем отправленное в той, из которой брали
+      mine.ev = mine.ev.filter((e) => !sent.has(e.id));
       for (const [id, v] of sent) {
-        const x = q.views[id];
+        const x = mine.views[id];
         if (!x || x.v !== v) continue;
-        if (x.end) delete q.views[id];
+        if (x.end) delete mine.views[id];
         else x.sv = v;
       }
-      save();
-      if (q.ev.length || Object.values(q.views).some((x) => x.v !== x.sv)) setTimeout(() => flush(), 1000);
+      if (mine === q) save();
+      else
+        try {
+          localStorage.setItem(qkey(mineOwner), JSON.stringify(mine));
+        } catch (e) {}
+      if (mine === q && (q.ev.length || Object.values(q.views).some((x) => x.v !== x.sv))) setTimeout(() => flush(), 1000);
     } catch (e) {
       // без сети или ошибка сервера — всё остаётся в очереди до следующей отправки
     } finally {
@@ -209,7 +249,31 @@
       if (Date.now() - lastFlush >= FLUSH_MS) flush();
     }, TICK_MS);
     setTimeout(() => flush(), 3000);
+    if (cloud.onUser) cloud.onUser(bind);
   }
 
-  K.analytics = { enabled, screen, flush };
+  /** Смена пользователя на устройстве: сессия просмотра завершается в очереди прежнего, дальше — очередь нового. */
+  function bind(uid) {
+    uid = uid || null;
+    if (!enabled || uid === owner) return;
+    if (view) {
+      tick();
+      put(true);
+      view = null;
+    }
+    save();
+    owner = uid;
+    q = load(owner, false);
+    save();
+    setTimeout(() => flush(), 1000);
+  }
+
+  /** Перед входом или выходом: дослать очередь текущего пользователя (не дольше ms). */
+  function settle(ms = 3000) {
+    if (!enabled || !owner) return Promise.resolve();
+    flushing = 0;
+    return Promise.race([flush(), new Promise((r) => setTimeout(r, ms))]).catch(() => {});
+  }
+
+  K.analytics = { enabled, screen, flush, bind, settle };
 })();

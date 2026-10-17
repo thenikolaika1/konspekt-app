@@ -10,27 +10,51 @@
  *    хранится в localStorage для быстрого старта и чтения без сети; sync() обновляет её
  *    с сервера. У облачных есть status: processing | ready | failed; content есть только у ready.
  * Закладки пока локальные и ссылаются на id конспектов любого вида.
+ *
+ * Данные каждого пользователя (auth.uid()) — в своём ключе konspekt.store.v1:<uid>; без пользователя
+ * (первый запуск до входа, участник потерял сессию, Supabase не настроен) — в konspekt.store.v1:none.
+ * Общий ключ прежних версий konspekt.store.v1 переносится пользователю этого устройства без потерь.
  */
 (() => {
   const K = (window.K = window.K || {});
-  const KEY = "konspekt.store.v1";
+  const LEGACY = "konspekt.store.v1"; // общий кэш до v57
+  const OWNER = "konspekt.store.v1.owner"; // uid, которому остался LEGACY (если не хватило места перенести)
+  const NONE = "none";
   // processing без изменений дольше этого считается прерванной генерацией (сервер тоже разрешает её повтор)
   const STALE_MS = 6 * 60_000;
   const UPLOAD_STALE_MS = 3 * 60_000;
   let db = { version: 1, notes: [], bookmarks: [] };
+  let owner = NONE; // чьи данные сейчас в db: uid или NONE
+  let KEY = LEGACY + ":" + NONE;
 
-  function load() {
+  const lsGet = (k) => {
     try {
-      const raw = localStorage.getItem(KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.notes) || !Array.isArray(data.bookmarks)) return false;
-      db = data;
-      return true;
+      return localStorage.getItem(k);
+    } catch (e) {
+      return null;
+    }
+  };
+  const lsDel = (k) => {
+    try {
+      localStorage.removeItem(k);
+    } catch (e) {}
+  };
+  const keyFor = (uid) => (uid !== NONE && lsGet(OWNER) === uid ? LEGACY : LEGACY + ":" + uid);
+
+  function parse(raw) {
+    try {
+      const data = raw && JSON.parse(raw);
+      return data && Array.isArray(data.notes) && Array.isArray(data.bookmarks) ? data : null;
     } catch (e) {
       console.warn("[store] load failed", e);
-      return false;
+      return null;
     }
+  }
+
+  function load() {
+    const data = parse(lsGet(KEY));
+    if (data) db = data;
+    return !!data;
   }
 
   function persist() {
@@ -143,19 +167,100 @@
   }
   const findBookmark = (id) => db.bookmarks.find((b) => b.id === id) || null;
 
-  K.store = {
-    init() {
-      if (!load()) {
-        seed();
-        try {
-          persist();
-        } catch (e) {}
-      } else if (migrateThumbnails()) {
+  /**
+   * Данные без владельца, которые получает пользователь без своего кэша: общий кэш прежних версий
+   * (если его ещё никому не отдали) или накопленное без входа. adopt — отдать: исходный ключ удаляется
+   * только после успешной записи нового. Облачные конспекты неизвестного владельца не переносятся.
+   */
+  function takeUnowned(uid, trustLegacy) {
+    const sources = [];
+    if (!lsGet(OWNER)) sources.push(LEGACY);
+    if (uid !== NONE) sources.push(LEGACY + ":" + NONE);
+    for (const src of sources) {
+      const data = parse(lsGet(src));
+      if (!data) continue;
+      if (!(src === LEGACY && trustLegacy)) {
+        const gone = new Set(data.notes.filter((n) => n.remote).map((n) => n.id));
+        data.notes = data.notes.filter((n) => !gone.has(n.id));
+        data.bookmarks.forEach((b) => (b.noteIds = b.noteIds.filter((x) => !gone.has(x))));
+      }
+      return { src, data };
+    }
+    return null;
+  }
+
+  /** Подключает данные пользователя uid (NONE — без пользователя). trustLegacy — сессия прежней версии на этом устройстве. */
+  function open(uid, trustLegacy) {
+    owner = uid || NONE;
+    KEY = keyFor(owner);
+    if (load()) {
+      if (migrateThumbnails()) {
         try {
           persist();
         } catch (e) {}
       }
+      return;
+    }
+    const found = takeUnowned(owner, trustLegacy);
+    if (!found) {
+      seed();
+      try {
+        persist();
+      } catch (e) {}
+      return;
+    }
+    db = found.data;
+    migrateThumbnails();
+    try {
+      persist();
+      lsDel(found.src);
+    } catch (e) {
+      // не хватило места на копию: прежний общий кэш остаётся на месте и закрепляется за этим пользователем
+      if (found.src === LEGACY && owner !== NONE) {
+        try {
+          localStorage.setItem(OWNER, owner);
+          KEY = LEGACY;
+          persist();
+        } catch (e2) {}
+      }
+    }
+  }
+
+  K.store = {
+    init() {
+      // пользователь этого устройства из сохранённой сессии (без сети); кэш v56 и раньше принадлежал ему
+      const uid = cloud() ? cloud().peekUid() : null;
+      open(uid, !!uid);
       return Promise.resolve();
+    },
+
+    /** Чьи данные открыты (uid или null). */
+    owner: () => (owner === NONE ? null : owner),
+
+    /**
+     * Явный выход участника с устройства: копии его облачных конспектов (текст для чтения без сети) удаляются —
+     * на сервере они остаются и вернутся при следующем входе. Закладки (только на устройстве) сохраняются
+     * вместе со ссылками на эти конспекты, поэтому после входа они снова заполнятся.
+     */
+    forget(uid) {
+      if (!uid) return;
+      const k = keyFor(uid);
+      const data = parse(lsGet(k));
+      if (!data) return;
+      data.notes = data.notes.filter((n) => !n.remote);
+      try {
+        localStorage.setItem(k, JSON.stringify(data));
+      } catch (e) {
+        lsDel(k); // не удалось перезаписать — лучше потерять копию, чем оставить её следующему пользователю
+      }
+      if (owner === uid) db = data;
+    },
+
+    /** Смена пользователя на устройстве: вход, выход, потеря сессии, новый гость. → true, если данные сменились. */
+    bind(uid) {
+      if ((uid || NONE) === owner) return false;
+      open(uid, false);
+      return true;
     },
 
     /**
@@ -165,7 +270,11 @@
     async sync() {
       const c = cloud();
       if (!c) return false;
+      const who = owner;
+      if (who === NONE || c.peekUid() !== who) return false;
       const rows = await c.listNotes();
+      // пока шёл запрос, пользователь сменился — ответ не его, кэш не трогаем
+      if (owner !== who || c.peekUid() !== who) return false;
       const before = JSON.stringify(db.notes);
       const ids = new Set(rows.map((r) => r.id));
       db.notes = db.notes.filter((n) => !n.remote || ids.has(n.id));
@@ -182,6 +291,9 @@
 
     /** Кладёт в кэш строку public.notes (результат генерации или опроса). */
     putRemote(row) {
+      // строка другого пользователя (сессия сменилась во время запроса) в чужой кэш не попадает
+      const c = cloud();
+      if (c && c.peekUid() !== (owner === NONE ? null : owner)) return null;
       const n = putRow(row);
       try {
         persist();

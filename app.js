@@ -354,13 +354,20 @@
       brand() +
       '<h1>Ранний доступ</h1><p>Введите код приглашения</p><div class="invite-form">' +
       '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения">' +
-      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button></div>'
+      '<p class="invite-error" role="alert"></p></div><button class="primary" data-redeem>Активировать</button>' +
+      (idLogin ? '<button class="text-action" data-go="login">У меня есть ID и ключ</button>' : "") +
+      "</div>"
     );
   }
 
   // блок создания конспекта: обычный, с остатком или «закончились» (числа — из get_my_access)
   function heroBody() {
     const a = S.access.info;
+    if (signedOut())
+      return (
+        '<h1 class="hero-limit-title">Нужно войти снова</h1><p class="hero-limit">Твои конспекты сохранены. Войди по ID и ключу, чтобы продолжить.</p>' +
+        '<button class="primary" data-go="login">Войти</button>'
+      );
     if (limitReached())
       return '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
     return (
@@ -728,7 +735,57 @@
     );
   }
 
-  // «Я»: только то, что есть на самом деле — анонимный профиль этого устройства (без имени), где хранятся конспекты, закладки, помощь и «о приложении»
+  // ---------- аккаунт: вход по ID и ключу ----------
+
+  const idLogin = !!(cloud && cloud.enabled && cloud.signInWithId);
+  const account = () => (idLogin ? cloud.getAccount() : { kind: "guest", id: "", uid: null });
+  const signedOut = () => account().kind === "signedOut";
+  // во время генерации аккаунт не меняется: её результат и попытка принадлежат тому, кто её начал.
+  // «Создаётся» в кэше старше 6 минут не держит (сервер такую генерацию тоже считает прерванной)
+  const PENDING_HOLD_MS = 6 * 60_000;
+  const generationBusy = () =>
+    S.screen === "processing" || !!generator.busy?.() || store.listPending().some((n) => Date.now() - n.updatedAt < PENDING_HOLD_MS);
+
+  function accountHead() {
+    const a = account();
+    if (a.kind === "participant") return "<h2>" + esc(a.id) + "</h2><p>Вход по ID на этом устройстве</p>";
+    if (a.kind === "signedOut") return "<h2>" + esc(a.id || "Участник") + "</h2><p>Нужно войти снова</p>";
+    return "<h2>Гость</h2><p>Анонимный профиль на этом устройстве</p>";
+  }
+
+  function accountCard() {
+    if (!idLogin) return "";
+    const a = account();
+    const msg = '<p class="account-msg" role="alert"></p>';
+    if (a.kind === "participant")
+      return (
+        '<div class="account-card"><p>Конспекты этого ID хранятся в облаке. На другом устройстве войди с тем же ID и ключом.</p>' + msg +
+        '<button class="secondary wide" data-signout>Выйти</button></div>'
+      );
+    if (a.kind === "signedOut")
+      return (
+        '<div class="account-card"><p>Вход по ID на этом устройстве завершён. Конспекты не потеряны — войди снова тем же ID и ключом.</p>' + msg +
+        '<button class="primary wide" data-go="login">Войти</button><button class="text-action" data-guest>Продолжить без входа</button></div>'
+      );
+    return '<div class="account-card"><button class="secondary wide" data-go="login">Войти по ID и ключу</button></div>';
+  }
+
+  function login() {
+    return (
+      app("login-screen") +
+      head("Вход", "По ID и ключу участника") +
+      '<div class="login-form">' +
+      '<label class="form-label" for="loginId">ID</label>' +
+      '<input id="loginId" class="field login-field" type="text" autocomplete="username" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="16" placeholder="KN-XXXXXX">' +
+      '<label class="form-label" for="loginKey">Ключ</label>' +
+      '<input id="loginKey" class="field login-field" type="password" autocomplete="current-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXXX-XXXXX-XXXXX-XXXXX">' +
+      '<p class="login-error" role="alert"></p>' +
+      '<button class="primary wide" data-login>Войти</button>' +
+      '<p class="login-note">ID и ключ выдаёт организатор. Ключ никому не показывай.</p></div></div>'
+    );
+  }
+
+  // «Я»: только то, что есть на самом деле — профиль этого устройства (гость или ID участника), где хранятся конспекты, закладки, помощь и «о приложении»
   function profile() {
     const all = store.listNotes(), marks = store.listBookmarks().length;
     // честно по месту хранения: облачные — в облаке, примеры и старые локальные — только на этом устройстве
@@ -745,7 +802,8 @@
       app("profile-screen") + DECO.head() +
       head("Профиль", "") +
       '<section class="pf-hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() +
-      '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id"><h2>Участник</h2><p>Анонимный профиль на этом устройстве</p></div></section>' +
+      '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id">' + accountHead() + "</div></section>" +
+      accountCard() +
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
       tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
@@ -809,6 +867,7 @@
     CONNECTION_LOST: ["Не удалось связаться с сервером.", "Попробуй ещё раз."],
     SERVER_TIMEOUT: ["Сервер не ответил вовремя.", "Попробуй ещё раз через минуту."],
     AUTH_FAILED: ["Не удалось подключиться к серверу.", "Попробуй ещё раз."],
+    SIGNED_OUT: ["Нужно войти снова.", "Открой «Я» и войди по ID и ключу."],
     UPLOAD_FAILED: ["Не удалось загрузить фотографии.", "Попробуй ещё раз."],
     UNREADABLE_PAGES: ["Не получилось прочитать текст на фотографиях.", "Сфотографируй страницы целиком, ровно и при хорошем свете."],
     AI_TIMEOUT: ["ИИ отвечал слишком долго.", "Попробуй ещё раз или отправь меньше страниц."],
@@ -940,6 +999,7 @@
     note,
     "new-bookmark": newBookmark,
     profile,
+    login,
     help,
     about,
     error,
@@ -1130,7 +1190,7 @@
     { id: "me", label: "Я", icon: "user", screen: "profile" },
   ];
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
-  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
   let tabbar = null;
 
   function currentTab() {
@@ -1187,7 +1247,7 @@
   }
 
   // камеру нельзя открыть без доступа и после «закончились» (это не защита лимита: её делает сервер)
-  const cameraBlocked = () => S.access.state === "none" || limitReached();
+  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut();
 
   const tabState = {}; // вкладка → { screen, history, lib, y }: где пользователь был в этом разделе
   function openTab(id) {
@@ -1544,6 +1604,7 @@
   // ---------- ранний доступ: состояние с сервера ----------
 
   let accessPromise = null;
+  let accessGen = 0; // номер пользователя устройства: растёт при каждой смене
 
   /** Новое состояние доступа с сервера; главная перерисовывается, только если оно изменилось. */
   function setAccess(info, quiet) {
@@ -1560,12 +1621,120 @@
    */
   function refreshAccess() {
     if (S.access.state === "off") return Promise.resolve();
-    if (!accessPromise)
+    if (!accessPromise) {
+      const gen = accessGen;
       accessPromise = cloud
         .getAccess()
-        .then((info) => setAccess(info), (e) => console.warn("[access] check failed", e.message))
+        // ответ для прежнего пользователя (аккаунт сменился, пока шёл запрос) не применяется
+        .then((info) => gen === accessGen && setAccess(info), (e) => console.warn("[access] check failed", e.message))
         .finally(() => (accessPromise = null));
+    }
     return accessPromise;
+  }
+
+  /** Сменился пользователь устройства: его конспекты, закладки, доступ. */
+  function onUserChange(uid) {
+    const changed = store.bind(uid);
+    if (!changed) return;
+    accessGen++;
+    accessPromise = null;
+    S.access = { state: "unknown", info: null };
+    S.noteId = null;
+    S.bookmarkId = null;
+    tabState.home = tabState.me = null;
+    if (["note", "bookmark", "camera", "error", "new-bookmark", "all-notes", "bookmarks"].includes(S.screen)) {
+      S.history = [];
+      S.screen = currentTab() === "me" ? "profile" : "home";
+    }
+    if (!S.sheet && !document.activeElement?.matches?.("input")) render();
+    if (uid) {
+      refreshAccess();
+      syncCloud();
+    }
+  }
+
+  const LOGIN_ERRORS = {
+    BAD_CREDENTIALS: "Неверный ID или ключ. Проверь их и попробуй ещё раз.",
+    RATE_LIMITED: "Слишком много попыток входа. Подожди несколько минут.",
+    NETWORK: "Нет подключения к интернету. Проверь подключение и попробуй ещё раз.",
+    CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
+    SERVER_TIMEOUT: "Сервер не ответил вовремя. Попробуй ещё раз через минуту.",
+    AUTH_FAILED: "Не удалось войти. Попробуй ещё раз.",
+    BUSY: "Сейчас создаётся конспект. Дождись результата и попробуй снова.",
+  };
+
+  function loginUi(busy, message) {
+    const btn = root.querySelector("[data-login]");
+    const err = root.querySelector(".login-error");
+    if (btn) {
+      btn.disabled = busy;
+      btn.textContent = busy ? "Входим…" : "Войти";
+    }
+    if (err) err.textContent = message || "";
+  }
+
+  async function doLogin() {
+    const idField = root.querySelector("#loginId");
+    const keyField = root.querySelector("#loginKey");
+    if (!idField || !keyField) return;
+    if (!idField.value.trim()) return idField.focus();
+    if (!keyField.value.trim()) return keyField.focus();
+    if (generationBusy()) return loginUi(false, LOGIN_ERRORS.BUSY);
+    loginUi(true, "");
+    let res;
+    try {
+      await window.K.analytics?.settle?.(); // события прежнего пользователя уходят от его имени
+      if (generationBusy()) throw new Error("BUSY");
+      res = await cloud.signInWithId(idField.value, keyField.value);
+    } catch (e) {
+      // ни ID, ни ключ в журнал не попадают — только код ошибки
+      console.warn("[account] sign in failed", e.message);
+      keyField.value = "";
+      return loginUi(false, LOGIN_ERRORS[e.message] || LOGIN_ERRORS.AUTH_FAILED);
+    }
+    keyField.value = "";
+    onUserChange(res.uid);
+    S.history = [];
+    S.tab = "me";
+    go("profile", false);
+  }
+
+  async function doSignOut() {
+    const msg = root.querySelector(".account-msg");
+    const btn = root.querySelector("[data-signout]");
+    const busyUi = (on) => {
+      if (!btn) return;
+      btn.disabled = on;
+      btn.textContent = on ? "Выходим…" : "Выйти";
+    };
+    if (generationBusy()) {
+      if (msg) msg.textContent = LOGIN_ERRORS.BUSY;
+      return;
+    }
+    // без сети и с истёкшим токеном supabase-js до ~30 с пытается его обновить — сразу показываем, что выход идёт
+    busyUi(true);
+    await window.K.analytics?.settle?.();
+    if (generationBusy()) {
+      busyUi(false);
+      if (msg) msg.textContent = LOGIN_ERRORS.BUSY;
+      return;
+    }
+    const uid = await cloud.signOut();
+    // копии облачных конспектов участника не остаются следующему пользователю устройства
+    if (account().kind !== "participant") store.forget(uid);
+    onUserChange(null);
+    S.history = [];
+    go("profile", false);
+    // устройство снова гость: прежний гость этого устройства или новый
+    refreshAccess().then(() => syncCloud());
+  }
+
+  function continueAsGuest() {
+    const a = account();
+    if (a.kind === "signedOut") store.forget(a.uid);
+    cloud.continueAsGuest();
+    render();
+    refreshAccess().then(() => syncCloud());
   }
 
   const REDEEM_ERRORS = {
@@ -1652,6 +1821,9 @@
     if (el("[data-back]")) return back();
 
     if (el("[data-redeem]")) return redeemCode();
+    if (el("[data-login]")) return doLogin();
+    if (el("[data-signout]")) return doSignOut();
+    if (el("[data-guest]")) return continueAsGuest();
 
     if (el("[data-start]")) {
       localStorage.setItem("k-first", "1");
@@ -1905,6 +2077,8 @@
   function onKeydown(e) {
     if (e.key === "Enter" && e.target.id === "renameField") root.querySelector("[data-save-rename]")?.click();
     if (e.key === "Enter" && e.target.id === "inviteCode") root.querySelector("[data-redeem]")?.click();
+    if (e.key === "Enter" && e.target.id === "loginId") root.querySelector("#loginKey")?.focus();
+    if (e.key === "Enter" && e.target.id === "loginKey") root.querySelector("[data-login]")?.click();
     if (e.key === "Enter" && e.target.id === "inNoteSearch") {
       e.preventDefault();
       nextNoteHit();
@@ -1914,7 +2088,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-redeem],[data-login],[data-signout],[data-guest]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],[data-lib-grade],[data-lib-subject],[data-lib-book],[data-lib-paragraph],[data-tab],.fab";
   root.addEventListener("click", (e) => {
@@ -1990,6 +2164,7 @@
   // Главную рисуем, когда известен доступ (не дольше ACCESS_WAIT_MS): иначе у пользователя без доступа мелькнёт
   // обычный экран. Не дождались (медленная сеть, офлайн) — обычный экран, доступ подставится, когда придёт ответ.
   const ACCESS_WAIT_MS = 1500;
+  if (idLogin) cloud.onUser(onUserChange);
   const firstAccess = refreshAccess();
   store
     .init()

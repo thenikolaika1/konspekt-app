@@ -158,5 +158,13 @@
     return once("note:" + noteId, () => cloudResume(noteId, opts));
   }
 
-  K.generator = { kind: useCloud ? "cloud" : "mock", generate, resume, analyzePages };
+  // другой пользователь на устройстве: незавершённая работа прежнего (его note_id) не продолжается
+  if (useCloud && cloud.onUser) cloud.onUser(() => {
+    if (!inFlight) current = null;
+  });
+
+  /** Идёт генерация (смена аккаунта в это время запрещена). */
+  const busy = () => !!inFlight;
+
+  K.generator = { kind: useCloud ? "cloud" : "mock", generate, resume, analyzePages, busy };
 })();
