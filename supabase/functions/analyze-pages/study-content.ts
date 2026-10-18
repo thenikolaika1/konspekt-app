@@ -294,22 +294,158 @@ export function previewOf(c: StudyContent): string {
 }
 
 /**
- * Достаёт JSON-объект из ответа модели: убирает служебные маркеры GLM (<|begin_of_box|>),
- * ограждения ```json и текст вокруг объекта. null — если JSON не разобрать.
+ * Почему ответ модели не разобрался как JSON — только тип, позиция и класс символа, без текста ответа
+ * (в ответе — текст учебника): этого достаточно, чтобы понять причину по логу.
  */
-export function extractJson(text: string): Json | null {
+export type JsonDiag = { kind: string; pos: number; len: number; at: string };
+
+/** Класс символа на позиции ошибки (сам символ из текста в лог не попадает). */
+function charClass(c: string | undefined): string {
+  if (c === undefined) return "EOF";
+  if (c === "\n") return "LF";
+  if (c === "\r") return "CR";
+  if (c === "\t") return "TAB";
+  if (c < " ") return "CONTROL";
+  if (c === '"') return "QUOTE";
+  if ("{}[],:".includes(c)) return "PUNCT:" + c;
+  if (/[«»“”„]/.test(c)) return "TYPO_QUOTE";
+  if (/\s/.test(c)) return "SPACE";
+  if (/[0-9]/.test(c)) return "DIGIT";
+  if (/[A-Za-z]/.test(c)) return "LATIN";
+  if (/[А-Яа-яЁё]/.test(c)) return "CYRILLIC";
+  return "OTHER";
+}
+
+/** Позиция первой } или ] после висячей запятой вне строк, иначе -1. */
+function trailingCommaPos(t: string): number {
+  let inStr = false;
+  let esc = false;
+  let comma = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if ((c === "}" || c === "]") && comma) return i;
+    if (!/\s/.test(c)) comma = c === ",";
+  }
+  return -1;
+}
+
+/** null — JSON корректен; иначе тип ошибки. Сообщение JSON.parse не логируется: в нём бывает фрагмент текста. */
+export function jsonDiag(t: string): JsonDiag | null {
+  try {
+    JSON.parse(t);
+    return null;
+  } catch (e) {
+    const msg = String((e as Error)?.message || "");
+    const m = /position (\d+)/.exec(msg);
+    // V8 не всегда называет позицию («Unexpected token ']'») — тогда ищем висячую запятую сами
+    const pos = m ? Number(m[1]) : msg.includes("end of JSON") ? t.length : trailingCommaPos(t);
+    const at = pos >= 0 ? charClass(t[pos]) : "UNKNOWN";
+    let prev = pos - 1;
+    while (prev >= 0 && /\s/.test(t[prev])) prev--;
+    const kind = /control character/i.test(msg) ? "control_char_in_string"
+      : pos >= t.length || at === "EOF" ? "unexpected_end"
+      : (at === "PUNCT:}" || at === "PUNCT:]") && t[prev] === "," ? "trailing_comma"
+      : at === "TYPO_QUOTE" ? "typographic_quote"
+      : /Expected ',' or|after property value|after array element/i.test(msg) ? "missing_comma_or_unescaped_quote"
+      : "unexpected_token";
+    return { kind, pos, len: t.length, at };
+  }
+}
+
+/**
+ * Безопасный ремонт синтаксиса, только когда строгий разбор не удался:
+ * сырые перевод строки и табуляция внутри строковых значений → \n и \t (текст не меняется, меняется только запись),
+ * прочие управляющие символы внутри строк убираются, висячая запятая перед } или ] (вне строк) удаляется.
+ * Кавычки и содержимое строк не трогаются: неэкранированные кавычки не угадываются.
+ */
+export function repairJsonSyntax(t: string): string {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) {
+        out += c;
+        esc = false;
+      } else if (c === "\\") {
+        out += c;
+        esc = true;
+      } else if (c === '"') {
+        out += c;
+        inStr = false;
+      } else if (c === "\n") out += "\\n";
+      else if (c === "\t") out += "\\t";
+      else if (c >= " ") out += c;
+      // \r и другие управляющие символы внутри строки — пропускаются
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === ",") {
+      let j = i + 1;
+      while (j < t.length && /\s/.test(t[j])) j++;
+      if (t[j] === "}" || t[j] === "]") continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+/**
+ * Достаёт JSON-объект из ответа модели: убирает служебные маркеры GLM (<|begin_of_box|>),
+ * ограждения ```json и текст вокруг объекта. Сначала строгий JSON.parse; если не вышло — безопасный ремонт
+ * синтаксиса (repairJsonSyntax). value = null — JSON не разобрать; diag — почему не разобрался строгий вариант.
+ */
+export function parseModelJson(text: string): { value: Json | null; repaired: boolean; diag: JsonDiag | null } {
   let t = String(text || "")
     .replace(/<\|begin_of_box\|>|<\|end_of_box\|>/g, "")
     .replace(/```(?:json)?/gi, "")
     .trim();
   const a = t.indexOf("{");
   const b = t.lastIndexOf("}");
-  if (a < 0 || b <= a) return null;
+  if (a < 0 || b <= a) return { value: null, repaired: false, diag: { kind: "no_object", pos: -1, len: t.length, at: "EOF" } };
   t = t.slice(a, b + 1);
   try {
-    return JSON.parse(t);
+    return { value: JSON.parse(t), repaired: false, diag: null };
   } catch {
-    return null;
+    // ниже — ремонт синтаксиса
+  }
+  const diag = jsonDiag(t);
+  try {
+    return { value: JSON.parse(repairJsonSyntax(t)), repaired: true, diag };
+  } catch {
+    return { value: null, repaired: false, diag };
+  }
+}
+
+/** JSON-объект из ответа модели или null (см. parseModelJson). */
+export function extractJson(text: string): Json | null {
+  return parseModelJson(text).value;
+}
+
+/** Подсказка модели для повтора по типу ошибки JSON (без текста её ответа). */
+export function jsonRetryHint(diag: JsonDiag | null): string {
+  switch (diag?.kind) {
+    case "control_char_in_string":
+      return "внутри строковых значений есть перевод строки или табуляция — внутри значений пиши только \\n";
+    case "trailing_comma":
+      return "перед } или ] стоит лишняя запятая";
+    case "typographic_quote":
+    case "missing_comma_or_unescaped_quote":
+      return "внутри текста стоит прямая кавычка \" — внутри значений используй только «ёлочки» или экранируй кавычку как \\\"";
+    case "unexpected_end":
+      return "JSON оборван — закрой все скобки и кавычки";
+    case "no_object":
+      return "в ответе нет JSON-объекта";
+    default:
+      return "нарушен синтаксис JSON";
   }
 }
 

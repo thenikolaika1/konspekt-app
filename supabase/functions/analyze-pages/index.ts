@@ -16,7 +16,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.1
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
-import { criticalIssues, extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
+import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -267,7 +267,8 @@ async function processNote(job: Job) {
   const m = {
     page_count: paths.length, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
     sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
-    retry_used: false, fallback_used: false, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "", error_code: "",
+    retry_used: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "",
+    error_code: "",
   };
   let aiCalled = false;
   let t = Date.now();
@@ -336,10 +337,18 @@ async function processNote(job: Job) {
       if (reply.fallbacks.length) m.fallback_used = true;
 
       t = Date.now();
-      const parsed = extractJson(reply.text);
-      const result: ReturnType<typeof validateStudyContent> = parsed
-        ? validateStudyContent(parsed, images.length)
-        : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : "not json" };
+      const parsed = parseModelJson(reply.text);
+      if (parsed.repaired) m.json_repaired++;
+      // тип и позиция ошибки JSON — без текста ответа (в нём текст учебника)
+      if (parsed.diag) {
+        console.warn(
+          "[analyze-pages] attempt " + (attempt + 1) + " json " + (parsed.repaired ? "repaired" : "invalid") + ": " +
+            JSON.stringify({ ...parsed.diag, truncated: reply.truncated }),
+        );
+      }
+      const result: ReturnType<typeof validateStudyContent> = parsed.value
+        ? validateStudyContent(parsed.value, images.length)
+        : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : parsed.diag?.kind || "not json" };
       m.parse_ms += Date.now() - t;
       last = result;
       let problems: string[];
@@ -360,7 +369,11 @@ async function processNote(job: Job) {
       } else {
         // страницы действительно не читаются — повтор не поможет
         if (result.code === "UNREADABLE_PAGES" && !best) break;
-        problems = [result.code === "AI_BAD_JSON" ? "ответ не является корректным JSON по схеме (" + result.reason + ")" : "в ответе нет ни разделов, ни терминов"];
+        problems = [
+          result.code === "AI_BAD_JSON"
+            ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
+            : "в ответе нет ни разделов, ни терминов",
+        ];
       }
       console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
       messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
