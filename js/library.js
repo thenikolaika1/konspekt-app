@@ -69,7 +69,9 @@
   const grade = (id) => grades().find((g) => g.id === gradeKey(id)) || null;
   const profiles = () => catalog.profiles;
   const profile = (id) => profiles().find((p) => p.id === id) || null;
-  const subjects = () => catalog.subjects;
+  // скрытые предметы (K.config.hiddenLibrarySubjects) экраны библиотеки не видят; catalog() по-прежнему отдаёт всё
+  const hidden = new Set(list((K.config || {}).hiddenLibrarySubjects));
+  const subjects = () => catalog.subjects.filter((s) => !hidden.has(s.id));
   const subject = (id) => subjects().find((s) => s.id === id) || null;
   /** учебники предмета; с gradeId — только этого класса */
   const books = (subjectId, gradeId) => list(subject(subjectId)?.books).filter((b) => !gradeId || b.grade === gradeKey(gradeId));

@@ -347,6 +347,40 @@
   // «Остался 1 конспект», «Осталось 2 конспекта», «Осталось 100 конспектов» — число только с сервера
   const remainingText = (n) => pluralForm(n, "Остался", "Осталось", "Осталось") + " " + notesCount(n);
 
+  // Бесплатное тестирование закончилось — по ответу сервера (get_my_access), а не по часам телефона:
+  // остаток 0 при неизрасходованной квоте сервер даёт только праву приглашения вне окна F&F. Если квота уже
+  // израсходована, ответ сервера после окна тот же, что и до него, — тогда сверяемся с датой конца окна.
+  // Права без окна (служебные аккаунты владельца) с остатком > 0 сюда не попадают; нет ответа сервера — тоже.
+  const FF_ENDS_AT = Date.parse(window.K.config?.ffEndsAt || "") || Infinity;
+  function ffEnded() {
+    if (!hasAccess() || !idLogin || cloud.getAccount().kind !== "participant") return false;
+    const a = S.access.info;
+    if (a.plan !== "beta" || a.remaining > 0) return false;
+    return a.used < a.quota || Date.now() >= FF_ENDS_AT;
+  }
+  // экраны, вместо которых после тестирования показывается «Бесплатное тестирование завершено»
+  const endedHere = () => (S.screen === "home" || S.screen.startsWith("library")) && ffEnded();
+
+  function accessEnded() {
+    const c = window.K.config?.ownerContact;
+    const contact =
+      c && c.url && c.label
+        ? '<a class="primary wide" href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.label) + "</a>"
+        : '<p class="ended-contact">Напиши Николаю лично.</p>';
+    const notes = store.listNotes().length;
+    return (
+      app("welcome access ended") +
+      logo() +
+      brand() +
+      "<h1>Бесплатное тестирование завершено</h1>" +
+      '<p class="ended-lead">Konspekt by NK переходит на платный доступ. Чтобы и дальше пользоваться готовыми конспектами и ИИ по фото, свяжись с Николаем.</p>' +
+      '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и созданные конспекты сохранены.</span></div>" +
+      '<div class="ended-actions">' + contact +
+      (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
+      "</div></div>"
+    );
+  }
+
   function earlyAccess() {
     return (
       app("welcome access") +
@@ -917,7 +951,7 @@
     // отказ сервера по раннему доступу (обычно вместо этого экрана — главная с экраном кода или «закончились»)
     NO_ACCESS: ["Нужен код раннего доступа.", "Введи код приглашения на главном экране."],
     LIMIT_REACHED: ["Бесплатные конспекты закончились.", "Если другой конспект ещё создаётся, дождись его."],
-    ACCESS_EXPIRED: ["Тестовый период закончился.", "Спасибо за участие! Библиотека по-прежнему доступна."],
+    ACCESS_EXPIRED: ["Бесплатное тестирование завершено.", "Твой аккаунт и созданные конспекты сохранены."],
     TOO_MANY_PAGES: ["Слишком много страниц.", "Можно отправить не больше " + MAX_PAGES + " страниц."],
     AI_PAUSED: ["Создание конспектов временно приостановлено.", "Библиотека работает как обычно. Попробуй позже."],
     AI_BUSY: ["Сейчас создаётся много конспектов.", "Подожди пару минут и попробуй ещё раз."],
@@ -1235,8 +1269,10 @@
   let tabbar = null;
 
   function currentTab() {
-    if (!(S.screen in TAB_OF) || S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
-    const own = TAB_OF[S.screen];
+    if (S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
+    // после тестирования готовый конспект (полноэкранный) тоже заменён экраном завершения — с панелью «Библиотеки»
+    const own = TAB_OF[S.screen] || (endedHere() ? "library" : undefined);
+    if (own === undefined && !(S.screen in TAB_OF)) return "";
     if (own) S.tab = own;
     return own || S.tab;
   }
@@ -1288,7 +1324,7 @@
   }
 
   // камеру нельзя открыть без доступа и после «закончились» (это не защита лимита: её делает сервер)
-  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut();
+  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut() || ffEnded();
 
   const tabState = {}; // вкладка → { screen, history, lib, y }: где пользователь был в этом разделе
   function openTab(id) {
@@ -1331,7 +1367,8 @@
     const dir = calm() ? null : navDir;
     navDir = null;
     document.querySelectorAll(".screen-ghost").forEach((g) => g.remove());
-    const html = (SCREENS[S.screen] || home)();
+    const ended = endedHere();
+    const html = (ended ? accessEnded : SCREENS[S.screen] || home)();
     const oldScreen = root.querySelector(":scope > .app");
 
     // экран: пересоздаём только если он изменился
@@ -1358,7 +1395,9 @@
     }
     firstPaint = false;
     // аналитика: начало и конец сессии просмотра параграфа, вход в библиотеку (js/analytics.js)
-    window.K.analytics?.screen(S.screen, S.screen === "library-paragraph" ? S.lib.paragraphId : null);
+    // просмотр — только если готовый конспект действительно на экране (не скрыт и не заменён экраном завершения)
+    const shown = !ended && S.screen === "library-paragraph" && library.paragraph(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId)?.content;
+    window.K.analytics?.screen(ended ? "access-ended" : S.screen, shown ? S.lib.paragraphId : null);
     renderTabbar();
     S.pages.forEach((p) => seenPages.add(p));
 
@@ -1653,7 +1692,8 @@
     if (JSON.stringify(next) === JSON.stringify(S.access)) return;
     S.access = next;
     // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
-    if (!quiet && !firstPaint && S.screen === "home" && !S.sheet && !document.activeElement?.matches?.("input")) render();
+    // главная и библиотека зависят от доступа (экран завершения тестирования)
+    if (!quiet && !firstPaint && (S.screen === "home" || S.screen.startsWith("library")) && !S.sheet && !document.activeElement?.matches?.("input")) render();
   }
 
   /**
