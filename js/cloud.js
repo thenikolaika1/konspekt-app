@@ -87,6 +87,21 @@
   }
   const peekUid = () => peekUser()?.id || null;
 
+  /**
+   * Сведения сервера из токена сессии (без запросов): invite — аккаунт создан регистрацией по приглашению (метку
+   * app_metadata.kn_reservation пишет только сервер, register-invite); issuedAt — когда сервер выдал токен, мс по часам
+   * сервера (iat). Часы устройства здесь не участвуют. Нет сессии или токен не читается — { invite: false, issuedAt: 0 }.
+   */
+  function serverMarks() {
+    try {
+      const t = String(peekSession()?.access_token || "").split(".")[1] || "";
+      const c = JSON.parse(atob(t.replace(/-/g, "+").replace(/_/g, "/")));
+      return { invite: !!c?.app_metadata?.kn_reservation, issuedAt: (Number(c?.iat) || 0) * 1000 };
+    } catch (e) {
+      return { invite: false, issuedAt: 0 };
+    }
+  }
+
   // смена пользователя (вход, выход, потеря сессии): store и аналитика переключают свои данные на его uid
   const userListeners = [];
   let lastUid;
@@ -599,7 +614,7 @@
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
     startAnalysis, waitForNote, getAccess, track,
-    peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
+    peekUid, onUser, getAccount, serverMarks, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
     registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };
 })();
