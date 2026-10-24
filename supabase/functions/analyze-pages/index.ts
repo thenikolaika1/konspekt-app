@@ -40,7 +40,7 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
 
-// Отказы start_text_generation: AI не запускается, note помечается failed с этим кодом (фото остаются для повтора).
+// Отказы start_text_generation_v2: AI не запускается, note помечается failed с этим кодом (фото остаются для повтора).
 export const REFUSALS: Record<string, [number, string]> = {
   no_access: [403, "NO_ACCESS"],
   limit_reached: [403, "LIMIT_REACHED"],
@@ -154,17 +154,18 @@ Deno.serve(async (req) => {
   const quota = await checkQuota(admin, user.id);
   if (quota) return json(429, { error: quota }, cors);
 
-  // Атомарно в одной транзакции (start_text_generation, только service_role): захват note из uploading/failed
-  // или из «зависшей» генерации и резерв одной операции лимита раннего доступа (op = note_id).
-  // Второй одновременный запрос по той же note получит already_processing — второй платной генерации не будет;
-  // повтор той же note не занимает второй слот. Итог резерва фиксирует триггер на notes.status:
-  // ready → списан, failed → возвращён. Без права или при исчерпанном лимите AI не запускается.
-  const { data: start, error: startError } = await admin.rpc("start_text_generation", {
+  // Атомарно в одной транзакции (start_text_generation_v2, только service_role): захват note из uploading/failed
+  // или из «зависшей» генерации и резерв одной операции лимита (op = note_id) в счёт действующей выдачи доступа
+  // (пробный период, оплаченный срок, владелец; срок — по часам сервера). Без выдач — прежняя проверка
+  // start_text_generation (участники F&F, служебные аккаунты). Второй одновременный запрос по той же note получит
+  // already_processing — второй платной генерации не будет; повтор той же note не занимает второй слот. Итог резерва
+  // фиксирует триггер на notes.status: ready → списан, failed → возвращён. Без доступа или при исчерпанном лимите AI не запускается.
+  const { data: start, error: startError } = await admin.rpc("start_text_generation_v2", {
     p_user_id: user.id,
     p_note_id: noteId,
     p_stale_seconds: STALE_MS / 1000,
     p_lease_seconds: LEASE_S,
-    // лимит страниц F&F (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
+    // лимит страниц (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
     p_page_count: paths.length,
   });
   if (startError) {
