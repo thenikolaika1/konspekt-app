@@ -87,20 +87,7 @@
   }
   const peekUid = () => peekUser()?.id || null;
 
-  /**
-   * Сведения сервера из токена сессии (без запросов): invite — аккаунт создан регистрацией по приглашению (метку
-   * app_metadata.kn_reservation пишет только сервер, register-invite); issuedAt — когда сервер выдал токен, мс по часам
-   * сервера (iat). Часы устройства здесь не участвуют. Нет сессии или токен не читается — { invite: false, issuedAt: 0 }.
-   */
-  function serverMarks() {
-    try {
-      const t = String(peekSession()?.access_token || "").split(".")[1] || "";
-      const c = JSON.parse(atob(t.replace(/-/g, "+").replace(/_/g, "/")));
-      return { invite: !!c?.app_metadata?.kn_reservation, issuedAt: (Number(c?.iat) || 0) * 1000 };
-    } catch (e) {
-      return { invite: false, issuedAt: 0 };
-    }
-  }
+
 
   // смена пользователя (вход, выход, потеря сессии): store и аналитика переключают свои данные на его uid
   const userListeners = [];
@@ -420,6 +407,30 @@
   }
 
   /**
+   * Доступ v61 (get_my_access_v2) — только по часам и данным сервера:
+   * { status: owner|paid|trial|expired|none, kind, plan, plan_title, starts_at, ends_at, paid_until, server_now,
+   *   ai_quota (null — без личного лимита), ai_used, ai_remaining, ai_available, revoked? }.
+   * null — на сервере ещё нет v61 (миграция не применена): приложение работает по старому get_my_access.
+   */
+  async function getAccessV2() {
+    await ensureUser();
+    try {
+      const data = await retryNetwork(() => callRpc("get_my_access_v2", undefined, "ACCESS_FAILED"));
+      return data && typeof data === "object" && typeof data.status === "string" ? data : null;
+    } catch (e) {
+      if (e?.cause?.code === "PGRST202") return null; // функции нет — старая база
+      throw e;
+    }
+  }
+
+  /** Тарифы, которые владелец сделал видимыми (private.plans.active). Пустой список — тарифы не заданы. */
+  async function getPlans() {
+    await ensureUser();
+    const data = await retryNetwork(() => callRpc("get_plans", undefined, "PLANS_FAILED"));
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
    * Аналитика (js/analytics.js): пакет событий в RPC public.track. Пользователя сервер берёт из JWT.
    * keepalive — при уходе страницы: supabase-js так не умеет, поэтому прямой запрос с последним токеном
    * (нет токена — не отправляем, события останутся в очереди до следующего запуска).
@@ -613,8 +624,8 @@
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
-    startAnalysis, waitForNote, getAccess, track,
-    peekUid, onUser, getAccount, serverMarks, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
+    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, track,
+    peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
     registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };
 })();

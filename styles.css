@@ -1780,3 +1780,33 @@ body.has-tabbar .fab{bottom:calc(var(--tabbar-h) + 18px)}
 .ended .ended-actions .primary{margin-top:0;display:flex;align-items:center;justify-content:center;text-decoration:none}
 .ended .secondary.wide{width:100%}
 @media(max-height:700px){.ended{padding-top:36px}.ended h1{margin-top:20px}}
+/* v61: доступ — «Мой доступ», «Тарифы», строка пробного периода, «Доступ закончился» в библиотеке */
+.access-card{display:grid;gap:6px;padding:16px;border:1px solid var(--ds-line,var(--line));border-radius:var(--ds-r-lg,18px);background:#fff;box-shadow:var(--ds-sh-1,none)}
+.access-status{font-size:17px;line-height:22px;font-weight:800;color:var(--k-ink)}
+.access-row{font-size:14px;line-height:19px;color:var(--muted)}
+.access-card .wide{width:100%;margin-top:8px}
+.access-card.status-owner .access-status,.access-card.status-paid .access-status{color:var(--green)}
+.access-card.status-expired .access-status{color:var(--wine)}
+.trial-line{display:flex;align-items:center;gap:8px;width:100%;margin:10px 0 0;padding:10px 12px;border:1px solid #dcecff;border-radius:12px;background:#f3f8ff;color:var(--blue-deep,var(--blue));font-size:14px;font-weight:700;text-align:left;cursor:pointer}
+.trial-line span{flex:1 1 auto}
+.trial-line .ui-icon{width:16px;height:16px;flex:0 0 auto}
+.plan-list{display:grid;gap:12px;margin-top:6px}
+.plan-card{padding:16px;border:1px solid var(--ds-line,var(--line));border-radius:var(--ds-r-lg,18px);background:#fff;box-shadow:var(--ds-sh-1,none)}
+.plan-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.plan-top b{font-size:18px;line-height:23px;font-weight:800;color:var(--k-ink);overflow-wrap:anywhere}
+.plan-price{flex:0 0 auto;font-size:16px;font-weight:800;color:var(--blue)}
+.plan-facts{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px;font-size:14px;line-height:19px;color:var(--k-text,var(--navy))}
+.plan-facts li{display:flex;gap:8px;align-items:flex-start}
+.plan-facts .ui-icon{width:17px;height:17px;flex:0 0 auto;margin-top:1px;color:var(--green)}
+.plan-desc{margin:10px 0 0;font-size:13.5px;line-height:1.45;color:var(--muted);overflow-wrap:anywhere}
+.plan-loading{padding:30px 0;text-align:center;color:var(--muted);font-size:14px}
+.plan-how{margin:22px 0 0;padding:16px;border-radius:16px;background:#f5f8fc;display:grid;gap:10px}
+.plan-how b{font-size:15px;color:var(--k-ink)}
+.plan-how p{margin:0;font-size:13.5px;line-height:1.45;color:var(--muted)}
+.plan-how .ended-contact{margin:0}
+.ended .ended-actions .secondary.wide{display:flex;align-items:center;justify-content:center;text-decoration:none}
+.ended-lib{padding-top:12px}
+.ended-back{align-self:stretch;display:flex;margin-bottom:6px}
+.ended-back .back{width:40px;height:40px;display:flex;align-items:center;justify-content:flex-start;padding:0;color:var(--k-ink)}
+a.primary.wide,a.secondary.wide{display:flex;align-items:center;justify-content:center;text-decoration:none;box-sizing:border-box}
+a.primary.wide{color:#fff}

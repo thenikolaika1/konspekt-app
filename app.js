@@ -48,7 +48,10 @@
     tab: "home",
     // ранний доступ: "off" — без Supabase (mock); "unknown" — сервер ещё не ответил или нет связи (приложение работает как обычно);
     // "ok" — доступ есть, info — ответ get_my_access(); "none" — сервер ответил, что доступа нет
-    access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null },
+    // v2 — ответ get_my_access_v2 (статус v61) или null, если сервер без v61
+    access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null, v2: null },
+    // тарифы (get_plans) для экрана «Тарифы»
+    plans: { state: "loading", items: [] },
   };
 
   const icon = (n) => {
@@ -200,6 +203,7 @@
     if (push && S.screen !== s && !TRANSIENT.includes(S.screen)) S.history.push(S.screen);
     S.screen = s;
     S.sheet = null;
+    if (s === "tariffs") loadPlans();
     render();
     scrollTo(0, 0);
   }
@@ -343,47 +347,123 @@
   // ---------- ранний доступ ----------
 
   const hasAccess = () => S.access.state === "ok";
-  const limitReached = () => hasAccess() && S.access.info.remaining <= 0;
+  // без личного лимита (владелец) остаток null — «закончились» не бывает
+  const limitReached = () => hasAccess() && S.access.info.remaining !== null && S.access.info.remaining <= 0;
   // «Остался 1 конспект», «Осталось 2 конспекта», «Осталось 100 конспектов» — число только с сервера
   const remainingText = (n) => pluralForm(n, "Остался", "Осталось", "Осталось") + " " + notesCount(n);
 
-  // Бесплатное тестирование закончилось — только по сведениям сервера, часы устройства не участвуют:
-  //  - аккаунт создан регистрацией по приглашению (метка сервера в токене); служебные аккаунты владельца
-  //    и гости её не имеют, сколько бы генераций ни потратили;
-  //  - остаток 0 при неизрасходованной квоте get_my_access даёт только праву приглашения вне окна F&F;
-  //  - квота уже израсходована (ответ сервера до и после окна одинаковый): токен выдан сервером не раньше
-  //    конца окна (iat ≥ ffEndsAt). До обновления токена (до часа) экран не показывается — не наоборот.
-  // Нет ответа сервера — экрана нет.
-  const FF_ENDS_AT = Date.parse(window.K.config?.ffEndsAt || "") || Infinity;
-  function ffEnded() {
-    if (!hasAccess() || !idLogin || cloud.getAccount().kind !== "participant") return false;
-    const m = cloud.serverMarks ? cloud.serverMarks() : { invite: false, issuedAt: 0 };
-    if (!m.invite) return false;
-    const a = S.access.info;
-    if (a.plan !== "beta" || a.remaining > 0) return false;
-    return a.used < a.quota || m.issuedAt >= FF_ENDS_AT;
+  // ---------- доступ v61: статус только с сервера (get_my_access_v2) ----------
+  // owner | paid | trial | expired | none; null — сервер без v61 (тогда приложение работает как v59, без экранов оплаты).
+  // Сроки и «осталось N дней» считаются от времени сервера (server_now), часы устройства не участвуют.
+  // Это интерфейс: генерацию ИИ закрывает сервер, а тексты библиотеки лежат в публичном файле и экраном не защищены.
+  const accessV2 = () => S.access.v2 || null;
+  const paywalled = () => accessV2()?.status === "expired";
+  // полный текст готового конспекта и главная заменяются экраном «Доступ закончился»; каталог остаётся виден
+  const paywallHere = () => (S.screen === "home" || S.screen === "library-paragraph") && paywalled();
+  const DAY_MS = 86_400_000;
+  const msk = (iso) => new Date(iso).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", year: "numeric" });
+  /** Дней до конца срока по часам сервера (неполный день — целый). */
+  function daysLeft(a) {
+    const end = Date.parse(a?.paid_until || a?.ends_at || ""), now = Date.parse(a?.server_now || "");
+    return end && now ? Math.max(0, Math.ceil((end - now) / DAY_MS)) : null;
   }
-  // экраны, вместо которых после тестирования показывается «Бесплатное тестирование завершено»
-  const endedHere = () => (S.screen === "home" || S.screen.startsWith("library")) && ffEnded();
+  const daysText = (n) => n + " " + pluralForm(n, "день", "дня", "дней");
 
-  function accessEnded() {
+  // контакт владельца (config.ownerContact); не задан — только текст, без неработающей кнопки
+  function contactBlock(cls) {
     const c = window.K.config?.ownerContact;
-    const contact =
-      c && c.url && c.label
-        ? '<a class="primary wide" href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.label) + "</a>"
-        : '<p class="ended-contact">Напиши Николаю лично.</p>';
+    return c && c.url && c.label
+      ? '<a class="' + (cls || "primary wide") + '" href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.label) + "</a>"
+      : '<p class="ended-contact">Напиши Николаю лично.</p>';
+  }
+
+  // «Доступ закончился»: на главной (с панелью вкладок) и вместо полного текста готового конспекта (с «Назад»)
+  function accessEnded() {
+    const a = accessV2() || {};
+    const inLibrary = S.screen === "library-paragraph";
+    const title =
+      a.kind === "trial" ? "Пробный период закончился" : a.kind === "legacy" ? "Бесплатное тестирование завершено" : "Оплаченный доступ закончился";
+    const lead = inLibrary
+      ? "Полный текст готовых конспектов открывается с действующим доступом. Список предметов и параграфов остаётся виден."
+      : "Готовые конспекты и ИИ по фото доступны по подписке. Оплата — вне приложения, после неё Николай откроет доступ.";
     const notes = store.listNotes().length;
     return (
-      app("welcome access ended") +
+      app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
+      (inLibrary ? '<div class="ended-back"><button class="back" data-back aria-label="Назад">' + icon("back") + "</button></div>" : "") +
       logo() +
       brand() +
-      "<h1>Бесплатное тестирование завершено</h1>" +
-      '<p class="ended-lead">Konspekt by NK переходит на платный доступ. Чтобы и дальше пользоваться готовыми конспектами и ИИ по фото, свяжись с Николаем.</p>' +
-      '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и созданные конспекты сохранены.</span></div>" +
-      '<div class="ended-actions">' + contact +
+      "<h1>" + title + "</h1>" +
+      '<p class="ended-lead">' + lead + "</p>" +
+      '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
+      '<div class="ended-actions">' +
+      '<button class="primary wide" data-go="tariffs">Посмотреть тарифы</button>' +
+      contactBlock("secondary wide") +
       (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
       "</div></div>"
     );
+  }
+
+  // «Тарифы»: только то, что владелец опубликовал (private.plans.active); пусто — условия уточняются лично
+  function tariffs() {
+    const p = S.plans;
+    const card = (x) =>
+      '<div class="plan-card"><div class="plan-top"><b>' + esc(x.title) + "</b>" + (x.price_label ? '<span class="plan-price">' + esc(x.price_label) + "</span>" : "") + "</div>" +
+      '<ul class="plan-facts"><li>' + icon("check") + "Все готовые конспекты библиотеки</li><li>" + icon("check") + "ИИ по фото: " + esc(String(x.ai_quota)) + " " +
+      pluralForm(x.ai_quota, "генерация", "генерации", "генераций") + " на срок</li><li>" + icon("check") + "Срок: " + esc(daysText(x.days)) + "</li></ul>" +
+      (x.description ? '<p class="plan-desc">' + esc(x.description) + "</p>" : "") + "</div>";
+    const body =
+      p.state === "list" && p.items.length
+        ? '<div class="plan-list">' + p.items.map(card).join("") + "</div>"
+        : p.state === "list"
+          ? emptyState("Тарифы пока не опубликованы", "Условия доступа уточняются лично — напиши Николаю.")
+          : p.state === "error"
+            ? emptyState("Не удалось загрузить тарифы", "Проверь подключение к интернету и открой экран ещё раз.")
+            : '<div class="plan-loading" role="status">Загружаем тарифы…</div>';
+    return (
+      app("tariffs-screen") + DECO.head() + head("Тарифы", "Готовые конспекты и ИИ по фото") + body +
+      '<div class="plan-how"><b>Как подключить</b><p>Оплата — наличными или переводом по договорённости, вне приложения. После оплаты Николай вручную откроет доступ к твоему ID.</p>' +
+      contactBlock() + "</div></div>"
+    );
+  }
+  function loadPlans() {
+    S.plans = { state: "loading", items: [] };
+    cloud
+      .getPlans()
+      .then((items) => (S.plans = { state: "list", items }), () => (S.plans = { state: "error", items: [] }))
+      .then(() => S.screen === "tariffs" && render());
+  }
+
+  // «Мой доступ» в профиле: статус, срок, дни, генерации — только по ответу сервера
+  function accessCard() {
+    const a = accessV2();
+    if (!a || a.status === "none") return "";
+    const left = daysLeft(a);
+    const until = a.paid_until || a.ends_at;
+    const rows = [];
+    let status, renew = true;
+    if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
+    else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
+    else if (a.status === "paid") status = "Оплачен до " + msk(until);
+    else if (a.status === "trial") status = "Пробный период до " + msk(until);
+    else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
+    if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));
+    if (a.status !== "expired")
+      rows.push(a.ai_quota === null ? "ИИ по фото: без личного лимита" : "ИИ по фото: осталось " + a.ai_remaining + " из " + a.ai_quota);
+    return (
+      '<h3 class="pf-h">Мой доступ</h3><div class="access-card status-' + esc(a.status) + '"><b class="access-status">' + esc(status) + "</b>" +
+      rows.map((r) => '<span class="access-row">' + esc(r) + "</span>").join("") +
+      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить доступ" : "Тарифы и продление") + "</button>" : "") +
+      "</div>"
+    );
+  }
+
+  // строка на главной во время пробного периода (без всплывающих окон)
+  function trialLine() {
+    const a = accessV2();
+    if (a?.status !== "trial" || a.kind !== "trial") return "";
+    const left = daysLeft(a);
+    if (left === null) return "";
+    return '<button class="trial-line" data-go="tariffs">' + icon("sparkle") + "<span>Пробный период: осталось " + esc(daysText(left)) + "</span>" + icon("chev") + "</button>";
   }
 
   function earlyAccess() {
@@ -444,10 +524,13 @@
         '<button class="primary" data-go="login">Войти</button>'
       );
     if (limitReached())
-      return '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
+      return accessV2()
+        ? '<h1 class="hero-limit-title">Генерации ИИ закончились</h1><p class="hero-limit">На этот срок использовано ' + esc(notesCount(a.quota)) + ". Новые появятся с продлением доступа.</p>" +
+            '<button class="primary" data-go="tariffs">Тарифы</button>'
+        : '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
     return (
       "<h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p>" +
-      (hasAccess() ? '<div class="hero-quota">' + esc(remainingText(a.remaining)) + "</div>" : "") +
+      (hasAccess() && a.remaining !== null ? '<div class="hero-quota">' + esc(remainingText(a.remaining)) + "</div>" : "") +
       '<button class="primary" data-go="camera">' + icon("camera") + "Сфотографировать</button>"
     );
   }
@@ -459,7 +542,7 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div>' + trialLine() + '<div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
       bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
@@ -882,6 +965,7 @@
       '<section class="pf-hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() +
       '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id">' + accountHead() + "</div></section>" +
       accountCard() +
+      accessCard() +
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
       tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
@@ -899,12 +983,12 @@
       ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
     ];
     const faq = [
-      ["Сколько конспектов можно создать?", "В раннем доступе число конспектов ограничено. Сколько осталось, видно на главном экране."],
+      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа: в пробном периоде — одна. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
       ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
       ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
       ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
       ["Где хранятся мои конспекты?", "Они привязаны к анонимному профилю на этом устройстве. Если очистить данные браузера или сменить устройство, доступ к ним может пропасть."],
-      ["Тратит ли библиотека лимит?", "Нет. Готовые конспекты библиотеки открываются без кода приглашения и без ограничений."],
+      ["Тратит ли библиотека лимит?", "Нет. Готовые конспекты не тратят генерации ИИ. Полный текст открывается, пока действует доступ; список предметов и параграфов виден всегда."],
     ];
     const errs = ["NETWORK", "UNREADABLE_PAGES", "AI_TIMEOUT", "AI_RATE_LIMITED", "TOO_MANY_PAGES", "AI_PAUSED", "LIMIT_REACHED", "ACCESS_EXPIRED"];
     return (
@@ -955,8 +1039,8 @@
     PAGES_MISSING: ["Фотографии этого конспекта не сохранились.", "Сфотографируй страницы ещё раз."],
     // отказ сервера по раннему доступу (обычно вместо этого экрана — главная с экраном кода или «закончились»)
     NO_ACCESS: ["Нужен код раннего доступа.", "Введи код приглашения на главном экране."],
-    LIMIT_REACHED: ["Бесплатные конспекты закончились.", "Если другой конспект ещё создаётся, дождись его."],
-    ACCESS_EXPIRED: ["Бесплатное тестирование завершено.", "Твой аккаунт и созданные конспекты сохранены."],
+    LIMIT_REACHED: ["Генерации ИИ на этот срок закончились.", "Если другой конспект ещё создаётся, дождись его. Продлить доступ можно в профиле."],
+    ACCESS_EXPIRED: ["Доступ закончился.", "Твой аккаунт и личные конспекты сохранены. Продлить доступ можно в профиле."],
     TOO_MANY_PAGES: ["Слишком много страниц.", "Можно отправить не больше " + MAX_PAGES + " страниц."],
     AI_PAUSED: ["Создание конспектов временно приостановлено.", "Библиотека работает как обычно. Попробуй позже."],
     AI_BUSY: ["Сейчас создаётся много конспектов.", "Подожди пару минут и попробуй ещё раз."],
@@ -1076,6 +1160,7 @@
     processing,
     note,
     "new-bookmark": newBookmark,
+    tariffs,
     profile,
     login,
     register,
@@ -1270,14 +1355,12 @@
     { id: "me", label: "Я", icon: "user", screen: "profile" },
   ];
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
-  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null, tariffs: null };
   let tabbar = null;
 
   function currentTab() {
-    if (S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
-    // после тестирования готовый конспект (полноэкранный) тоже заменён экраном завершения — с панелью «Библиотеки»
-    const own = TAB_OF[S.screen] || (endedHere() ? "library" : undefined);
-    if (own === undefined && !(S.screen in TAB_OF)) return "";
+    if (!(S.screen in TAB_OF) || S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
+    const own = TAB_OF[S.screen];
     if (own) S.tab = own;
     return own || S.tab;
   }
@@ -1329,14 +1412,14 @@
   }
 
   // камеру нельзя открыть без доступа и после «закончились» (это не защита лимита: её делает сервер)
-  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut() || ffEnded();
+  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut() || paywalled();
 
   const tabState = {}; // вкладка → { screen, history, lib, y }: где пользователь был в этом разделе
   function openTab(id) {
     const t = TABS.find((x) => x.id === id);
     if (!t) return;
     // «Фото» — тот же вход в существующий генератор, что и кнопка «Сфотографировать»; «назад» вернёт в раздел
-    if (t.id === "photo") return cameraBlocked() ? render() : go("camera");
+    if (t.id === "photo") return paywalled() ? go("tariffs") : cameraBlocked() ? render() : go("camera");
     const here = currentTab();
     if (here === t.id) {
       // повторное нажатие: в глубине раздела — к его корню, на корне — к началу
@@ -1372,7 +1455,7 @@
     const dir = calm() ? null : navDir;
     navDir = null;
     document.querySelectorAll(".screen-ghost").forEach((g) => g.remove());
-    const ended = endedHere();
+    const ended = paywallHere();
     const html = (ended ? accessEnded : SCREENS[S.screen] || home)();
     const oldScreen = root.querySelector(":scope > .app");
 
@@ -1692,13 +1775,28 @@
   let accessGen = 0; // номер пользователя устройства: растёт при каждой смене
 
   /** Новое состояние доступа с сервера; главная перерисовывается, только если оно изменилось. */
-  function setAccess(info, quiet) {
-    const next = { state: info ? "ok" : "none", info: info || null };
+  function setAccess(info, quiet, v2 = null) {
+    const next = { state: info ? "ok" : "none", info: info || null, v2 };
     if (JSON.stringify(next) === JSON.stringify(S.access)) return;
     S.access = next;
     // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
-    // главная и библиотека зависят от доступа (экран завершения тестирования)
-    if (!quiet && !firstPaint && (S.screen === "home" || S.screen.startsWith("library")) && !S.sheet && !document.activeElement?.matches?.("input")) render();
+    // главная, библиотека и профиль зависят от доступа («Доступ закончился», «Мой доступ»)
+    if (!quiet && !firstPaint && (S.screen === "home" || S.screen === "profile" || S.screen.startsWith("library")) && !S.sheet && !document.activeElement?.matches?.("input")) render();
+  }
+
+  // ответ v61 → прежняя форма (quota/used/remaining) для главной, камеры и экрана ошибки
+  function fromV2(a) {
+    if (!a || a.status === "none") return null;
+    return {
+      resource: "text_generation", plan: a.kind, quota: a.ai_quota, used: a.ai_used || 0, reserved: a.ai_reserved || 0,
+      remaining: a.ai_quota === null ? null : a.ai_remaining || 0, available: a.ai_quota === null ? null : a.ai_available || 0,
+    };
+  }
+  /** Доступ с сервера: v61 (get_my_access_v2); сервер без v61 — прежний get_my_access, как в v59. */
+  async function fetchAccess() {
+    const v2 = cloud.getAccessV2 ? await cloud.getAccessV2() : null;
+    if (v2) return { info: fromV2(v2), v2 };
+    return { info: await cloud.getAccess(), v2: null };
   }
 
   /**
@@ -1709,10 +1807,9 @@
     if (S.access.state === "off") return Promise.resolve();
     if (!accessPromise) {
       const gen = accessGen;
-      accessPromise = cloud
-        .getAccess()
+      accessPromise = fetchAccess()
         // ответ для прежнего пользователя (аккаунт сменился, пока шёл запрос) не применяется
-        .then((info) => gen === accessGen && setAccess(info), (e) => console.warn("[access] check failed", e.message))
+        .then((r) => gen === accessGen && setAccess(r.info, false, r.v2), (e) => console.warn("[access] check failed", e.message))
         .finally(() => (accessPromise = null));
     }
     return accessPromise;
@@ -1724,7 +1821,7 @@
     if (!changed) return;
     accessGen++;
     accessPromise = null;
-    S.access = { state: "unknown", info: null };
+    S.access = { state: "unknown", info: null, v2: null };
     S.noteId = null;
     S.bookmarkId = null;
     tabState.home = tabState.me = null;
