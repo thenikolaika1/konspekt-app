@@ -24,25 +24,37 @@
 -- Порядок блокировок (без взаимных блокировок):
 --   генерация (новая логика): note → пользователь (advisory) → ai_limits → строка журнала;
 --   генерация (старая логика): note → user_entitlements → ai_limits → строка журнала (без изменений);
---   функции владельца: пользователь (advisory) → access_grants; триггер итога: note → строка журнала.
+--   функции владельца: пользователь (advisory) → access_grants;
+--   триггеры итога (notes_finalize_usage, notes_finish_generation_start): note → строка журнала / строки запусков.
 --
--- Применять вручную после 20261018130000 (Dashboard → SQL Editor), до выпуска analyze-pages и клиента v61.
--- Откат — в конце файла.
+-- Защита общего бюджета от повторов: каждый запуск пишется в private.generation_starts; неудачи (итог failed или
+-- итога нет дольше 10 минут) личный лимит не тратят, но ограничены — на выдачу и за сутки (access_settings).
+--
+-- Применять вручную после 20261018130000 (Dashboard → SQL Editor), одним запуском всего файла, когда нет идущих
+-- генераций; до выпуска analyze-pages и клиента v61. Весь файл — одна транзакция: при любой ошибке не создаётся ничего.
+-- Порядок выпуска и откат — supabase/release/paid-access-v61.md; блок отката — в конце файла.
 -- =====================================================================================
+
+begin;
 
 -- -------------------------------------------------------------------------------------
 -- 1. Таблицы
 -- -------------------------------------------------------------------------------------
 
--- Параметры пробного периода (одна строка). attempts_per_generation — сколько запусков (включая неудачные)
--- даёт одна генерация лимита: неудачи лимит не тратят, но бесконечных повторов нет (как max_user_starts у F&F).
+-- Параметры доступа (одна строка). Неудачные запуски личный лимит не тратят, но ограничены (владельца это не касается,
+-- для него — только общие лимиты ai_limits):
+--   max_failed_per_grant — неудач за один срок доступа: не больше max(этого числа, лимита генераций срока);
+--   max_failed_per_day   — неудач за последние 24 часа;
+--   max_starts_per_day   — всех запусков за последние 24 часа (NULL — без суточного предела).
 create table private.access_settings (
-  id                      boolean     primary key default true check (id),
-  trial_on_register       boolean     not null default true,
-  trial_days              integer     not null default 7 check (trial_days between 1 and 60),
-  trial_ai_quota          integer     not null default 1 check (trial_ai_quota >= 0),
-  attempts_per_generation integer     not null default 3 check (attempts_per_generation between 1 and 10),
-  updated_at              timestamptz not null default now()
+  id                   boolean     primary key default true check (id),
+  trial_on_register    boolean     not null default true,
+  trial_days           integer     not null default 7 check (trial_days between 1 and 60),
+  trial_ai_quota       integer     not null default 1 check (trial_ai_quota >= 0),
+  max_failed_per_grant integer     not null default 3 check (max_failed_per_grant between 0 and 100),
+  max_failed_per_day   integer     not null default 2 check (max_failed_per_day between 0 and 100),
+  max_starts_per_day   integer     check (max_starts_per_day is null or max_starts_per_day between 1 and 100),
+  updated_at           timestamptz not null default now()
 );
 insert into private.access_settings default values;
 
@@ -99,11 +111,27 @@ alter table private.usage_ledger
   add column grant_id uuid references private.access_grants (id) on delete set null;
 create index usage_ledger_grant_idx on private.usage_ledger (grant_id) where grant_id is not null;
 
+-- Каждый запуск AI (новая логика): итог пишет триггер на notes.status. Повтор той же note — новая строка.
+create table private.generation_starts (
+  id          bigint      generated always as identity primary key,
+  user_id     uuid        not null references auth.users (id) on delete cascade,
+  grant_id    uuid        references private.access_grants (id) on delete set null,
+  op_key      text        not null check (length(op_key) between 1 and 200),
+  started_at  timestamptz not null default now(),
+  outcome     text        check (outcome in ('ok', 'failed')),
+  finished_at timestamptz,
+  constraint generation_starts_finished check ((outcome is null) = (finished_at is null))
+);
+create index generation_starts_user_time on private.generation_starts (user_id, started_at);
+create index generation_starts_open on private.generation_starts (user_id, op_key) where outcome is null;
+create index generation_starts_grant on private.generation_starts (grant_id) where grant_id is not null;
+
 alter table private.access_settings enable row level security;
+alter table private.generation_starts enable row level security;
 alter table private.plans           enable row level security;
 alter table private.access_grants   enable row level security;
 alter table private.access_log      enable row level security;
-revoke all on private.access_settings, private.plans, private.access_grants, private.access_log
+revoke all on private.access_settings, private.plans, private.access_grants, private.access_log, private.generation_starts
   from public, anon, authenticated, service_role;
 
 -- -------------------------------------------------------------------------------------
@@ -139,6 +167,43 @@ as $$
     from private.usage_ledger l
    where l.grant_id = p_grant_id
 $$;
+
+-- Неудачные запуски пользователя с момента p_since (по выдаче — если p_grant_id задан): итог failed или итога нет
+-- дольше p_lease (функция прервалась — резерв уже вернул генерацию, а запуск бюджета потрачен).
+create function private.failed_starts(p_user_id uuid, p_since timestamptz, p_grant_id uuid default null,
+                                      p_lease interval default interval '10 minutes')
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  select count(*)::integer
+    from private.generation_starts s
+   where s.user_id = p_user_id and s.started_at >= p_since
+     and (p_grant_id is null or s.grant_id = p_grant_id)
+     and (s.outcome = 'failed' or (s.outcome is null and s.started_at < pg_catalog.now() - p_lease))
+$$;
+
+-- Итог запуска — в той же транзакции, что и смена notes.status (как notes_finalize_usage для резерва).
+create function private.finish_generation_start()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update private.generation_starts s
+     set outcome = case when new.status = 'ready' then 'ok' else 'failed' end, finished_at = pg_catalog.now()
+   where s.user_id = new.user_id and s.op_key = new.id::text and s.outcome is null;
+  return null;
+end
+$$;
+
+create trigger notes_finish_generation_start
+  after update of status on public.notes
+  for each row
+  when (old.status is distinct from new.status and new.status in ('ready', 'failed'))
+  execute function private.finish_generation_start();
 
 -- Состояние доступа пользователя (одно на всё приложение). status: owner | paid | trial | expired | none.
 -- kind — откуда состояние: trial / paid / owner (выдачи) или legacy (старое право, если выдач нет).
@@ -293,9 +358,10 @@ $$;
 -- -------------------------------------------------------------------------------------
 -- 4. RPC только для сервера (service_role): проверка и резерв генерации
 -- -------------------------------------------------------------------------------------
--- Результаты — как у start_text_generation (analyze-pages их уже понимает):
+-- Результаты — как у start_text_generation, плюс два новых (их понимает analyze-pages этой версии):
 --   started | ready | already_processing | not_found | no_access | access_expired | limit_reached |
---   too_many_pages | ai_paused | ai_busy | already_consumed.
+--   too_many_pages | ai_paused | ai_busy | already_consumed |
+--   retry_limit (исчерпаны неудачные запуски — на срок или за сутки) | daily_limit (суточный предел запусков).
 create function public.start_text_generation_v2(
   p_user_id       uuid,
   p_note_id       uuid,
@@ -315,7 +381,8 @@ declare
   v_g     private.access_grants;
   v_u     record;
   v_state text;
-  v_per   integer;
+  v_set   private.access_settings;
+  v_open  record;
   v_op    text := p_note_id::text;
 begin
   if p_user_id is null or p_note_id is null then
@@ -375,12 +442,26 @@ begin
     return jsonb_build_object('result', 'already_consumed', 'access', private.access_state(p_user_id));
   end if;
 
-  -- 5. личный лимит выдачи (у владельца его нет): успешные + чужие активные резервы; число запусков с повторами
+  -- 5. личные пределы (у владельца их нет): успешные + чужие активные резервы — лимит срока;
+  --    неудачные запуски — на срок и за сутки; все запуски — за сутки (если задано)
   if v_g.ai_quota is not null then
     select * into v_u from private.grant_usage(v_g.id, v_op);
-    select s.attempts_per_generation into v_per from private.access_settings s limit 1;
-    if v_u.used + v_u.reserved >= v_g.ai_quota or v_u.starts >= v_g.ai_quota * coalesce(v_per, 3) then
+    if v_u.used + v_u.reserved >= v_g.ai_quota then
       return jsonb_build_object('result', 'limit_reached', 'access', private.access_state(p_user_id));
+    end if;
+    select * into v_set from private.access_settings limit 1;
+    -- идущие запуски (итога ещё нет) считаются возможными неудачами: параллельные запуски не обходят предел
+    select count(*) filter (where s.grant_id = v_g.id) as grant_open, count(*) as all_open into v_open
+      from private.generation_starts s
+     where s.user_id = p_user_id and s.outcome is null and s.started_at >= pg_catalog.now() - interval '10 minutes';
+    if private.failed_starts(p_user_id, '-infinity', v_g.id) + v_open.grant_open >= greatest(v_set.max_failed_per_grant, v_g.ai_quota)
+       or private.failed_starts(p_user_id, pg_catalog.now() - interval '24 hours') + v_open.all_open >= v_set.max_failed_per_day then
+      return jsonb_build_object('result', 'retry_limit', 'access', private.access_state(p_user_id));
+    end if;
+    if v_set.max_starts_per_day is not null
+       and (select count(*) from private.generation_starts s
+             where s.user_id = p_user_id and s.started_at > pg_catalog.now() - interval '24 hours') >= v_set.max_starts_per_day then
+      return jsonb_build_object('result', 'daily_limit', 'access', private.access_state(p_user_id));
     end if;
   end if;
 
@@ -408,6 +489,11 @@ begin
          finalized_at = null
    where l.state <> 'consumed';
   update private.ai_limits set total_starts = total_starts + 1, updated_at = pg_catalog.now() where id;
+  -- запуск в журнал запусков; незавершённый прежний запуск этой note (функция прервалась) — неудача
+  update private.generation_starts s
+     set outcome = 'failed', finished_at = pg_catalog.now()
+   where s.user_id = p_user_id and s.op_key = v_op and s.outcome is null;
+  insert into private.generation_starts (user_id, grant_id, op_key) values (p_user_id, v_g.id, v_op);
 
   -- 8. захват note (итог резерва фиксирует существующий триггер notes_finalize_usage: ready → списан, failed → возвращён)
   update public.notes
@@ -499,9 +585,12 @@ begin
       select jsonb_agg(jsonb_build_object(
                'id', g.id, 'kind', g.kind, 'plan', g.plan, 'starts_at', g.starts_at, 'ends_at', g.ends_at,
                'ai_quota', g.ai_quota, 'ai_used', u.used, 'ai_reserved', u.reserved, 'starts', u.starts,
+               'failed', private.failed_starts(v_uid, '-infinity', g.id),
                'revoked_at', g.revoked_at, 'granted_by', g.granted_by, 'note', g.note) order by g.starts_at, g.created_at)
         from private.access_grants g cross join lateral private.grant_usage(g.id) u
        where g.user_id = v_uid), '[]'::jsonb),
+    'starts_24h', (select count(*) from private.generation_starts s where s.user_id = v_uid and s.started_at > pg_catalog.now() - interval '24 hours'),
+    'failed_24h', private.failed_starts(v_uid, pg_catalog.now() - interval '24 hours'),
     'legacy', (select jsonb_build_object('source', e.source, 'plan', e.plan, 'quota', e.quota)
                  from private.user_entitlements e where e.user_id = v_uid and e.resource = 'text_generation'),
     'log', coalesce((
@@ -682,6 +771,8 @@ $$;
 -- -------------------------------------------------------------------------------------
 revoke all on function private.active_grant(uuid, timestamptz)              from public, anon, authenticated, service_role;
 revoke all on function private.grant_usage(uuid, text)                      from public, anon, authenticated, service_role;
+revoke all on function private.failed_starts(uuid, timestamptz, uuid, interval) from public, anon, authenticated, service_role;
+revoke all on function private.finish_generation_start()                    from public, anon, authenticated, service_role;
 revoke all on function private.access_state(uuid)                           from public, anon, authenticated, service_role;
 revoke all on function private.grant_trial_on_register()                    from public, anon, authenticated, service_role;
 revoke all on function private.admin_user(text)                             from public, anon, authenticated, service_role;
@@ -701,11 +792,14 @@ grant execute on function public.get_my_access_v2() to authenticated;
 grant execute on function public.get_plans()        to authenticated;
 grant execute on function public.start_text_generation_v2(uuid, uuid, integer, integer, integer) to service_role;
 
+commit;
+
 -- =====================================================================================
 -- Откат (вручную, одной транзакцией). Удаляет только объекты этой миграции; выдачи и журнал теряются.
 -- Перед откатом вернуть analyze-pages на start_text_generation и клиента на v59/v60.
 --
 -- begin;
+-- drop trigger notes_finish_generation_start on public.notes;
 -- drop trigger user_entitlements_trial on private.user_entitlements;
 -- drop function public.start_text_generation_v2(uuid, uuid, integer, integer, integer);
 -- drop function public.get_my_access_v2();
@@ -720,10 +814,13 @@ grant execute on function public.start_text_generation_v2(uuid, uuid, integer, i
 -- drop function private.admin_lock(uuid);
 -- drop function private.admin_user(text);
 -- drop function private.grant_trial_on_register();
+-- drop function private.finish_generation_start();
+-- drop function private.failed_starts(uuid, timestamptz, uuid, interval);
 -- drop function private.access_state(uuid);
 -- drop function private.grant_usage(uuid, text);
 -- drop function private.active_grant(uuid, timestamptz);
 -- alter table private.usage_ledger drop column grant_id;
+-- drop table private.generation_starts;
 -- drop table private.access_log;
 -- drop table private.access_grants;
 -- drop table private.plans;

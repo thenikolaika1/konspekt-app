@@ -48,6 +48,8 @@ export const REFUSALS: Record<string, [number, string]> = {
   too_many_pages: [400, "TOO_MANY_PAGES"],
   ai_paused: [503, "AI_PAUSED"],
   ai_busy: [429, "AI_BUSY"],
+  retry_limit: [429, "RETRY_LIMIT"],
+  daily_limit: [429, "DAILY_LIMIT"],
 };
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
