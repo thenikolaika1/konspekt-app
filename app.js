@@ -460,6 +460,38 @@
     );
   }
 
+  // v61.3: вход в панель владельца — только при статусе owner с сервера (это удобство, а не защита:
+  // каждую функцию панели проверяет сервер — роль, постоянный пароль панели и её сессию)
+  function ownerEntry() {
+    if (accessV2()?.status !== "owner" || account().kind !== "participant") return "";
+    return (
+      '<button class="owner-entry" data-owner-panel><span class="owner-entry-ico" aria-hidden="true">👑</span>' +
+      "<span>Панель владельца<small>Ученики, подписки, приглашения, ИИ</small></span></button>"
+    );
+  }
+  let ownerLoad = null;
+  // код и стили панели загружаются только по нажатию — ученики их не скачивают
+  function openOwnerPanel() {
+    ownerLoad =
+      ownerLoad ||
+      new Promise((resolve, reject) => {
+        const css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = "./owner.css?v=61";
+        document.head.appendChild(css);
+        const js = document.createElement("script");
+        js.src = "./js/owner.js?v=61";
+        js.onload = resolve;
+        js.onerror = () => {
+          ownerLoad = null;
+          js.remove();
+          reject(new Error("OWNER_LOAD_FAILED"));
+        };
+        document.head.appendChild(js);
+      });
+    return ownerLoad.then(() => window.K.owner.open(), () => alert("Не удалось открыть панель. Проверь подключение к интернету."));
+  }
+
   // строка на главной во время пробного периода (без всплывающих окон)
   function trialLine() {
     const a = accessV2();
@@ -969,6 +1001,7 @@
       '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id">' + accountHead() + "</div></section>" +
       accountCard() +
       accessCard() +
+      ownerEntry() +
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
       tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
@@ -1910,6 +1943,8 @@
       if (msg) msg.textContent = LOGIN_ERRORS.BUSY;
       return;
     }
+    // сессия панели владельца закрывается до выхода (на сервере она без сессии входа и так недействительна)
+    await window.K.owner?.beforeSignOut?.();
     const uid = await cloud.signOut();
     // копии облачных конспектов участника не остаются следующему пользователю устройства
     if (account().kind !== "participant") store.forget(uid);
@@ -2076,6 +2111,7 @@
     if (el("[data-cred-done]")) return credentialsDone();
     if (el("[data-login]")) return doLogin();
     if (el("[data-signout]")) return doSignOut();
+    if (el("[data-owner-panel]")) return openOwnerPanel();
     if (el("[data-guest]")) return continueAsGuest();
 
     if (el("[data-start]")) {
@@ -2345,7 +2381,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-register],[data-cred-done],[data-login],[data-signout],[data-guest]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-register],[data-cred-done],[data-login],[data-signout],[data-guest],[data-owner-panel]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],[data-lib-grade],[data-lib-subject],[data-lib-book],[data-lib-paragraph],[data-tab],.fab";
   root.addEventListener("click", (e) => {

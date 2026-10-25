@@ -432,6 +432,18 @@
   }
 
   /**
+   * Панель владельца (js/owner.js): только функции public.owner_* — каждая сама проверяет на сервере роль владельца,
+   * пароль панели и её сессию (миграция 20261026120000). Ответ — объект; отказ приходит как { error }.
+   * Повтор при сбое связи безопасен: изменяющие действия идут с идентификатором операции (request_id).
+   */
+  async function ownerRpc(fn, args) {
+    if (!/^owner_[a-z_]+$/.test(fn)) throw new Error("OWNER_BAD_CALL");
+    await ensureUser();
+    const data = await retryNetwork(() => callRpc(fn, args, "OWNER_FAILED"));
+    return data && typeof data === "object" ? data : { error: "SERVER_ERROR" };
+  }
+
+  /**
    * Аналитика (js/analytics.js): пакет событий в RPC public.track. Пользователя сервер берёт из JWT.
    * keepalive — при уходе страницы: supabase-js так не умеет, поэтому прямой запрос с последним токеном
    * (нет токена — не отправляем, события останутся в очереди до следующего запуска).
@@ -625,7 +637,7 @@
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
-    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, track,
+    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, track, ownerRpc,
     peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
     registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };

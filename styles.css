@@ -1810,3 +1810,7 @@ body.has-tabbar .fab{bottom:calc(var(--tabbar-h) + 18px)}
 .ended-back .back{width:40px;height:40px;display:flex;align-items:center;justify-content:flex-start;padding:0;color:var(--k-ink)}
 a.primary.wide,a.secondary.wide{display:flex;align-items:center;justify-content:center;text-decoration:none;box-sizing:border-box}
 a.primary.wide{color:#fff}
+/* v61.3: кнопка «Панель владельца» в профиле (видна только владельцу; сама панель — owner.css) */
+.owner-entry{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #f1e2c2;background:linear-gradient(135deg,#fffaf0,#fff);border-radius:var(--ds-r,16px);padding:14px;margin:14px 0 4px;color:var(--k-ink,#0d1747);font-weight:700;font-size:16px;text-align:left;cursor:pointer}
+.owner-entry .owner-entry-ico{width:40px;height:40px;border-radius:12px;background:#fbf2df;display:grid;place-items:center;font-size:21px}
+.owner-entry small{display:block;font-weight:500;color:var(--k-muted,#6c7696);font-size:12.5px;margin-top:2px}
