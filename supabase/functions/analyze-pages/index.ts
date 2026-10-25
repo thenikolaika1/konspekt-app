@@ -50,6 +50,8 @@ export const REFUSALS: Record<string, [number, string]> = {
   ai_busy: [429, "AI_BUSY"],
   retry_limit: [429, "RETRY_LIMIT"],
   daily_limit: [429, "DAILY_LIMIT"],
+  cooldown: [429, "COOLDOWN"],
+  ai_unavailable: [503, "AI_UNAVAILABLE"],
 };
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
