@@ -418,7 +418,8 @@
       const data = await retryNetwork(() => callRpc("get_my_access_v2", undefined, "ACCESS_FAILED"));
       return data && typeof data === "object" && typeof data.status === "string" ? data : null;
     } catch (e) {
-      if (e?.cause?.code === "PGRST202") return null; // функции нет — старая база
+      // функции нет — старая база: PostgREST отвечает PGRST202 (Could not find the function), PostgreSQL — 42883
+      if (e?.cause?.code === "PGRST202" || e?.cause?.code === "42883") return null;
       throw e;
     }
   }
