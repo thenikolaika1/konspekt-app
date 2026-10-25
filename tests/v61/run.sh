@@ -14,8 +14,15 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 # 1. сценарии сервера
 $P -d postgres -c "drop database if exists t61" -c "create database t61 template base61" >/dev/null
-$P -d t61 -v ON_ERROR_STOP=1 -1 -f "$ROOT/supabase/migrations/20261024150000_paid_access.sql" >/dev/null
+$P -d t61 -v ON_ERROR_STOP=1 -f "$ROOT/supabase/migrations/20261024150000_paid_access.sql" >/dev/null
 $P -d t61 -v ON_ERROR_STOP=1 -f "$HERE/access.test.sql"
+# 1б. защита бюджета ИИ от повторов, отзыв во время пробного (v61.1)
+$P -d postgres -c "drop database if exists bud61" -c "create database bud61 template base61" >/dev/null
+$P -d bud61 -v ON_ERROR_STOP=1 -f "$ROOT/supabase/migrations/20261024150000_paid_access.sql" >/dev/null
+$P -d bud61 -v ON_ERROR_STOP=1 -f "$HERE/budget.test.sql"
+# 1в. переход v59 → v61 на копии «как в production», ученик из v59, откат (v61.1)
+$P -d postgres -c "drop database if exists tr61" -c "create database tr61 template base61" >/dev/null
+$P -d tr61 -v ON_ERROR_STOP=1 -v mig="$ROOT/supabase/migrations/20261024150000_paid_access.sql" -f "$HERE/transition.test.sql"
 # 2. одновременные запросы
 bash "$HERE/concurrency.test.sh"
 # 3. интерфейс (Chromium)

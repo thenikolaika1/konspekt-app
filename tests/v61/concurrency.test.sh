@@ -8,7 +8,7 @@ pass=0; fail=0
 check() { if [ "$2" = "$3" ]; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1 → получено [$2], ожидалось [$3]"; fail=$((fail+1)); fi; }
 
 $P -d postgres -c "drop database if exists $DB" -c "create database $DB template base61" >/dev/null
-$P -d $DB -v ON_ERROR_STOP=1 -1 -f $ROOT/supabase/migrations/20261024150000_paid_access.sql >/dev/null
+$P -d $DB -v ON_ERROR_STOP=1 -f $ROOT/supabase/migrations/20261024150000_paid_access.sql >/dev/null
 $P -d $DB >/dev/null <<'SQL'
 update private.ai_limits set beta_starts_at = '2026-10-18 21:00+00', beta_ends_at = '2026-10-23 21:00+00', max_total_starts = 1000, total_starts = 7, max_in_flight = 3 where id;
 create function public.t_user(p_kn text) returns uuid language plpgsql as $$
@@ -89,6 +89,16 @@ after=$(grep -c "deadlock detected" "$PGLOG" </dev/null)
 check "E. 40 параллельных операций — взаимных блокировок нет" "$((after - before))" "0"
 check "E. ни одной операции не списано больше лимита выдачи" "$($P -d $DB -c "select count(*) from private.access_grants g cross join lateral private.grant_usage(g.id) u where g.ai_quota is not null and u.used > g.ai_quota")" "0"
 check "E. не больше одного consumed на note" "$($P -d $DB -c "select count(*) from (select op_key from private.usage_ledger where state='consumed' group by user_id, op_key having count(*) > 1) x")" "0"
+
+# F. v61.1: параллельные запуски не обходят суточный предел неудач (идущие запуски считаются возможными неудачами)
+$P -d $DB -c "update private.ai_limits set max_total_starts = 1000, max_in_flight = 10 where id; update private.usage_ledger set state='released', finalized_at=now() where state='reserved'; update private.generation_starts set outcome='failed', finished_at=now() where outcome is null" >/dev/null
+U6=$($P -d $DB -c "select public.t_user('KN-ZZZZZC')"); $P -d $DB -c "select private.admin_grant('KN-ZZZZZC', null, 30, 10)" >/dev/null
+N0=$($P -d $DB -c "select public.t_note('$U6')"); start $U6 $N0 0 >/dev/null; $P -d $DB -c "update public.notes set status='failed', stage='failed' where id='$N0'" >/dev/null
+for i in 1 2 3; do N=$($P -d $DB -c "select public.t_note('$U6')"); (start $U6 $N 1.5 > ${TMPDIR:-/tmp}/cF$i.out) & sleep 0.2; done; wait
+started=$(cat ${TMPDIR:-/tmp}/cF1.out ${TMPDIR:-/tmp}/cF2.out ${TMPDIR:-/tmp}/cF3.out | grep -c started)
+check "F. при 1 неудаче из 3 параллельных запусков начат только 1 (предел 2 в сутки)" "$started" "1"
+$P -d $DB -c "update public.notes set status='failed', stage='failed' where user_id='$U6' and status='processing'" >/dev/null
+check "F. неудач за сутки не больше предела" "$($P -d $DB -c "select private.failed_starts('$U6', now()-interval '24 hours') <= 2")" "t"
 
 echo "ИТОГО: $pass PASS, $fail FAIL"
 [ $fail = 0 ]

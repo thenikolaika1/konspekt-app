@@ -68,6 +68,8 @@ const ACC = {
   paid: { status: "paid", kind: "paid", plan: null, starts_at: at(-3), ends_at: at(27), paid_until: at(57), server_now: NOW, ai_quota: 20, ai_used: 5, ai_reserved: 0, ai_remaining: 15, ai_available: 15 },
   paidExpired: { status: "expired", kind: "paid", plan: null, starts_at: at(-31), ends_at: at(-1), revoked: false, server_now: NOW, ai_quota: 0, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
   revoked: { status: "expired", kind: "paid", plan: null, starts_at: at(-3), ends_at: at(0), revoked: true, server_now: NOW, ai_quota: 0, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
+  // v61.1: отозвана роль владельца — нейтральный заголовок
+  ownerRevoked: { status: "expired", kind: "owner", plan: null, starts_at: at(-30), ends_at: at(0), revoked: true, server_now: NOW, ai_quota: 0, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
   owner: { status: "owner", kind: "owner", plan: null, starts_at: at(-1), ends_at: null, server_now: NOW, ai_quota: null, ai_used: 42, ai_reserved: 0, ai_remaining: null, ai_available: null },
   legacyService: { status: "paid", kind: "legacy", legacy_source: "manual", starts_at: null, ends_at: null, server_now: NOW, ai_quota: 100, ai_used: 12, ai_reserved: 0, ai_remaining: 88, ai_available: 88 },
   legacyFF: { status: "expired", kind: "legacy", legacy_source: "beta_invite", starts_at: "2026-10-18T21:00:00Z", ends_at: "2026-10-23T21:00:00Z", server_now: NOW, ai_quota: 1, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
@@ -259,14 +261,35 @@ async function scenarios() {
     const { ctx, page } = await open(P({ ...ACC.paid, ai_used: 20, ai_remaining: 0, ai_available: 0 }));
     const t = await text(page);
     check("12. paid, генерации срока исчерпаны → «Генерации ИИ закончились», кнопка «Тарифы»", t.includes("Генерации ИИ закончились") && t.includes("Новые появятся с продлением"), t.slice(0, 300));
+    check("v61.1 грамматика: «На этот срок использовано 20 конспектов»", t.includes("На этот срок использовано 20 конспектов"), t.slice(0, 300));
     await tab(page, "photo");
     check("12. камера не открывается (сервер всё равно откажет)", !(await page.$(".scr-camera")));
     await ctx.close();
   }
+  // v61.1 грамматика: одна генерация — «использован 1 конспект»
+  {
+    const { ctx, page } = await open(P({ ...ACC.trial, ai_used: 1, ai_remaining: 0, ai_available: 0 }));
+    const t = await text(page);
+    check("v61.1 грамматика: «На этот срок использован 1 конспект»", t.includes("На этот срок использован 1 конспект") && !t.includes("использовано 1 конспект"), t.slice(0, 300));
+    await ctx.close();
+  }
+  // v61.1 справка: число генераций пробного периода не зашито в текст
+  {
+    const { ctx, page } = await open(P(ACC.trial));
+    await tab(page, "me");
+    await click(page, '[data-go="help"]', 800);
+    // ответы справки свёрнуты (<details>) — читаем весь текст экрана, а не только видимый
+    const h = await page.evaluate(() => document.querySelector("#app > .app")?.textContent || "");
+    check("v61.1 справка: «зависит от доступа — пробного периода или тарифа», без «в пробном периоде — одна»", h.includes("пробного периода или тарифа") && !h.includes("в пробном периоде — одна"), h.slice(0, 200));
+    check("v61.1 справка: объяснение RETRY_LIMIT есть", h.includes("Слишком много неудачных попыток"));
+    await ctx.close();
+  }
   // 11/13. оплаченный срок закончился; доступ отозван
-  for (const [k, title, card] of [["paidExpired", "Оплаченный доступ закончился", /Доступ закончился 1 ноября 2026/], ["revoked", "Оплаченный доступ закончился", /Доступ закрыт/]]) {
+  for (const [k, title, card] of [["paidExpired", "Оплаченный доступ закончился", /Доступ закончился 1 ноября 2026/], ["revoked", "Оплаченный доступ закончился", /Доступ закрыт/],
+                                   ["ownerRevoked", "Доступ закончился", /Доступ закрыт/]]) {
     const { ctx, page } = await open(P(ACC[k]));
-    check("13. " + k + ": «" + title + "»", (await text(page)).includes(title));
+    const h1 = await page.$eval("#app > .app h1", (n) => n.textContent).catch(() => "");
+    check("13. " + k + ": заголовок «" + title + "»", h1 === title, h1);
     await tab(page, "me");
     check("13. " + k + ": «Мой доступ» — " + card, card.test(await text(page)));
     await ctx.close();
@@ -365,6 +388,23 @@ async function scenarios() {
     const T = await T_(page);
     check("4. отказ сервера ACCESS_EXPIRED → обновлён статус и показан экран «Пробный период закончился»", T.calls.includes("startAnalysis") && t.includes("Пробный период закончился"), [T.calls.slice(-6), t.slice(0, 200)]);
     check("4. нет ошибок JS", noErr(errors.filter((e) => !/ACCESS_EXPIRED|generation\] failed/.test(e))), errors);
+    await ctx.close();
+  }
+
+  // v61.1: сервер отказал из-за предела неудачных запусков → понятный экран ошибки, статус не «закончился»
+  {
+    const png = path.join(V61, "icons", fs.readdirSync(path.join(V61, "icons")).find((f) => f.endsWith(".png")));
+    const { ctx, page, errors } = await open(P(ACC.paid, { startError: "RETRY_LIMIT" }));
+    await tab(page, "photo");
+    await page.setInputFiles("#galleryInput", png);
+    await page.waitForTimeout(1500);
+    const create = await page.$("#app > .app .camera-actions .primary");
+    if (create) await create.click();
+    await page.waitForTimeout(3500);
+    const t = await text(page);
+    check("v61.1 RETRY_LIMIT → «Слишком много неудачных попыток.» и совет попробовать завтра", t.includes("Слишком много неудачных попыток.") && t.includes("Попробуй завтра"), t.slice(0, 300));
+    check("v61.1 RETRY_LIMIT → не экран «доступ закончился»", !t.includes("закончился"));
+    check("v61.1 RETRY_LIMIT → нет ошибок JS", noErr(errors.filter((e) => !/RETRY_LIMIT|generation\] failed/.test(e))), errors);
     await ctx.close();
   }
 
