@@ -58,7 +58,7 @@
   }
 
   // отказы сервера без запуска AI (note уже failed с этим кодом)
-  const REFUSALS = ["NO_ACCESS", "LIMIT_REACHED", "ACCESS_EXPIRED", "TOO_MANY_PAGES", "AI_PAUSED", "AI_BUSY", "RETRY_LIMIT", "DAILY_LIMIT"];
+  const REFUSALS = ["NO_ACCESS", "LIMIT_REACHED", "ACCESS_EXPIRED", "TOO_MANY_PAGES", "AI_PAUSED", "AI_BUSY", "RETRY_LIMIT", "DAILY_LIMIT", "COOLDOWN", "AI_UNAVAILABLE"];
 
   /** Запуск analyze-pages. Отказ по доступу сервер уже записал в note (failed) — в списке так же, без «Создаётся…». */
   async function start(noteId, paths) {
