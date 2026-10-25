@@ -30,8 +30,22 @@ create function auth.uid() returns uuid language sql stable as $$
   select nullif(coalesce(current_setting('request.jwt.claim.sub', true),
                          current_setting('request.jwt.claims', true)::jsonb ->> 'sub'), '')::uuid
 $$;
+-- как в Supabase: jwt() — все claims запроса (aal, session_id, is_anonymous…)
+create function auth.jwt() returns jsonb language sql stable as $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb
+$$;
+-- сессии входа Supabase Auth (выход из аккаунта удаляет строку)
+create table auth.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz default now()
+);
 grant usage on schema auth to anon, authenticated, service_role;
-grant execute on function auth.uid() to anon, authenticated, service_role;
+grant execute on function auth.uid(), auth.jwt() to anon, authenticated, service_role;
+-- как в Supabase: pgcrypto в схеме extensions
+create schema extensions;
+create extension pgcrypto schema extensions;
+grant usage on schema extensions to anon, authenticated, service_role;
 
 create schema storage;
 create table storage.buckets (id text primary key, name text, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);

@@ -45,6 +45,15 @@
       return Promise.resolve(JSON.parse(JSON.stringify(T.plans || [])));
     },
     track: async (ev) => (T.tracked.push(...ev), { ok: ev.length, skipped: 0 }),
+    // v61.3: функции панели — в тестах панели идут в локальную базу через тестовый сервер (owner-ui.test.js),
+    // от имени входа T.rpcUser (claims JWT задаёт сервер); T.rpcOffline — обрыв связи
+    async ownerRpc(fn, args) {
+      call("ownerRpc:" + fn);
+      if (T.rpcOffline || T.offline) throw new Error("CONNECTION_LOST");
+      const res = await fetch("/__rpc/" + fn, { method: "POST", headers: { "content-type": "application/json", "x-test-user": T.rpcUser || "none" }, body: JSON.stringify(args || {}) });
+      if (!res.ok) throw new Error("OWNER_FAILED");
+      return res.json();
+    },
     peekUid: () => (T.kind === "signedOut" ? null : T.uid || null),
     onUser: (f) => listeners.push(f),
     getAccount: () =>
