@@ -90,15 +90,17 @@ check "E. 40 параллельных операций — взаимных бл
 check "E. ни одной операции не списано больше лимита выдачи" "$($P -d $DB -c "select count(*) from private.access_grants g cross join lateral private.grant_usage(g.id) u where g.ai_quota is not null and u.used > g.ai_quota")" "0"
 check "E. не больше одного consumed на note" "$($P -d $DB -c "select count(*) from (select op_key from private.usage_ledger where state='consumed' group by user_id, op_key having count(*) > 1) x")" "0"
 
-# F. v61.1: параллельные запуски не обходят суточный предел неудач (идущие запуски считаются возможными неудачами)
-$P -d $DB -c "update private.ai_limits set max_total_starts = 1000, max_in_flight = 10 where id; update private.usage_ledger set state='released', finalized_at=now() where state='reserved'; update private.generation_starts set outcome='failed', finished_at=now() where outcome is null" >/dev/null
+# F. параллельные запуски не обходят паузу после технических неудач (идущие запуски считаются возможными неудачами);
+#    прежние запуски из E уводятся за пределы окон (иначе сработал бы общий автостоп)
+$P -d $DB -c "update private.ai_limits set max_total_starts = 1000, max_in_flight = 10 where id; update private.usage_ledger set state='released', finalized_at=now() where state='reserved'; update private.generation_starts set outcome='failed', finished_at=now() where outcome is null; update private.generation_starts set started_at = started_at - interval '3 days', finished_at = finished_at - interval '3 days'" >/dev/null
 U6=$($P -d $DB -c "select public.t_user('KN-ZZZZZC')"); $P -d $DB -c "select private.admin_grant('KN-ZZZZZC', null, 30, 10)" >/dev/null
 N0=$($P -d $DB -c "select public.t_note('$U6')"); start $U6 $N0 0 >/dev/null; $P -d $DB -c "update public.notes set status='failed', stage='failed' where id='$N0'" >/dev/null
 for i in 1 2 3; do N=$($P -d $DB -c "select public.t_note('$U6')"); (start $U6 $N 1.5 > ${TMPDIR:-/tmp}/cF$i.out) & sleep 0.2; done; wait
 started=$(cat ${TMPDIR:-/tmp}/cF1.out ${TMPDIR:-/tmp}/cF2.out ${TMPDIR:-/tmp}/cF3.out | grep -c started)
-check "F. при 1 неудаче из 3 параллельных запусков начат только 1 (предел 2 в сутки)" "$started" "1"
+check "F. при 1 технической неудаче из 3 параллельных запусков начат только 1 (пауза после 2)" "$started" "1"
+check "F. остальные два — cooldown" "$(cat ${TMPDIR:-/tmp}/cF1.out ${TMPDIR:-/tmp}/cF2.out ${TMPDIR:-/tmp}/cF3.out | grep -c cooldown)" "2"
 $P -d $DB -c "update public.notes set status='failed', stage='failed' where user_id='$U6' and status='processing'" >/dev/null
-check "F. неудач за сутки не больше предела" "$($P -d $DB -c "select private.failed_starts('$U6', now()-interval '24 hours') <= 2")" "t"
+check "F. технических неудач за 15 минут не больше предела паузы" "$($P -d $DB -c "select private.failed_starts('$U6', now()-interval '15 minutes', 'tech') <= 2")" "t"
 
 echo "ИТОГО: $pass PASS, $fail FAIL"
 [ $fail = 0 ]

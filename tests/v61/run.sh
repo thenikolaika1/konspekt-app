@@ -22,7 +22,8 @@ $P -d bud61 -v ON_ERROR_STOP=1 -f "$ROOT/supabase/migrations/20261024150000_paid
 $P -d bud61 -v ON_ERROR_STOP=1 -f "$HERE/budget.test.sql"
 # 1в. переход v59 → v61 на копии «как в production», ученик из v59, откат (v61.1)
 $P -d postgres -c "drop database if exists tr61" -c "create database tr61 template base61" >/dev/null
-$P -d tr61 -v ON_ERROR_STOP=1 -v mig="$ROOT/supabase/migrations/20261024150000_paid_access.sql" -f "$HERE/transition.test.sql"
+RB=$(mktemp); sed -n '/^-- begin;$/,/^-- commit;$/s/^-- //p' "$ROOT/supabase/migrations/20261024150000_paid_access.sql" > "$RB"
+$P -d tr61 -v ON_ERROR_STOP=1 -v mig="$ROOT/supabase/migrations/20261024150000_paid_access.sql" -v rb="$RB" -f "$HERE/transition.test.sql"; rm -f "$RB"
 # 2. одновременные запросы
 bash "$HERE/concurrency.test.sh"
 # 3. интерфейс (Chromium)

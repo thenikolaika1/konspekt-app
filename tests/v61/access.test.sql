@@ -80,7 +80,7 @@ select t.ok('21. повтор той же note после успеха → ready
   and (select count(*) from private.usage_ledger where op_key = :'n1') = 1 and (select state from private.usage_ledger where op_key = :'n1') = 'consumed');
 select t.ok('4. вторая генерация в пробном периоде → limit_reached', t.start(:'u1', :'n2') = 'limit_reached');
 
--- неудача возвращает генерацию, но число повторов ограничено (3 запуска на 1 генерацию)
+-- неудача возвращает генерацию; технические неудачи — только короткие паузы, срок не закрывают (v61.2)
 select t.register('TESTCODE0002', 'KN-BBBBBB') as u2 \gset
 select t.note(:'u2') as m1 \gset
 select t.ok('8a. запуск 1', t.start(:'u2', :'m1') = 'started');
@@ -91,14 +91,17 @@ select t.start(:'u2', :'m1') as r8 \gset
 select t.ok('8a. повтор той же note после ошибки — started (attempts 2)', :'r8' = 'started'
   and (select attempts from private.usage_ledger where op_key = :'m1') = 2);
 select t.finish(:'m1', false);
-select t.ok('8a. 3-й запуск после 2 неудач за сутки — retry_limit (max_failed_per_day = 2)', t.start(:'u2', :'m1') = 'retry_limit');
-select t.ok('8a. отказ retry_limit не тратит генерацию и не пишет запуск', (t.me(:'u2') ->> 'ai_available')::int = 1
+select t.ok('8a. 3-й запуск после 2 технических неудач за 15 минут — cooldown (tech_pause_after = 2)', t.start(:'u2', :'m1') = 'cooldown');
+select t.ok('8a. отказ cooldown не тратит генерацию и не пишет запуск', (t.me(:'u2') ->> 'ai_available')::int = 1
   and (select count(*) from private.generation_starts where op_key = :'m1') = 2);
-update private.generation_starts set started_at = started_at - interval '25 hours', finished_at = finished_at - interval '25 hours' where op_key = :'m1';
-select t.ok('8a. через сутки — снова можно (неудач за срок 2 < 3)', t.start(:'u2', :'m1') = 'started');
+update private.generation_starts set started_at = started_at - interval '16 minutes', finished_at = finished_at - interval '16 minutes' where op_key = :'m1';
+select t.ok('8a. через 16 минут — снова можно (не через сутки)', t.start(:'u2', :'m1') = 'started');
 select t.finish(:'m1', false);
-update private.generation_starts set started_at = started_at - interval '25 hours', finished_at = finished_at - interval '25 hours' where op_key = :'m1' and started_at > now() - interval '1 hour';
-select t.ok('8a. 3 неудачи за срок — retry_limit и на следующий день (max(3, лимит 1) = 3)', t.start(:'u2', :'m1') = 'retry_limit');
+update private.generation_starts set started_at = started_at - interval '25 hours', finished_at = finished_at - interval '25 hours' where op_key = :'m1';
+select t.ok('8a. 3 технические неудачи — на следующий день started, генерация пробного цела', t.start(:'u2', :'m1') = 'started'
+  and (t.me(:'u2') ->> 'ai_available')::int = 0);
+select t.finish(:'m1', true);
+select t.ok('8a. затем успех: списана ровно 1 генерация', (t.me(:'u2') ->> 'ai_used')::int = 1);
 
 -- 5. окончание пробного периода
 select t.age(:'u1', interval '8 days');

@@ -1,5 +1,5 @@
 -- v61.1: переход v59 → v61 на копии базы «как в production» (НЕ production).
--- Запуск на базе БЕЗ миграции v61: psql -v mig=<путь к 20261024150000_paid_access.sql> -f transition.test.sql
+-- Запуск на базе БЕЗ миграции v61: psql -v mig=<путь к 20261024150000_paid_access.sql> -v rb=<блок отката> -f transition.test.sql
 \set QUIET on
 \pset tuples_only on
 \pset format unaligned
@@ -117,34 +117,8 @@ select t.finish(:'wn', true);
 
 -- ===== откат миграции (блок из файла) =====
 create table t.ledger_mid as select id, state, attempts from private.usage_ledger;
-begin;
-drop trigger notes_finish_generation_start on public.notes;
-drop trigger user_entitlements_trial on private.user_entitlements;
-drop function public.start_text_generation_v2(uuid, uuid, integer, integer, integer);
-drop function public.get_my_access_v2();
-drop function public.get_plans();
-drop function private.admin_grant_trial(text, text);
-drop function private.admin_set_owner(text, text);
-drop function private.admin_revoke(text, text, text, text);
-drop function private.admin_extend(text, text, integer, integer, text, text);
-drop function private.admin_grant(text, text, integer, integer, text, text);
-drop function private.admin_status(text);
-drop function private.admin_terms(text, integer, integer);
-drop function private.admin_lock(uuid);
-drop function private.admin_user(text);
-drop function private.grant_trial_on_register();
-drop function private.finish_generation_start();
-drop function private.failed_starts(uuid, timestamptz, uuid, interval);
-drop function private.access_state(uuid);
-drop function private.grant_usage(uuid, text);
-drop function private.active_grant(uuid, timestamptz);
-alter table private.usage_ledger drop column grant_id;
-drop table private.generation_starts;
-drop table private.access_log;
-drop table private.access_grants;
-drop table private.plans;
-drop table private.access_settings;
-commit;
+-- блок «Откат» из файла миграции как есть (run.sh извлекает его в отдельный файл: -v rb=...)
+\i :rb
 select t.ok('RB1. откат без ошибок; журнал генераций сохранён', (select count(*) from t.ledger_mid) = (select count(*) from private.usage_ledger)
   and not exists (select 1 from t.ledger_mid m join private.usage_ledger l using (id) where (m.state, m.attempts) is distinct from (l.state, l.attempts)));
 select t.ok('RB2. после отката v59 работает: служебный аккаунт — started; конспекты на месте',

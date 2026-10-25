@@ -281,7 +281,8 @@ async function scenarios() {
     // ответы справки свёрнуты (<details>) — читаем весь текст экрана, а не только видимый
     const h = await page.evaluate(() => document.querySelector("#app > .app")?.textContent || "");
     check("v61.1 справка: «зависит от доступа — пробного периода или тарифа», без «в пробном периоде — одна»", h.includes("пробного периода или тарифа") && !h.includes("в пробном периоде — одна"), h.slice(0, 200));
-    check("v61.1 справка: объяснение RETRY_LIMIT есть", h.includes("Слишком много неудачных попыток"));
+    check("v61.2 справка: объяснения COOLDOWN, AI_UNAVAILABLE, RETRY_LIMIT, DAILY_LIMIT есть",
+      ["ИИ сейчас не отвечает.", "Сервис ИИ временно недоступен.", "Слишком много попыток с нечитаемыми фото.", "На сегодня запуски ИИ закончились."].every((x) => h.includes(x)));
     await ctx.close();
   }
   // 11/13. оплаченный срок закончился; доступ отозван
@@ -391,10 +392,15 @@ async function scenarios() {
     await ctx.close();
   }
 
-  // v61.1: сервер отказал из-за предела неудачных запусков → понятный экран ошибки, статус не «закончился»
-  {
+  // v61.2: отказы защиты бюджета → понятный экран ошибки «генерация не потрачена», статус не «закончился»
+  for (const [code, what, hint] of [
+    ["COOLDOWN", "ИИ сейчас не отвечает.", "Подожди 15 минут"],
+    ["AI_UNAVAILABLE", "Сервис ИИ временно недоступен.", "возобновится само"],
+    ["RETRY_LIMIT", "Слишком много попыток с нечитаемыми фото.", "Пересними страницы"],
+    ["DAILY_LIMIT", "На сегодня запуски ИИ закончились.", "Попробуй завтра"],
+  ]) {
     const png = path.join(V61, "icons", fs.readdirSync(path.join(V61, "icons")).find((f) => f.endsWith(".png")));
-    const { ctx, page, errors } = await open(P(ACC.paid, { startError: "RETRY_LIMIT" }));
+    const { ctx, page, errors } = await open(P(ACC.paid, { startError: code }));
     await tab(page, "photo");
     await page.setInputFiles("#galleryInput", png);
     await page.waitForTimeout(1500);
@@ -402,9 +408,9 @@ async function scenarios() {
     if (create) await create.click();
     await page.waitForTimeout(3500);
     const t = await text(page);
-    check("v61.1 RETRY_LIMIT → «Слишком много неудачных попыток.» и совет попробовать завтра", t.includes("Слишком много неудачных попыток.") && t.includes("Попробуй завтра"), t.slice(0, 300));
-    check("v61.1 RETRY_LIMIT → не экран «доступ закончился»", !t.includes("закончился"));
-    check("v61.1 RETRY_LIMIT → нет ошибок JS", noErr(errors.filter((e) => !/RETRY_LIMIT|generation\] failed/.test(e))), errors);
+    check("v61.2 " + code + " → «" + what + "», «" + hint + "», «генерация не потрачена»", t.includes(what) && t.includes(hint) && /генерация не потрачена/i.test(t), t.slice(0, 300));
+    check("v61.2 " + code + " → не экран «доступ закончился»", !t.includes("закончился") || code === "DAILY_LIMIT");
+    check("v61.2 " + code + " → нет ошибок JS", noErr(errors.filter((e) => !new RegExp(code + "|generation\\] failed").test(e))), errors);
     await ctx.close();
   }
 
