@@ -18,7 +18,9 @@
 -- сам пароль вводится уже в приложении владельцем и в SQL/логи не попадает.
 --
 -- Браузеру (authenticated) — только public.owner_* (SECURITY DEFINER, search_path = ''); каждая функция начинает
--- с проверки условий 1–4. Закрытые таблицы по-прежнему недоступны ролям API. service_role не нужен.
+-- с отказа на любом HTTP-методе, кроме POST (секреты — только в теле запроса, см. private.panel_post_only), затем
+-- проверяет условия 1–4. Закрытые таблицы по-прежнему недоступны ролям API. service_role не нужен.
+-- Старая заглушка public.redeem_beta_invite(p_code) (не вызывается ни одной версией приложения) — без права вызова.
 -- Порядок блокировок: владелец (строка owner_panel_secrets / advisory пользователя) → как в функциях admin_*.
 -- Откат — в конце файла.
 -- =====================================================================================
@@ -211,6 +213,21 @@ begin
   end if;
   return v_uid;
 end
+$$;
+
+-- Секреты панели (пароль, код установки, ключ сессии) передаются только в ТЕЛЕ POST-запроса: его PostgREST и шлюз
+-- Supabase в журнал не пишут. PostgREST разрешает вызывать функции и через GET/HEAD (аргументы — в адресе запроса,
+-- а адрес попадает в журналы), поэтому каждая функция панели первой строкой отказывает на любом методе, кроме POST:
+-- через GET панель не работает совсем, и ни один клиент не может незаметно пользоваться адресом с секретами.
+-- (Запись адреса уже отправленного GET-запроса в журнал сервер отменить не может — это делает шлюз до базы.)
+-- request.method выставляет PostgREST на каждый запрос; вне PostgREST (SQL Editor, тесты) его нет — разрешено.
+create function private.panel_post_only()
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select coalesce(nullif(pg_catalog.current_setting('request.method', true), ''), 'POST') = 'POST'
 $$;
 
 -- Новая сессия панели для владельца; возвращает ключ (только здесь и только один раз).
@@ -509,6 +526,9 @@ declare
   v_uid uuid := private.panel_owner_uid();
   v_s   private.owner_panel_secrets;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   if v_uid is null then
     return jsonb_build_object('owner', false);
   end if;
@@ -536,6 +556,9 @@ declare
   v_s   private.owner_panel_secrets;
   v_r   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   if v_uid is null then
     return jsonb_build_object('error', 'FORBIDDEN');
   end if;
@@ -573,6 +596,9 @@ declare
   v_s   private.owner_panel_secrets;
   v_r   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   if v_uid is null then
     return jsonb_build_object('error', 'FORBIDDEN');
   end if;
@@ -607,6 +633,9 @@ as $$
 declare
   v_uid uuid := auth.uid();
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   if v_uid is not null then
     update private.owner_panel_sessions ps set revoked_at = pg_catalog.now()
      where ps.user_id = v_uid and ps.token_hash = private.panel_sha256(coalesce(p_session, '')) and ps.revoked_at is null;
@@ -627,6 +656,9 @@ declare
   v_c record;
   v_n integer;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -651,6 +683,9 @@ declare
   v_s private.owner_panel_secrets;
   v_r jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -803,6 +838,9 @@ declare
   v_s jsonb;
   v_i jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -854,6 +892,9 @@ declare
   v_off   integer := greatest(coalesce(p_offset, 0), 0);
   v_res   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -901,6 +942,9 @@ declare
   v_uid uuid;
   v_st  jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -960,6 +1004,9 @@ declare
   v_start timestamptz;
   v_per   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1068,6 +1115,9 @@ declare
   v_r   jsonb;
   v_g   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1109,6 +1159,9 @@ declare
   v_g     jsonb;
   v_start timestamptz;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1165,6 +1218,9 @@ declare
   v_g jsonb;
   v_n integer;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1217,6 +1273,9 @@ declare
   v_exp   timestamptz;
   v_id    uuid;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1271,6 +1330,9 @@ declare
   v_off   integer := greatest(coalesce(p_offset, 0), 0);
   v_res   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1317,6 +1379,9 @@ declare
   v_i private.beta_invites;
   v_m private.invite_meta;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1372,6 +1437,9 @@ as $$
 declare
   v_c record;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1395,6 +1463,9 @@ declare
   v_off   integer := greatest(coalesce(p_offset, 0), 0);
   v_res   jsonb;
 begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
   select * into v_c from private.panel_check(p_session);
   if v_c.o_err is not null then
     return jsonb_build_object('error', v_c.o_err);
@@ -1447,6 +1518,13 @@ revoke all on function
   public.owner_invite_create(text, uuid, text, integer), public.owner_invites(text, text, integer, integer),
   public.owner_invite_revoke(text, uuid, uuid), public.owner_ai(text), public.owner_history(text, integer, integer)
   from public, anon, authenticated, service_role;
+
+revoke all on function private.panel_post_only() from public, anon, authenticated, service_role;
+
+-- Заглушка v58 public.redeem_beta_invite(p_code) принимает код приглашения, но ни одна версия приложения её не
+-- вызывает (активация кода — только регистрацией через Edge Function). Вызов через GET положил бы код в адрес запроса,
+-- поэтому право вызова у ролей API снимается. Тело функции не меняется; откат — grant ниже, в блоке «Откат».
+revoke execute on function public.redeem_beta_invite(text) from public, anon, authenticated;
 
 grant execute on function
   public.owner_panel_state(), public.owner_panel_setup(text, text), public.owner_unlock(text), public.owner_lock(text),
@@ -1513,6 +1591,8 @@ commit;
 -- drop function private.panel_sha256(text);
 -- drop function private.panel_normalize(text);
 -- drop function private.panel_random(integer, text);
+-- drop function private.panel_post_only();
+-- grant execute on function public.redeem_beta_invite(text) to authenticated;
 -- alter table private.access_log alter column actor set default session_user;
 -- drop table private.invite_meta;
 -- drop table private.owner_requests;

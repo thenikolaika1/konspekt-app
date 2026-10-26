@@ -66,6 +66,7 @@ check "M6. повторный запуск: число объектов то ж�
 check "M7. функции v61.2 не изменены (start_text_generation_v2, admin_grant/extend/revoke, get_my_access_v2)" \
   "$($P -d mp0 -c "select md5(string_agg(pg_get_functiondef(p.oid), '' order by p.proname)) from pg_proc p where p.proname in ('start_text_generation_v2','admin_grant','admin_extend','admin_revoke','get_my_access_v2','access_state','register_invite_begin','register_invite_finish')")" \
   "$($P -d mp4 -c "select md5(string_agg(pg_get_functiondef(p.oid), '' order by p.proname)) from pg_proc p where p.proname in ('start_text_generation_v2','admin_grant','admin_extend','admin_revoke','get_my_access_v2','access_state','register_invite_begin','register_invite_finish')")"
+check "M8. после миграции redeem_beta_invite недоступна ролям API, тело функции то же" "$($P -d mp4 -c "select has_function_privilege('authenticated', 'public.redeem_beta_invite(text)', 'execute')")" "f"
 check "M8. журнал из SQL Editor по-прежнему пишет actor = postgres" "$($P -d mp4 -c "select (private.admin_extend('KN-SAAAAA', null, 7, 1) is not null)::text; select actor from private.access_log order by id desc limit 1" | tail -1)" "postgres"
 
 # 3. откат (блок из файла миграции как есть)
@@ -74,6 +75,7 @@ S2=$(snap mp4)
 $P -d mp4 -v ON_ERROR_STOP=1 -f "$TMP/rb.sql" >/dev/null 2>&1; check "M9. откат без ошибок" "$?" "0"
 check "M9. после отката объектов панели нет" "$($P -d mp4 -c "$OBJ")" "0"
 check "M9. выдачи, приглашения, журнал, аккаунты остались" "$(snap mp4)" "$S2"
+check "M9. право на старую redeem_beta_invite возвращено откатом (как в v59)" "$($P -d mp4 -c "select has_function_privilege('authenticated', 'public.redeem_beta_invite(text)', 'execute')")" "t"
 check "M9. регистрация по коду и v61 работают после отката" "$($P -d mp4 -c "select public.register_invite_begin('SEEDCODE0001', 'KN-SBAAAA', repeat('b', 64)) ->> 'result'")" "reserved"
 for d in mp0 mp1 mp2 mp3 mp4 mp5; do $P -d postgres -c "drop database if exists $d" >/dev/null; done
 rm -rf "$TMP"

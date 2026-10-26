@@ -91,7 +91,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       const fn = p0.slice(7);
       const claims = USERS[req.headers["x-test-user"]] || USERS.none;
-      rpcLog.push({ fn, body });
+      rpcLog.push({ fn, body, method: req.method, url: req.url });
       execFile("psql", [...PSQL, "-d", DB, "-v", "fn=" + fn, "-v", "args=" + (body || "{}"), "-v", "claims=" + JSON.stringify(claims)],
         (err, out, errOut) => {
           if (err) return res.writeHead(500).end(String(errOut));
@@ -133,7 +133,9 @@ async function open(T, viewport = { width: 390, height: 844 }, opts = {}) {
     } catch (e) {}
   });
   const errors = [];
+  const consoleLog = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("console", (m) => consoleLog.push(m.type() + " " + m.text()));
   page.on("dialog", (d) => d.accept());
   await page.goto("http://127.0.0.1:" + PORT + "/");
   await page.waitForTimeout(1600);
@@ -143,7 +145,7 @@ async function open(T, viewport = { width: 390, height: 844 }, opts = {}) {
     await b.click();
     await page.waitForTimeout(300);
   }
-  return { ctx, page, errors, blocked };
+  return { ctx, page, errors, blocked, consoleLog };
 }
 const appText = (p) => p.evaluate(() => document.querySelector("#app > .app")?.innerText || "");
 const owText = (p) => p.evaluate(() => document.querySelector("#owner-root")?.innerText || "");
@@ -430,6 +432,13 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     await wait(page, 1500);
     check("U40. выход из аккаунта: сессия панели закрыта на сервере, панель закрыта, кнопки нет", ownerSessionValid() === "0"
       && !(await page.$eval("#owner-root", (n) => !n.hidden)) && !(await appText(page)).includes("Панель владельца"));
+    // секреты не уходят ни в консоль браузера, ни в аналитику, ни в адреса запросов
+    const tracked = await page.evaluate(() => JSON.stringify(window.__T.tracked || []));
+    const said = o.consoleLog.join("\n");
+    check("U43. пароль и ключи сессии панели не попадают в консоль браузера и в события аналитики",
+      ![PW, PW.replace(/-/g, ""), PW.toLowerCase()].some((v) => said.includes(v) || tracked.includes(v)) && !/[0-9a-f]{64}/.test(said + tracked), { said: said.slice(0, 300) });
+    check("U43. все вызовы панели — POST на сервер, аргументы только в теле (адреса без параметров)", rpcLog.length > 20 && rpcLog.every((x) => x.method === "POST" && !x.url.includes("?")),
+      rpcLog.filter((x) => x.method !== "POST" || x.url.includes("?")).slice(0, 3));
     check("U40. sessionStorage очищен", !(await page.evaluate(() => JSON.stringify({ ...sessionStorage }).includes("kn-owner-panel"))));
     check("U24. владелец: нет ошибок JS за весь сценарий", !o.errors.length, o.errors);
     check("U24. ни одного запроса к *.supabase.co (только локальный сервер)", !o.blocked.length, o.blocked);

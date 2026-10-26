@@ -31,7 +31,7 @@ end $$;
 -- вход Supabase Auth: строка сессии входа; claims — как в JWT
 create function t.login(p_uid uuid) returns uuid language sql as
   $$ insert into auth.sessions (user_id) values (p_uid) returning id $$;
-create table t.ctx (uid uuid, sid uuid, anon boolean default false);
+create table t.ctx (uid uuid, sid uuid, anon boolean default false, method text);  -- method: как request.method от PostgREST
 insert into t.ctx values (null, null);
 create function t.as_user(p_uid uuid, p_sid uuid, p_anon boolean default false) returns void language sql as
   $$ update t.ctx set uid = p_uid, sid = p_sid, anon = p_anon $$;
@@ -42,6 +42,7 @@ begin
   select * into c from t.ctx;
   perform set_config('request.jwt.claims', jsonb_build_object('sub', c.uid, 'session_id', c.sid, 'role', 'authenticated',
                                                               'is_anonymous', c.anon, 'aal', 'aal1')::text, true);
+  perform set_config('request.method', coalesce(c.method, ''), true);
   set local role authenticated;
   execute p_sql into r;
   reset role;
@@ -433,6 +434,60 @@ select t.ok('D35. нет паролей, кодов, ключей сессий �
 select t.ok('D35. нет служебных адресов, bcrypt и sha256-отпечатков', not exists (select 1 from t.responses where r like '%konspekt.invalid%'
   or r ~ '\$2[aby]\$' or r ~ '[0-9a-f]{64}' or r like '%encrypted_password%' or r like '%code_hash%' or r like '%token_hash%'),
   (select left(r, 200) from t.responses where r like '%konspekt.invalid%' or r ~ '\$2[aby]\$' or r ~ '[0-9a-f]{64}' limit 1));
+
+-- ======================================================================
+-- H. HTTP: секреты только в теле POST — через GET/HEAD функции панели ничего не выполняют (даже с верными секретами)
+-- ======================================================================
+select (select failed_count from private.owner_panel_secrets where user_id = :'uo') as fc0,
+       (select count(*) from private.owner_panel_sessions where user_id = :'uo') as ns0,
+       (select count(*) from private.owner_panel_sessions where user_id = :'uo' and revoked_at is not null) as nr0,
+       (select count(*) from private.access_grants) as ng0, (select count(*) from private.beta_invites) as ni0,
+       (select count(*) from private.owner_requests) as nq0 \gset
+create table t.calls (f text);
+insert into t.calls select x from unnest(array[
+  'select public.owner_panel_state()',
+  'select public.owner_panel_setup(''ABCD-EFGH-JKMN'', ' || t.q(:'pw2') || ')',
+  'select public.owner_unlock(' || t.q(:'pw2') || ')',
+  'select public.owner_lock($S)', 'select public.owner_lock_all($S)',
+  'select public.owner_change_password($S, ' || t.q(:'pw2') || ', ''Q7MZK-3HRWD-X9TNP-C4YGJ'')',
+  'select public.owner_overview($S)', 'select public.owner_students($S, ''SA'')', 'select public.owner_student($S, ''KN-SAAAAA'')',
+  'select public.owner_preview($S, ''KN-SBAAAA'', ''grant'', 30, 20)',
+  'select public.owner_grant($S, gen_random_uuid(), ''KN-SBAAAA'', 30, 20)',
+  'select public.owner_extend($S, gen_random_uuid(), ''KN-SAAAAA'', 30, 20)',
+  'select public.owner_revoke($S, gen_random_uuid(), ''KN-SAAAAA'', null, 1)',
+  'select public.owner_invite_create($S, gen_random_uuid(), ''через GET'', 7)', 'select public.owner_invites($S)',
+  'select public.owner_invite_revoke($S, gen_random_uuid(), gen_random_uuid())',
+  'select public.owner_ai($S)', 'select public.owner_history($S)']) x;
+update t.ctx set method = 'GET';
+create table t.get_r as select f, t.p(f) r from t.calls;
+update t.ctx set method = 'HEAD';
+create table t.head_r as select f, t.p(f) r from t.calls;
+update t.ctx set method = 'POST';
+select t.ok('H1. все 18 функций панели через GET → METHOD_NOT_ALLOWED (верный пароль и ключ сессии не помогают)',
+  (select count(*) from t.get_r) = 18 and (select bool_and(r = '{"error": "METHOD_NOT_ALLOWED"}'::jsonb) from t.get_r),
+  (select string_agg(f || ' → ' || r::text, '; ') from t.get_r where r <> '{"error": "METHOD_NOT_ALLOWED"}'::jsonb));
+select t.ok('H2. все 18 через HEAD → METHOD_NOT_ALLOWED', (select bool_and(r = '{"error": "METHOD_NOT_ALLOWED"}'::jsonb) from t.head_r),
+  (select string_agg(f || ' → ' || r::text, '; ') from t.head_r where r <> '{"error": "METHOD_NOT_ALLOWED"}'::jsonb));
+select t.ok('H3. через GET/HEAD ничего не выполнилось: ни попыток пароля, ни новых/закрытых сессий, ни выдач, ни кодов, ни записей операций',
+  (select failed_count from private.owner_panel_secrets where user_id = :'uo') = :fc0
+  and (select count(*) from private.owner_panel_sessions where user_id = :'uo') = :ns0
+  and (select count(*) from private.owner_panel_sessions where user_id = :'uo' and revoked_at is not null) = :nr0
+  and (select count(*) from private.access_grants) = :ng0 and (select count(*) from private.beta_invites) = :ni0
+  and (select count(*) from private.owner_requests) = :nq0);
+select t.ok('H4. ответ отказа не содержит аргументов (ни пароля, ни ключа)', not exists (select 1 from t.get_r, t.secrets s
+  where s.value <> '' and position(s.value in r::text) > 0));
+select t.ok('H5. POST (и вызов вне PostgREST) работает как раньше: та же сессия, тот же пароль', t.p('select public.owner_overview($S)') ? 'students'
+  and t.api('select public.owner_unlock(' || t.q(:'pw2') || ')') ->> 'result' = 'ok');
+update t.ctx set method = null;
+select t.ok('H6. старая заглушка redeem_beta_invite(p_code) (код приглашения) больше не вызывается ролями API',
+  t.api('select public.redeem_beta_invite(''ABCD-EFGH-JKMN'')') ->> 'sqlerror' = '42501'
+  and not has_function_privilege('authenticated', 'public.redeem_beta_invite(text)', 'execute')
+  and not has_function_privilege('anon', 'public.redeem_beta_invite(text)', 'execute'));
+select t.ok('H7. функции с секретами в аргументах (пароль, код, ключ сессии) — только owner_* и все с проверкой метода', not exists (
+  select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))
+     and p.proargnames[1:p.pronargs] && array['p_password', 'p_new_password', 'p_current_password', 'p_setup_code', 'p_session', 'p_code']
+     and (p.proname not like 'owner\_%' or pg_get_functiondef(p.oid) not like '%panel_post_only()%')));
 
 -- отзыв роли владельца — панель закрыта сразу
 select t.ok('A10. отзыв роли владельца → FORBIDDEN даже с действующей сессией', (select private.admin_revoke('KN-WAAAAA', 'тест', 'owner') ->> 'result') = 'revoked'

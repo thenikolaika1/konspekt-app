@@ -36,3 +36,5 @@ $P -d ow61 -v ON_ERROR_STOP=1 -f "$HERE/owner.test.sql"
 bash "$HERE/owner-migration.test.sh"
 bash "$HERE/owner-concurrency.test.sh"
 node "$HERE/owner-ui.test.js"
+# 5. функции панели через настоящий PostgREST (если есть исполняемый файл: PGRST_BIN=/путь/postgrest), иначе SKIP
+node "$HERE/owner-pgrst.test.js"
