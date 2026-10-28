@@ -1,2 +1,9 @@
 ui-audit-screens/
 node_modules/
+# v62: закрытые файлы библиотеки и резервные копии — никогда не в репозиторий
+library-seed*.sql
+seed-noexpect.sql
+*.source.js
+konspekt-v62/
+*.dump
+konspekt-backup-*/

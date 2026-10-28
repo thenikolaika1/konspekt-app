@@ -109,11 +109,39 @@ FUNCL="select n.nspname || '.' || p.proname || '(' || pg_get_function_identity_a
 FUNCS="select md5(string_agg(n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || md5(p.prosrc) || p.prosecdef || coalesce(array_to_string(p.proconfig, ','), '') || coalesce(array_to_string(p.proacl, ','), ''), '|' order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private', 'analytics')"
 SNAP="$ROOT/supabase/release/v62-snapshot.sql"
 $P -d $DB -f "$SNAP" > "$OUT/snap-before.txt"
+# структура: таблицы (RLS, действующие права на таблицы — пустой ACL = права по умолчанию владельца), политики, права на колонки
+RELS="select md5(string_agg(x, '|' order by x)) from (
+  select n.nspname || '.' || c.relname || ':' || c.relkind::text || ':' || c.relrowsecurity || ':' || array_to_string(coalesce(c.relacl, acldefault('r', c.relowner)), ',') x
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private', 'analytics') and c.relkind in ('r', 'v', 'm', 'p') union all
+  select 'policy ' || schemaname || '.' || tablename || ':' || policyname || ':' || cmd || ':' || array_to_string(roles, ',') || ':' || coalesce(qual, '') || ':' || coalesce(with_check, '')
+    from pg_policies where schemaname in ('public', 'private', 'analytics', 'storage') union all
+  select 'col ' || table_schema || '.' || table_name || '.' || column_name || ':' || grantee || ':' || privilege_type
+    from information_schema.column_privileges where table_schema in ('public', 'private', 'analytics') and grantee in ('anon', 'authenticated', 'service_role')) z"
+R0=$($P -d $DB -c "$RELS"); RELL=$(echo "$RELS" | sed -e 's/^select md5(string_agg(x, .|. order by x)) from (/select x from (/' -e 's/) z$/) z order by x/'); $P -d $DB -c "$RELL" > "$OUT/r0.txt"
 D0=$($P -d $DB -c "$DATA"); S0=$($P -d $DB -c "$STATE"); F0=$($P -d $DB -c "$FUNCS"); $P -d $DB -c "$FUNCL" > "$OUT/f0.txt"
 
 # ---------- 1. резервная копия до миграции (как backup-before-v62.ps1: полная и только данные) ----------
 pg_dump $PGD -d $DB -Fc -f "$OUT/full.dump" && pg_dump $PGD -d $DB -Fc --data-only -t 'public.*' -t 'private.*' -t 'analytics.*' -t auth.users -f "$OUT/data.dump"
 check "1. резервные копии сделаны и читаются" "$(pg_restore -l "$OUT/full.dump" >/dev/null && pg_restore -l "$OUT/data.dump" >/dev/null && echo ok)" "ok"
+# та же проверка структуры, что в backup-before-v62.ps1 (те же выражения): функции, политики, RLS в копии = в базе
+LIVE=$($P -d $DB -c "select (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public','private','analytics') and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')) || '|' || (select count(*) from pg_policies where schemaname in ('public','private','analytics')) || '|' || (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relrowsecurity and c.relkind in ('r','p') and n.nspname in ('public','private','analytics'))")
+pg_restore -l "$OUT/full.dump" > "$OUT/toc.txt"
+TOCS="$(grep -cE '^[0-9]+; [0-9]+ [0-9]+ FUNCTION (public|private|analytics) ' "$OUT/toc.txt")|$(grep -cE '^[0-9]+; [0-9]+ [0-9]+ POLICY (public|private|analytics) ' "$OUT/toc.txt")|$(grep -cE '^[0-9]+; [0-9]+ [0-9]+ ROW SECURITY (public|private|analytics) ' "$OUT/toc.txt")"
+check "1. копия: функций, политик RLS, таблиц с RLS — столько же, сколько в базе ($LIVE)" "$TOCS" "$LIVE"
+MISS=0; for need in 'TABLE DATA private access_grants' 'TABLE DATA private ai_limits' 'TABLE DATA private access_settings' 'TABLE DATA public notes' \
+  'TABLE DATA auth users' 'ACL public FUNCTION get_my_access_v2()' 'ACL public TABLE notes' 'POLICY public notes notes: select own'; do
+  grep -qF -- " $need " "$OUT/toc.txt" || { MISS=$((MISS+1)); echo "  нет в копии: $need"; }
+done
+check "1. в копии есть данные выдач, бюджета, настроек, конспектов, пользователей; права и политики" "$MISS" "0"
+
+# ---------- 1б. пробный прогон (v62-dryrun.sql): все шаги и самопроверки, затем rollback ----------
+DRY="$ROOT/supabase/release/v62-dryrun.sql"
+(cd "$ROOT" && node tools/make-dryrun.mjs supabase/migrations/20261028120000_v62_paid_library.sql "$OUT/dry.sql" 2>/dev/null)
+check "1б. v62-dryrun.sql пересобирается из миграции байт в байт (файлы не разошлись)" "$(cmp -s "$OUT/dry.sql" "$DRY" && echo same)" "same"
+OUTD=$($P -d $DB -v ON_ERROR_STOP=1 -f "$DRY" 2>&1); RC=$?
+check "1б. пробный прогон: все шаги и самопроверки прошли, в конце ROLLBACK" "$RC/$(echo "$OUTD" | grep -c 'ПРОБНЫЙ ПРОГОН пройден')" "0/1"
+check "1б. после пробного прогона база как была: данные, функции, таблицы и права, нет таблицы текстов" \
+  "$($P -d $DB -c "$DATA")|$($P -d $DB -c "$FUNCS")|$($P -d $DB -c "$RELS")|$($P -d $DB -c "select to_regclass('private.library_paragraphs') is null")" "$D0|$F0|$R0|t"
 
 # ---------- 2. миграция ----------
 OUTM=$($P -d $DB -v ON_ERROR_STOP=1 -f "$M/20261028120000_v62_paid_library.sql" 2>&1); RC=$?
@@ -186,6 +214,11 @@ pg_restore $PGD -d ${DB}r --exit-on-error "$OUT/full.dump" 2>"$OUT/restore.err";
 check "5. полная копия восстанавливается в пустую базу" "$RC" "0"; [ $RC = 0 ] || head -3 "$OUT/restore.err"
 check "5. восстановленная база = состояние до миграции: данные" "$($P -d ${DB}r -c "$DATA")" "$D0"
 check "5. восстановленная база = состояние до миграции: функции, права, search_path" "$($P -d ${DB}r -c "$FUNCS")" "$F0"
+check "5. восстановленная база = состояние до миграции: таблицы, RLS, политики, права на таблицы и колонки" "$($P -d ${DB}r -c "$RELS")" "$R0"
+[ "$($P -d ${DB}r -c "$RELS")" = "$R0" ] || diff "$OUT/r0.txt" <($P -d ${DB}r -c "$RELL") | grep "^[<>]" | sort -k2 | head -6
+check "5. восстановлены выдачи, конспекты, бюджет, настройки и панель владельца (число строк)" \
+  "$($P -d ${DB}r -c "select (select count(*) from private.access_grants) || '/' || (select count(*) from public.notes) || '/' || (select max_total_starts || ':' || total_starts from private.ai_limits) || '/' || (select count(*) from private.access_settings) || '/' || (select count(*) from private.owner_panel_secrets)")" \
+  "2/9/40:10/1/0"
 [ "$($P -d ${DB}r -c "$FUNCS")" = "$F0" ] || diff "$OUT/f0.txt" <($P -d ${DB}r -c "$FUNCL") | head -6
 check "5. в восстановленной базе нет v62 (таблицы текстов)" "$($P -d ${DB}r -c "select to_regclass('private.library_paragraphs') is null")" "t"
 $P -d ${DB}r -v ON_ERROR_STOP=1 -c "truncate private.access_log" >/dev/null

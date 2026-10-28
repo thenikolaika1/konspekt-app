@@ -75,6 +75,11 @@ try {
   }
   $live = Live-Counts
   Say ('Подключение есть. Пользователей: ' + $live['auth.users'] + ', конспектов: ' + $live['public.notes'])
+  # структура приложения в базе: функции (без функций расширений), политики RLS, таблицы с включённым RLS
+  $qs = "select (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public','private','analytics') and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')) || '|' || (select count(*) from pg_policies where schemaname in ('public','private','analytics')) || '|' || (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relrowsecurity and c.relkind in ('r','p') and n.nspname in ('public','private','analytics'))"
+  $struct = (& $psql -X -w -A -t -v ON_ERROR_STOP=1 -c $qs | Select-Object -First 1)
+  if ($LASTEXITCODE -ne 0 -or $struct -notmatch '^\d+\|\d+\|\d+$') { Fail 'не удалось прочитать структуру базы' }
+  $liveF, $livePol, $liveRls = $struct.Split('|') | ForEach-Object { [int]$_ }
 
   # 2. копии
   Say 'Полная копия…'
@@ -110,7 +115,20 @@ foreach ($dump in @($full, $data)) {
     if ($have -lt $lo -or $have -gt $hi) { $ok = $false; Say ("  РАСХОЖДЕНИЕ " + (Split-Path $dump -Leaf) + ": $t — в копии $have, в базе " + $live[$t]) 'Red' }
   }
 }
-$listFull = (& $pgRestore -l $full | Measure-Object -Line).Lines
+$toc = & $pgRestore -l $full
+if ($LASTEXITCODE -ne 0) { Fail ('pg_restore не читает оглавление ' + $full) }
+$listFull = ($toc | Measure-Object -Line).Lines
+# 4. структура в полной копии = в базе: функции, политики, RLS; права (ACL) на функции и таблицы приложения на месте
+$tocF = @($toc | Where-Object { $_ -match '^\d+; \d+ \d+ FUNCTION (public|private|analytics) ' }).Count
+$tocPol = @($toc | Where-Object { $_ -match '^\d+; \d+ \d+ POLICY (public|private|analytics) ' }).Count
+$tocRls = @($toc | Where-Object { $_ -match '^\d+; \d+ \d+ ROW SECURITY (public|private|analytics) ' }).Count
+$tocAcl = @($toc | Where-Object { $_ -match '^\d+; \d+ \d+ ACL (public|private|analytics) ' }).Count
+Say ("Структура: функций $tocF из $liveF, политик RLS $tocPol из $livePol, таблиц с RLS $tocRls из $liveRls, записей прав $tocAcl")
+if ($tocF -ne $liveF -or $tocPol -ne $livePol -or $tocRls -ne $liveRls) { $ok = $false; Say '  РАСХОЖДЕНИЕ структуры: в копии не все функции, политики или RLS' 'Red' }
+foreach ($need in @('TABLE DATA private access_grants', 'TABLE DATA private ai_limits', 'TABLE DATA private access_settings', 'TABLE DATA public notes',
+                    'TABLE DATA auth users', 'ACL public FUNCTION get_my_access_v2()', 'ACL public TABLE notes', 'POLICY public notes notes: select own')) {
+  if (-not ($toc | Where-Object { $_ -match ('^\d+; \d+ \d+ ' + [regex]::Escape($need) + ' ') })) { $ok = $false; Say ("  НЕТ В КОПИИ: " + $need) 'Red' }
+}
 if (-not $ok) { Fail 'копия неполная — выпуск не начинать, сообщите о проблеме' }
 $busy = @($tables | Where-Object { $live[$_] -ne $after[$_] })
 if ($busy.Count) { Say ('Во время копирования менялись: ' + ($busy -join ', ') + ' — копия согласована, это нормально.') 'Yellow' }
@@ -121,9 +139,10 @@ $sum = @(
   "konspekt-full.dump  $((Get-Item $full).Length) байт  SHA256 $h1  (объектов: $listFull)",
   "konspekt-data.dump  $((Get-Item $data).Length) байт  SHA256 $h2",
   ('Строк в копии: ' + (($tables | ForEach-Object { "$_ $($inCopy[$_])" }) -join ', ')),
+  "Структура в копии: функций $tocF, политик RLS $tocPol, таблиц с RLS $tocRls, записей прав $tocAcl (как в базе)",
   'Хранить вне репозитория, не пересылать: в копии данные пользователей. Вторую копию папки — на флешку или в личное облако.',
-  'Восстановление всей базы (в новый проект Supabase или свой PostgreSQL 17): pg_restore --no-owner --no-acl -d <база> konspekt-full.dump',
-  'Точечное восстановление данных в существующую схему: pg_restore --data-only -n <схема> -t <таблица> -d <база> konspekt-data.dump (в пустую таблицу)'
+  'Проверка копии на своём компьютере: pg_restore -d <пустая база PostgreSQL 17> konspekt-full.dump (с правами и RLS); в production не восстанавливать без решения владельца',
+  'Точечное восстановление данных одной таблицы: pg_restore --data-only -n <схема> -t <таблица> -d <база> konspekt-data.dump (в очищенную таблицу)'
 )
 $sum | Set-Content -Path (Join-Path $OutDir 'README.txt') -Encoding UTF8
 Say ''
