@@ -48,51 +48,77 @@ R = ceil(21 × 1,5) = 32; свободно = 180 − 32 − 10 = 138 → мож�
 
 ## Выпуск (одно окно)
 
-**Шаг 0. Резервная копия** (обязательно, Supabase Free: автоматических копий нет). PowerShell, в папке репозитория:
-```
-powershell -ExecutionPolicy Bypass -File .\supabase\release\backup-before-v58.ps1 -DbHost aws-0-XX.pooler.supabase.com
-```
-Скрипт ничего не меняет и проверяет, что копия полная. Сохрани обе копии и SHA-256 вне репозитория.
-Закрытый файл с текстами `library-seed.sql` в репозиторий не входит. Если его нет — собери заново на компьютере (папка репозитория):
-```
-git show 53d3203:js/library-catalog.js > ..\library-catalog.source.js
-node tools/library-split.mjs ..\library-catalog.source.js --index js/library-index.js --seed ..\library-seed.sql
-```
-`js/library-index.js` после этого не должен измениться (`git status` — без изменений). Оба файла держи вне репозитория.
+Все команды к базе — через **psql** (PostgreSQL 17 Command Line Tools, те же, что для резервной копии). Строка подключения —
+Dashboard → Connect → Session pooler; пароль psql спросит сам (не вставлять в команду и не сохранять в файлах).
+Ниже `DB` — это строка `"host=aws-0-XX.pooler.supabase.com port=5432 dbname=postgres user=postgres.ohdeykbkgimvwstkwuuf sslmode=require"`.
+Все файлы, кроме миграции, — в папке **вне репозитория** (например, `Документы\konspekt-v62`).
 
-**Шаг 1. Предпроверка (только чтение, SQL Editor):**
-```sql
-select to_regclass('private.owner_panel_secrets') is not null as v613,     -- true: панель v61.3 применена
-       to_regclass('private.library_paragraphs') is null as no_v62,        -- true: v62 ещё не применялась
-       (select count(*) from private.plans where active) as active_plans,  -- 0
-       (select max_total_starts || '/' || total_starts || '/' || max_in_flight from private.ai_limits) as ai;  -- запиши: бюджет/израсходовано/1
+**Шаг 0. Резервная копия** (обязательно: в Supabase Free автоматических копий нет). PowerShell, в папке репозитория:
+```
+powershell -ExecutionPolicy Bypass -File .\supabase\release\backup-before-v62.ps1 -DbHost aws-0-XX.pooler.supabase.com
+```
+Скрипт ничего не меняет: делает полную копию и копию данных, сверяет число строк (в том числе выдачи, журнал, генерации,
+панель) и пишет SHA-256 в README.txt. Проверка: в конце «Копия полная». Восстановление из такой копии проверено на тестовой
+базе (вся база и одна таблица) — команды в README.txt копии.
+
+**Шаг 0б. Закрытый файл с текстами** (на компьютере, в папке репозитория, ветка v62; ~1 МБ):
+```
+mkdir ..\konspekt-v62
+git show 53d3203:js/library-catalog.js > ..\konspekt-v62\library-catalog.source.js
+node tools/library-split.mjs ..\konspekt-v62\library-catalog.source.js --index js/library-index.js --seed ..\konspekt-v62\library-seed.sql --expect supabase/release/v62-library-manifest.tsv
+```
+Проверка: в конце «параграфов 77 (history: 26, physics: 51); контрольные суммы каждого параграфа встроены»; `git status` —
+без изменений. Исходник — тот самый каталог, что уже лежит в публичной истории git (коммит `53d3203`), манифест
+`supabase/release/v62-library-manifest.tsv` — только контрольные суммы (sha256) 77 текстов, самих текстов в нём нет.
+Если генератор пишет «манифест не совпадает с исходником» — исходник не тот, дальше не идти.
+Файл `library-seed.sql` закрытый: **не коммитить, не вставлять в чаты, не публиковать**; после выпуска его можно удалить
+(он снова собирается этой же командой).
+
+**Шаг 1. Предпроверка и снимок данных (только чтение):**
+```
+psql DB -X -A -t -c "select to_regclass('private.owner_panel_secrets') is not null, to_regclass('private.library_paragraphs') is null, (select count(*) from private.plans where active), (select max_total_starts||'/'||total_starts||'/'||max_in_flight from private.ai_limits)"
+```
+Ожидается `t|t|0|40/10/1` (бюджет может отличаться — запиши его). Снимок данных — сохрани вывод:
+```
+psql DB -X -A -t -f supabase/release/v62-snapshot.sql > ..\konspekt-v62\snapshot-before.txt
 ```
 
-**Шаг 2. Миграция.** SQL Editor → вставить **весь** файл `supabase/migrations/20261028120000_v62_paid_library.sql` → Run (один раз).
-Файл — одна транзакция: при любой ошибке не меняется ничего. Повторный запуск отклоняется («v62 уже применена»).
-Проверка:
-```sql
-select code, title, days, ai_quota, price_label, active from private.plans;   -- premium | Premium | 30 | 10 | 299 ₽ | true
-select budget_reserve_factor, owner_reserve_starts, budget_warn_percent from private.access_settings;  -- 1.50 | 10 | 20
-select max_total_starts || '/' || total_starts || '/' || max_in_flight from private.ai_limits;        -- как в шаге 1
-select has_table_privilege('authenticated', 'private.library_paragraphs', 'select');                  -- false
-select private.budget_state();   -- резерв: obligations = 0, если Premium ещё никому не выдан
+**Шаг 2. Миграция** (одна транзакция: при любой ошибке не меняется ничего; повторный запуск отклоняется):
 ```
-Ученики, заметки, выдачи, права, журнал, генерации и аналитика не меняются (проверено тестом на копии с данными).
-Два старых служебных аккаунта с ручным доступом не трогаются: их статус и лимит остаются прежними.
+psql DB -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261028120000_v62_paid_library.sql
+```
+Проверка — конец вывода `COMMIT`, затем:
+```
+psql DB -X -A -t -f supabase/release/v62-snapshot.sql > ..\konspekt-v62\snapshot-after.txt
+fc.exe ..\konspekt-v62\snapshot-before.txt ..\konspekt-v62\snapshot-after.txt
+psql DB -X -A -t -c "select code||'/'||days||'/'||ai_quota||'/'||price_label||'/'||active from private.plans; select max_total_starts||'/'||total_starts from private.ai_limits; select has_table_privilege('authenticated','private.library_paragraphs','select')"
+```
+Ожидается: `fc` — «различия не найдены» (ученики, конспекты, выдачи, права, журналы, генерации, аналитика, бюджет — как
+были); `premium/30/10/299 ₽/true`; бюджет как в шаге 1; `f`.
+Ошибка — ничего не изменилось; дальше не идти, прислать мне текст ошибки.
 
-**Шаг 3. Тексты в закрытую таблицу** — файл `library-seed.sql` (77 параграфов: история 26, физика 51; биология не загружается).
-Файл закрытый: **не коммитить, не вставлять в чаты, не публиковать**. Он большой (~2 МБ), поэтому через psql (те же
-PostgreSQL Command Line Tools, что для копии):
+**Шаг 3. Тексты** (одна транзакция; встроенная проверка контрольной суммы **каждого** из 77 параграфов — при любом
+расхождении загрузка откатывается целиком):
 ```
-psql "host=aws-0-XX.pooler.supabase.com port=5432 dbname=postgres user=postgres.ohdeykbkgimvwstkwuuf sslmode=require" -v ON_ERROR_STOP=1 -f library-seed.sql
+psql DB -X -v ON_ERROR_STOP=1 -f ..\konspekt-v62\library-seed.sql
 ```
-Файл повторяемый: второй запуск ничего не дублирует и не удаляет. В конце он печатает проверку — должно совпасть:
+Проверка — в выводе `NOTICE: контрольные суммы совпали: 77 параграфов`, `COMMIT` и две строки:
 ```
-history | 26 | f914c0a49a08433e54815c79eb1ddb2339089dd8501fd880f486e937c79d1c73
-physics | 51 | 2480b110d53a4f0a68cf00243b090004e88f7663da389c1aa4a79d860e23e855
+history|26|f914c0a49a08433e54815c79eb1ddb2339089dd8501fd880f486e937c79d1c73
+physics|51|2480b110d53a4f0a68cf00243b090004e88f7663da389c1aa4a79d860e23e855
 ```
-(те же суммы получены на тестовой копии). Не совпало — сайт не публиковать, написать мне.
+Каждую из 77 сумм файл сверил сам внутри транзакции (иначе была бы ошибка и откат). Число строк:
+`psql DB -X -A -t -c "select subject_id, count(*) from private.library_paragraphs group by 1 order by 1"` → `history|26`, `physics|51`;
+и снова снимок данных (`fc` с snapshot-before — без различий). Файл повторяемый: второй запуск ничего не дублирует.
+Не совпало — сайт не публиковать, прислать мне вывод.
+
+**Шаг 3б. Доступ к библиотеке по статусам** (до публикации сайта; только чтение, тексты не выводятся):
+```
+psql DB -X -A -t -f supabase/release/v62-access-check.sql
+```
+Для одного пользователя каждого статуса сервер вызывается от его имени. Ожидается: `owner|KN-…|text`, `trial|…|text`
+(если сейчас есть ученик на пробном), `paid|…|text` (служебный аккаунт с ручным доступом или ученик с Premium),
+`expired|…|ACCESS_REQUIRED`, `none|гость|ACCESS_REQUIRED`. Другой результат — сайт не публиковать, прислать мне вывод.
 
 **Шаг 4. Контакт для оплаты** (по желанию, можно позже): `js/config.js` → `ownerContact: { label: "Написать Николаю", url: "https://…" }`.
 Пока `null` — ученик видит «Контакт для оплаты скоро появится здесь. Пока напиши Николаю лично…», без пустых кнопок.
@@ -142,18 +168,32 @@ physics | 51 | 2480b110d53a4f0a68cf00243b090004e88f7663da389c1aa4a79d860e23e855
 
 ## Откат (только по решению владельца, после резервной копии)
 
-1. Сайт: revert merge v62 в `main` (вернётся v61.3 с текстами в файле — это снова откроет их всем).
-2. База: SQL Editor → весь файл `supabase/release/rollback-v62.sql` → Run. Возвращает функции v61.3 (проверено: тексты функций,
-   права и `search_path` совпадают с чистой v61.3), удаляет таблицу текстов, выключает тариф premium (выдачи остаются),
-   бюджет не меняет. Ученики, заметки, выдачи, генерации и журнал — без изменений (проверено тестом).
-3. Повторный выпуск после отката: снова шаги 2–3 (миграция включает тот же тариф обратно).
+Главное: **после публикации сайта v62 старого каталога с текстами на сайте нет.** Сайт v61.3 снова выложил бы тексты
+всем (через `js/library-catalog.js`). Поэтому сначала — меры без отката, полный откат — только в крайнем случае.
 
-Закрытые права TRUNCATE/REFERENCES/TRIGGER откат не возвращает: приложению они не нужны.
+| Когда | Что случилось | Что делать |
+|---|---|---|
+| До публикации сайта | что угодно после шагов 2–3 | `psql DB -X -v ON_ERROR_STOP=1 -f supabase/release/rollback-v62.sql` — база снова v61.3; старый сайт работает как раньше; тексты закрытой таблицы удаляются вместе с ней |
+| После публикации | конспект не открывается, «пока недоступен» | откат не нужен: повторить шаг 3 (повторяемый) |
+| После публикации | пробные генерации на паузе («приостановлено») из-за резерва | откат не нужен: увеличить бюджет в панели; при необходимости ослабить резерв: `update private.access_settings set budget_reserve_factor = 1.0, owner_reserve_starts = 0;` (только по твоему решению) |
+| После публикации | не работает панель (выдача/продление) | откат не нужен: выдать через SQL Editor `select private.admin_grant('KN-…', 'premium');` / `private.admin_extend(…)` — они не менялись |
+| После публикации | сбой генераций у всех | остановить ИИ: `supabase/release/ai-stop.sql` (как раньше); библиотека и личные конспекты продолжают работать |
+| Крайний случай | нужно вернуть v61.3 целиком | **1)** revert merge v62 в `main` (сайт v61.3 — тексты снова публичны, решение владельца); **2)** дождаться публикации Pages; **3)** `rollback-v62.sql`. Обратный порядок на время между шагами оставит сайт v62 без библиотеки («Не удалось загрузить»), личные конспекты при этом работают |
+
+`rollback-v62.sql`: возвращает функции v61.3 (проверено на копии production: тексты функций, права и `search_path`
+совпадают с v61.3 до миграции), удаляет таблицу текстов, выключает тариф premium (выдачи остаются), бюджет не меняет;
+ученики, конспекты, выдачи, генерации и журнал не меняются. Закрытые права TRUNCATE/REFERENCES/TRIGGER не возвращает.
+Повторный выпуск после отката — снова шаги 2–3.
+
+Последнее средство — восстановление из копии шага 0 (проверено на тестовой базе): одна таблица —
+`pg_restore --data-only -t <таблица> -d DB konspekt-data.dump` в очищенную таблицу; вся база — в новый проект.
 
 ## Тесты (только локальная копия PostgreSQL 16, GigaChat не вызывается, настоящих токенов нет)
 
 `tests/v61/run.sh` (все прежние наборы, адаптированы к v62) и `tests/v62/run.sh`:
 `v62.test.sql` (доступ к текстам, Premium, генерации, панель, бюджет, переходы состояний), `security.test.sql`
 (права на копии с правами по умолчанию как в production, прямые запросы anon/authenticated/service_role),
-`migration.test.sh` (данные, повтор, откат),
+`migration.test.sh` (данные, повтор, откат), `prodcopy.test.sh` (весь выпуск на копии как production: права по умолчанию,
+событийный триггер ensure_rls, данные той же формы, резервная копия → миграция → тексты с контрольными суммами → доступ
+по ролям → восстановление из копии → откат),
 `concurrency.test.sh` (одновременные запуски и выдачи против резерва), `v62.test.js` (интерфейс, PWA v61.3 → v62).

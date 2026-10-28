@@ -656,6 +656,12 @@ begin
                 and (has_table_privilege(r, c.oid, 'truncate') or has_table_privilege(r, c.oid, 'trigger'))) then
     raise exception 'у ролей API осталось TRUNCATE/TRIGGER на таблицах public';
   end if;
+  -- PostgreSQL 17 (production): право MAINTAIN тоже снято
+  if pg_catalog.current_setting('server_version_num')::integer >= 170000
+     and exists (select 1 from pg_catalog.pg_class c, unnest(array['anon', 'authenticated', 'service_role']) r
+                  where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and has_table_privilege(r, c.oid, 'maintain')) then
+    raise exception 'у ролей API осталось MAINTAIN на таблицах public';
+  end if;
 end $$;
 
 commit;

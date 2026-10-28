@@ -6,6 +6,10 @@
 // Запуск из корня репозитория:
 //   node tools/library-split.mjs <исходный library-catalog.js> --index js/library-index.js --seed <вне репозитория>/library-seed.sql
 //   [--subjects history,physics]   — чьи тексты заливаются (остальные предметы в каталоге остаются «Скоро»)
+//   [--expect <manifest.tsv>]      — контрольные суммы каждого параграфа: SQL проверит их сам и при любом расхождении
+//                                    откатит загрузку целиком. Манифест (subject<TAB>book<TAB>paragraph<TAB>sha256 текста
+//                                    content::text, как его хранит PostgreSQL) получают на тестовой копии: загрузить SQL
+//                                    без --expect, выполнить запрос «Манифест» из конца файла, сохранить вывод.
 //
 // Повторный запуск с тем же исходником даёт те же файлы. SQL-файл повторяемый: upsert по (предмет, учебник, параграф),
 // чужие строки не трогает и ничего не удаляет. Новый класс или учебник (например, 7 класс) — добавить в исходник и
@@ -24,6 +28,7 @@ const source = args[0];
 const indexOut = opt("--index");
 const seedOut = opt("--seed");
 const subjects = new Set(opt("--subjects", "history,physics").split(",").filter(Boolean));
+const expectFile = opt("--expect");
 if (!source || source.startsWith("--") || !indexOut || !seedOut) {
   console.error("Использование: node tools/library-split.mjs <исходный каталог> --index js/library-index.js --seed <файл.sql> [--subjects history,physics]");
   process.exit(2);
@@ -66,6 +71,18 @@ const keys = new Set(rows.map((r) => r.s + "/" + r.b + "/" + r.p));
 if (keys.size !== rows.length) throw new Error("повторяющиеся параграфы в исходнике");
 
 const sha = createHash("sha256").update(readFileSync(source)).digest("hex");
+// контрольные суммы из манифеста: ровно по одной на каждый загружаемый параграф
+let expect = null;
+if (expectFile) {
+  expect = new Map();
+  for (const line of readFileSync(expectFile, "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"))) {
+    const [s, b, p, h] = line.trim().split("\t");
+    if (!/^[0-9a-f]{64}$/.test(h || "")) throw new Error("строка манифеста не подходит: " + line);
+    expect.set(s + "/" + b + "/" + p, h);
+  }
+  const missing = rows.filter((r) => !expect.has(r.s + "/" + r.b + "/" + r.p)).map((r) => r.s + "/" + r.b + "/" + r.p);
+  if (missing.length || expect.size !== rows.length) throw new Error("манифест не совпадает с исходником: нет " + missing.join(", ") + "; строк " + expect.size + " из " + rows.length);
+}
 const counts = [...subjects].map((id) => id + ": " + rows.filter((r) => r.s === id).length).join(", ");
 
 const indexJs =
@@ -103,10 +120,25 @@ const seed =
   rows.map((r) => "(" + [q(r.s), q(r.b), q(r.p)].join(", ") + ")").join(", ") +
   ")) <> " + rows.length + " then\n" +
   "    raise exception 'загружены не все параграфы';\n  end if;\nend $$;\n" +
+  (expect
+    ? "-- контрольная сумма каждого параграфа (sha256 content::text); расхождение — откат всей загрузки\n" +
+      "do $$\ndeclare v_bad text;\nbegin\n" +
+      "  select string_agg(e.s || '/' || e.b || '/' || e.p, ', ') into v_bad\n" +
+      "    from (values\n" + rows.map((r) => "    (" + [q(r.s), q(r.b), q(r.p), q(expect.get(r.s + "/" + r.b + "/" + r.p))].join(", ") + ")").join(",\n") +
+      "\n  ) as e(s, b, p, h)\n" +
+      "    left join private.library_paragraphs l on (l.subject_id, l.book_id, l.paragraph_id) = (e.s, e.b, e.p)\n" +
+      "   where l.content is null or encode(sha256(convert_to(l.content::text, 'UTF8')), 'hex') <> e.h;\n" +
+      "  if v_bad is not null then\n    raise exception 'контрольная сумма не совпала: %', v_bad;\n  end if;\n" +
+      "  raise notice 'контрольные суммы совпали: % параграфов', " + rows.length + ";\nend $$;\n"
+    : "") +
   "commit;\n" +
   "-- Проверка (одинаковый результат на тестовой копии и в production означает одинаковые тексты):\n" +
   "select subject_id, count(*) as paragraphs,\n" +
   "       encode(sha256(convert_to(string_agg(book_id || '/' || paragraph_id || '=' || content::text, '|' order by book_id, paragraph_id), 'UTF8')), 'hex') as sha256\n" +
-  "  from private.library_paragraphs group by subject_id order by subject_id;\n";
+  "  from private.library_paragraphs group by subject_id order by subject_id;\n" +
+  "-- Манифест (контрольная сумма каждого параграфа; для --expect):\n" +
+  "-- select subject_id || chr(9) || book_id || chr(9) || paragraph_id || chr(9) || encode(sha256(convert_to(content::text, 'UTF8')), 'hex')\n" +
+  "--   from private.library_paragraphs order by 1;\n";
 writeFileSync(seedOut, seed);
-console.error("Каталог без текстов: " + indexOut + "; закрытый SQL: " + seedOut + " — параграфов " + rows.length + " (" + counts + ")");
+console.error("Каталог без текстов: " + indexOut + "; закрытый SQL: " + seedOut + " — параграфов " + rows.length + " (" + counts + ")" +
+  (expect ? "; контрольные суммы каждого параграфа встроены" : ""));

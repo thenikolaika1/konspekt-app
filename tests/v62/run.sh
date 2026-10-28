@@ -31,6 +31,8 @@ done
 $P -d sec62 -v ON_ERROR_STOP=1 -f "$HERE/security.test.sql"
 # 2. миграция: повторный запуск, данные на месте, откат и снова v62
 bash "$HERE/migration.test.sh"
+# 2б. весь выпуск на копии как production: права и триггеры Supabase, данные той же формы, копия → миграция → тексты → откат
+bash "$HERE/prodcopy.test.sh"
 # 3. одновременные запросы: запуски и выдачи против резерва
 bash "$HERE/concurrency.test.sh"
 # 4. интерфейс и PWA (Chromium)
