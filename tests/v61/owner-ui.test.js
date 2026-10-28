@@ -419,6 +419,65 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
       && sqlv("select max_total_starts from private.ai_limits") === "130" && sqlv("select count(*) from private.access_log where action = 'budget'") === "1", t.slice(0, 300));
     sqlv("update private.ai_limits set max_total_starts = 100 where id");
 
+    // v62: 🎁 подарочный доступ — форма (по умолчанию 7 дней и 1 генерация), подтверждение, результат, повторный подарок
+    await owClick(page, '[data-ow-tab="home"]', 1500);
+    check("U60. главная: кнопка «🎁 Подарить доступ»", (await owText(page)).includes("🎁 Подарить доступ"));
+    await owClick(page, '[data-ow-go="gift"]', 600);
+    t = await owText(page);
+    check("U60. форма подарка: ID, «Количество дней» = 7, «Количество генераций ИИ» = 1, «Это не Premium»",
+      t.includes("Количество дней") && t.includes("Количество генераций ИИ") && t.includes("Это не Premium")
+      && (await page.$eval("#owner-root #owGiftDays", (n) => n.value)) === "7" && (await page.$eval("#owner-root #owGiftQuota", (n) => n.value)) === "1", t.slice(0, 300));
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-form.png") });
+    await page.fill("#owner-root #owKn", "KN-SAAAAG");
+    await page.fill("#owner-root #owGiftDays", "3651");
+    await owClick(page, 'button[type="submit"]', 600);
+    check("U61. 3651 день — понятная ошибка, на сервер не уходит", (await owText(page)).includes("Не больше 3650 дней"));
+    await page.fill("#owner-root #owGiftDays", "0");
+    await owClick(page, 'button[type="submit"]', 600);
+    check("U61. 0 дней — форма не отправляется (минимум 1)", !(await owText(page)).includes("Подтверди подарок"));
+    await page.fill("#owner-root #owGiftDays", "30");
+    await page.fill("#owner-root #owGiftQuota", "1001");
+    await owClick(page, 'button[type="submit"]', 600);
+    check("U61. 1001 генерация — понятная ошибка", (await owText(page)).includes("Не больше 1000 генераций"));
+    await page.fill("#owner-root #owGiftQuota", "3");
+    await page.fill("#owner-root #owNote", "подарок за отзыв");
+    await owClick(page, 'button[type="submit"]', 1800);
+    t = await owText(page);
+    check("U62. подтверждение: «Вы собираетесь подарить ученику KN-SAAAAG», 🎁 30 дней, 🤖 3, 💰 бесплатно, «Подтвердить выдачу?», кнопки",
+      t.includes("Вы собираетесь подарить ученику KN-SAAAAG") && t.includes("🎁 Доступ: 30 дней") && t.includes("🤖 Генерации ИИ: 3")
+      && t.includes("💰 Стоимость для ученика: бесплатно") && t.includes("Подтвердить выдачу?") && t.includes("Отмена") && t.includes("Подтвердить подарок"), t.slice(0, 600));
+    check("U62. до подтверждения подарка нет", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAG') and g.plan = 'gift'") === "0");
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-confirm.png") });
+    await page.evaluate(() => { const b = document.querySelector('#owner-root [data-ow-act="gift-commit"]'); b.click(); b.click(); });
+    await until(page, async () => (await owText(page)).includes("Подарок выдан"));
+    t = await owText(page);
+    const end30g = new Date(Date.now() + 30 * 864e5).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", year: "numeric" });
+    check("U62. результат: «🎁 Подарок выдан», подарено 30 дней и 3 генерации, «Доступ до» — дата окончания", t.includes("🎁 Подарок выдан")
+      && t.includes("30 дней, 3 генерации") && t.includes("Доступ до") && t.includes(end30g), t.slice(0, 500));
+    check("U62. двойное нажатие — один подарок в базе: 30 дней, 3 генерации, тариф gift",
+      sqlv("select count(*) || ':' || max(g.ends_at - g.starts_at) || ':' || max(g.ai_quota) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAG') and g.plan = 'gift'") === "1:30 days:3");
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-result.png") });
+    // повторный подарок из карточки ученика — добавляется
+    await owClick(page, '[data-ow-act="to-student"]', 1500);
+    t = await owText(page);
+    check("U63. карточка ученика: «Подарок», сроки доступа с пометкой «🎁 Подарок», кнопка «🎁 Подарить доступ»",
+      t.includes("Подарок") && t.includes("🎁 Подарок · ИИ: 0 из 3") && t.includes("🎁 Подарить доступ"), t.slice(0, 600));
+    await owClick(page, '[data-ow-act="gift"]', 600);
+    check("U63. ID ученика подставлен и не редактируется", (await page.$eval("#owner-root #owKn", (n) => n.value + "|" + n.readOnly)) === "KN-SAAAAG|true");
+    await page.fill("#owner-root #owGiftDays", "10");
+    await page.fill("#owner-root #owGiftQuota", "2");
+    await owClick(page, 'button[type="submit"]', 1800);
+    t = await owText(page);
+    check("U63. подтверждение повторного подарка: «добавится к нему», всего 5 генераций", t.includes("добавится к нему") && t.includes("всего 5"), t.slice(0, 500));
+    await owClick(page, '[data-ow-act="gift-commit"]', 2000);
+    check("U63. повторный подарок добавлен: один срок 40 дней, 5 генераций",
+      sqlv("select count(*) || ':' || max(g.ends_at - g.starts_at) || ':' || max(g.ai_quota) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAG') and g.plan = 'gift'") === "1:40 days:5");
+    await owClick(page, '[data-ow-tab="home"]', 1500);
+    await owClick(page, '[data-ow-tab="history"]', 1500);
+    t = await owText(page);
+    check("U64. история: «🎁 Подарок» с днями, генерациями и «добавлено к подарку»", t.includes("🎁 Подарок") && t.includes("добавлено к подарку"), t.slice(0, 600));
+    check("U64. на телефоне без горизонтальной прокрутки", await noHScroll(page));
+
     // 13. история
     await owClick(page, '[data-ow-tab="history"]', 1500);
     t = await owText(page);

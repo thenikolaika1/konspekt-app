@@ -41,6 +41,8 @@ const ACC = {
   premium: { status: "paid", kind: "paid", plan: "premium", plan_title: "Premium", starts_at: at(-3), ends_at: at(27), paid_until: at(27), server_now: NOW, ai_quota: 10, ai_used: 4, ai_reserved: 0, ai_remaining: 6, ai_available: 6 },
   premiumEnding: { status: "paid", kind: "paid", plan: "premium", plan_title: "Premium", starts_at: at(-28), ends_at: at(2), paid_until: at(2), server_now: NOW, ai_quota: 10, ai_used: 9, ai_reserved: 0, ai_remaining: 1, ai_available: 1 },
   premiumExtended: { status: "paid", kind: "paid", plan: "premium", plan_title: "Premium", starts_at: at(-28), ends_at: at(2), paid_until: at(32), server_now: NOW, ai_quota: 10, ai_used: 9, ai_reserved: 0, ai_remaining: 1, ai_available: 1 },
+  gift: { status: "paid", kind: "paid", plan: "gift", plan_title: "Подарок", starts_at: at(-1), ends_at: at(29), paid_until: at(29), server_now: NOW, ai_quota: 3, ai_used: 1, ai_reserved: 0, ai_remaining: 2, ai_available: 2 },
+  giftExpired: { status: "expired", kind: "paid", plan: "gift", starts_at: at(-8), ends_at: at(-1), revoked: false, server_now: NOW, ai_quota: 0, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
   premiumExpired: { status: "expired", kind: "paid", plan: "premium", starts_at: at(-31), ends_at: at(-1), revoked: false, server_now: NOW, ai_quota: 0, ai_used: 0, ai_reserved: 0, ai_remaining: 0, ai_available: 0 },
   owner: { status: "owner", kind: "owner", plan: null, starts_at: at(-1), ends_at: null, server_now: NOW, ai_quota: null, ai_used: 0, ai_reserved: 0, ai_remaining: null, ai_available: null },
 };
@@ -364,6 +366,28 @@ async function scenarios() {
     await page.waitForTimeout(2500);
     await skipWelcome(page);
     check("V12. обновление страницы во время загрузки — приложение работает", !!(await page.$("#app > .app")) && noErr(errors), errors);
+    await ctx.close();
+  }
+
+  // V14. Подарочный доступ глазами ученика: «🎁 Подарок до …», библиотека открыта; после конца — свой заголовок
+  {
+    const { ctx, page, errors } = await open(P(ACC.gift, { notes: [NOTE] }));
+    let t = await text(page);
+    check("V14. подарок: обычная главная, «Осталось 2 конспекта», без экрана оплаты", t.includes("Осталось 2 конспекта") && !t.includes("закончил"), t.slice(0, 300));
+    await tab(page, "me");
+    t = await text(page);
+    check("V14. «Мой доступ»: «🎁 Подарок до …», ИИ 2 из 3", t.includes("🎁 Подарок до") && t.includes("осталось 2 из 3"), t.slice(0, 600));
+    await toBook(page, "history");
+    await click(page, "[data-lib-paragraph]:not(.soon)", 900);
+    check("V14. подарок: история открывается", !!(await page.$(".cn-doc")));
+    check("V14. нет ошибок JS", noErr(errors), errors);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(P(ACC.giftExpired, { notes: [NOTE] }));
+    const t = await text(page);
+    check("V14. подарок закончился: «Подарочный доступ закончился», кнопка Premium, личные конспекты сохранены",
+      t.includes("Подарочный доступ закончился") && t.includes("Premium за 299 ₽") && t.includes("личные конспекты сохранены"), t.slice(0, 400));
     await ctx.close();
   }
 

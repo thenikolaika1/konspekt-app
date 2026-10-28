@@ -132,12 +132,25 @@ begin
   end if;
 end $$;
 
+-- Пометка подарочного доступа (не продаётся: active = false, get_plans её не показывает). Подарок — срок kind = 'paid'
+-- с plan = 'gift': библиотека и ИИ как у оплаченного срока, но это не покупка Premium (см. раздел 5б).
+insert into private.plans (code, title, days, ai_quota, price_label, description, active, sort_order)
+values ('gift', 'Подарок', 7, 1, null, 'Подарочный доступ от владельца: история, физика и ИИ по фото на выбранный срок', false, 90)
+on conflict (code) do nothing;
+
+do $$
+begin
+  if not exists (select 1 from private.plans p where p.code = 'gift' and p.title = 'Подарок' and not p.active) then
+    raise exception 'Код gift в private.plans уже занят другим тарифом — проверьте его вручную';
+  end if;
+end $$;
+
 -- -------------------------------------------------------------------------------------
 -- 4. Бюджет ИИ: обязательства по оплаченным срокам и резерв
 -- -------------------------------------------------------------------------------------
 
 -- O: оставшиеся успешные генерации действующих и будущих оплаченных сроков (без идущих сейчас резервов:
--- их запуск уже учтён в total_starts).
+-- их запуск уже учтён в total_starts). Подарки (plan = 'gift') не входят: резерв защищает только оплаченное.
 create function private.premium_obligations()
 returns integer
 language sql
@@ -146,7 +159,20 @@ set search_path = ''
 as $$
   select coalesce(sum(greatest(g.ai_quota - u.used - u.reserved, 0)), 0)::integer
     from private.access_grants g cross join lateral private.grant_usage(g.id) u
-   where g.kind = 'paid' and g.revoked_at is null and g.ends_at > pg_catalog.now()
+   where g.kind = 'paid' and g.plan is distinct from 'gift' and g.revoked_at is null and g.ends_at > pg_catalog.now()
+$$;
+
+-- Обещанные подарочные генерации (действующие и будущие подарки): НЕ резерв — подарочные запуски идут только сверх
+-- резерва Premium; учитываются лишь при выдаче нового подарка, чтобы не обещать больше, чем есть свободного бюджета.
+create function private.gift_obligations()
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  select coalesce(sum(greatest(g.ai_quota - u.used - u.reserved, 0)), 0)::integer
+    from private.access_grants g cross join lateral private.grant_usage(g.id) u
+   where g.kind = 'paid' and g.plan = 'gift' and g.revoked_at is null and g.ends_at > pg_catalog.now()
 $$;
 
 -- Сколько запусков из резерва владельца на 30 дней он ещё не потратил.
@@ -195,6 +221,7 @@ begin
     'owner_reserve', v_c.owner_reserve_starts, 'owner_reserve_left', v_own,
     'free', v_free, 'per_premium', v_per, 'can_sell', greatest(v_free, 0) / greatest(v_per, 1),
     'min_budget', v_l.total_starts + v_r,
+    'gift_obligations', private.gift_obligations(),
     'warn_percent', v_c.budget_warn_percent,
     'state', case when v_rem <= 0 then 'exhausted'
                   when v_free <= 0 then 'reserved_only'
@@ -227,6 +254,7 @@ as $$
 declare
   v_r    jsonb;
   v_kind text;
+  v_plan text;
   v_l    record;
   v_c    private.access_settings;
   v_need integer;
@@ -234,8 +262,9 @@ begin
   begin
     v_r := private.start_text_generation_v2_base(p_user_id, p_note_id, p_stale_seconds, p_lease_seconds, p_page_count);
     if v_r ->> 'result' = 'started' then
-      select g.kind into v_kind from private.active_grant(p_user_id) g;
-      if v_kind is distinct from 'paid' then
+      select g.kind, g.plan into v_kind, v_plan from private.active_grant(p_user_id) g;
+      -- оплаченный срок — резерв и есть его генерации; подарок, пробный, владелец и прочие — только сверх резерва
+      if v_kind is distinct from 'paid' or v_plan = 'gift' then
         -- строка ai_limits уже заблокирована основой в этой транзакции; запуск в total_starts уже учтён
         select * into v_l from private.ai_limits for update;
         select * into v_c from private.access_settings limit 1;
@@ -326,6 +355,24 @@ begin
 end
 $$;
 
+-- Хватит ли свободного бюджета на подарок с p_quota генерациями: свободное за вычетом уже обещанных подарков (× k).
+-- Вызывать под блокировкой строки ai_limits при выдаче.
+create function private.panel_gift_budget_check(p_quota integer)
+returns jsonb
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  v_b    jsonb := private.budget_state();
+  v_k    numeric := (v_b ->> 'factor')::numeric;
+  v_need integer := ceil(p_quota * v_k)::integer;
+  v_free integer := (v_b ->> 'free')::integer - ceil((v_b ->> 'gift_obligations')::integer * v_k)::integer;
+begin
+  return jsonb_build_object('need', v_need, 'free', v_free, 'ok', v_free >= v_need, 'budget', v_b);
+end
+$$;
+
 create or replace function public.owner_preview(p_session text, p_kn_id text, p_action text, p_days integer default null,
                                                 p_ai_quota integer default null)
 returns jsonb
@@ -341,6 +388,8 @@ declare
   v_t     record;
   v_start timestamptz;
   v_per   jsonb;
+  v_g     record;
+  v_a     jsonb;
 begin
   if not private.panel_post_only() then
     return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
@@ -363,6 +412,27 @@ begin
     end if;
     return jsonb_build_object('action', 'revoke', 'kn_id', v_kn, 'periods', v_per, 'periods_count', jsonb_array_length(v_per),
                               'access', private.access_state(v_uid), 'server_now', pg_catalog.now());
+  end if;
+  if p_action = 'gift' then
+    begin
+      select * into v_g from private.panel_gift_plan(v_uid, p_days, p_ai_quota);
+    exception
+      when numeric_value_out_of_range or datetime_field_overflow then
+        return jsonb_build_object('error', 'GIFT_TOO_LARGE');
+      when others then
+        return private.panel_error(sqlstate, sqlerrm);
+    end;
+    if v_g.o_err is not null then
+      return jsonb_build_object('error', v_g.o_err);
+    end if;
+    v_a := private.access_state(v_uid);
+    return jsonb_build_object(
+      'action', 'gift', 'kn_id', v_kn, 'days', p_days, 'ai_quota', p_ai_quota,
+      'merge', v_g.o_merge is not null, 'starts_at', v_g.o_starts, 'ends_at', v_g.o_ends, 'total_quota', v_g.o_quota,
+      'starts_after_current', v_g.o_starts > pg_catalog.now() + interval '1 second',
+      'trial_active', v_a ->> 'status' = 'trial' and v_a ->> 'kind' = 'trial',
+      'budget_check', private.panel_gift_budget_check(p_ai_quota),
+      'periods', v_per, 'access', v_a, 'server_now', pg_catalog.now());
   end if;
   if p_action not in ('grant', 'extend') then
     return jsonb_build_object('error', 'INVALID_INPUT');
@@ -585,13 +655,181 @@ end
 $$;
 
 -- -------------------------------------------------------------------------------------
+-- 5б. Подарочный доступ («🎁 Подарить доступ» в панели)
+-- -------------------------------------------------------------------------------------
+-- Подарок — срок kind = 'paid' с plan = 'gift'. Даёт то же, что оплаченный срок: историю и физику целиком и ИИ по фото
+-- в пределах подаренного числа генераций, по времени сервера. Но это не покупка Premium:
+--   - не входит в обязательства бюджета (резерв Premium его не защищает): при нехватке свободного бюджета подарочные
+--     запуски ставятся на паузу, как пробные; оплаченные генерации идут первыми;
+--   - новый подарок выдаётся, только если свободного бюджета (за вычетом уже обещанных подарков × k) хватает на
+--     ceil(генерации × k): подарков не обещают больше, чем есть; Premium продаётся без учёта подарков (он важнее);
+--   - в статистике панели («с подпиской», «истекают») не считается подпиской;
+--   - пробный период не меняет и не запускает заново.
+-- Повторный подарок: если последний (по окончанию) действующий или будущий срок ученика — подарок, новый подарок
+-- ДОБАВЛЯЕТСЯ к нему (дни к сроку, генерации к лимиту); иначе — новый срок с конца последнего оплаченного (действующий
+-- Premium не сокращается и не меняется) или с текущего момента. Владельцу и аккаунтам с особым ручным доступом подарок
+-- не выдаётся (их доступ не меняется). Технические пределы: 1–3650 дней и 1–1000 генераций за раз, итог подарочного
+-- срока — не больше 1000 генераций и не дальше 3650 дней от сегодня.
+
+-- План подарка: что будет сделано (без изменений). Вызывать под блокировкой пользователя (admin_lock) при выдаче.
+create function private.panel_gift_plan(p_user_id uuid, p_days integer, p_ai_quota integer,
+                                        out o_err text, out o_merge uuid, out o_starts timestamptz,
+                                        out o_ends timestamptz, out o_quota integer)
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  v_a    jsonb;
+  v_last private.access_grants;
+begin
+  if p_days is null or p_ai_quota is null or p_days not between 1 and 3650 or p_ai_quota not between 1 and 1000 then
+    o_err := 'GIFT_INVALID';
+    return;
+  end if;
+  v_a := private.access_state(p_user_id);
+  if v_a ->> 'status' = 'owner' then
+    o_err := 'GIFT_OWNER';
+    return;
+  end if;
+  if v_a ->> 'kind' = 'legacy' and v_a ->> 'status' in ('paid', 'trial') then
+    o_err := 'GIFT_MANUAL_ACCESS';   -- особый ручной доступ без выдач: подарок заменил бы его, не трогаем
+    return;
+  end if;
+  select * into v_last
+    from private.access_grants g
+   where g.user_id = p_user_id and g.kind = 'paid' and g.revoked_at is null and g.ends_at > pg_catalog.now()
+   order by g.ends_at desc, g.created_at desc
+   limit 1;
+  if v_last.id is not null and v_last.plan = 'gift' then
+    o_merge := v_last.id;
+    o_starts := v_last.starts_at;
+    o_ends := v_last.ends_at + pg_catalog.make_interval(days => p_days);
+    o_quota := v_last.ai_quota + p_ai_quota;
+  else
+    o_starts := greatest(pg_catalog.now(), coalesce(v_last.ends_at, pg_catalog.now()));
+    o_ends := o_starts + pg_catalog.make_interval(days => p_days);
+    o_quota := p_ai_quota;
+  end if;
+  if o_quota > 1000 or o_ends > pg_catalog.now() + interval '3650 days' then
+    o_err := 'GIFT_TOO_LARGE';
+  end if;
+end
+$$;
+
+create function public.owner_gift(p_session text, p_request_id uuid, p_kn_id text, p_days integer, p_ai_quota integer,
+                                  p_note text default null)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_c   record;
+  v_uid uuid;
+  v_t   record;
+  v_p   record;
+  v_b   jsonb;
+  v_r   jsonb;
+  v_id  uuid;
+  v_kn  text;
+begin
+  if not private.panel_post_only() then
+    return jsonb_build_object('error', 'METHOD_NOT_ALLOWED');
+  end if;
+  select * into v_c from private.panel_check(p_session);
+  if v_c.o_err is not null then
+    return jsonb_build_object('error', v_c.o_err);
+  end if;
+  v_r := private.panel_request(p_request_id, v_c.o_uid, 'gift',
+           jsonb_build_object('kn', p_kn_id, 'days', p_days, 'ai_quota', p_ai_quota, 'note', p_note));
+  if v_r is not null then
+    return v_r;
+  end if;
+  begin
+    if p_note is not null and pg_catalog.length(p_note) > 200 then
+      raise exception 'Комментарий: не больше 200 символов' using errcode = '22023';
+    end if;
+    select * into v_t from private.panel_target(p_kn_id);
+    v_uid := v_t.o_uid;
+    v_kn := v_t.o_kn;
+    -- порядок блокировок как у выдачи: пользователь (advisory) → строка ai_limits
+    perform private.admin_lock(v_uid);
+    select * into v_p from private.panel_gift_plan(v_uid, p_days, p_ai_quota);
+    if v_p.o_err is not null then
+      v_r := jsonb_build_object('error', v_p.o_err);
+    else
+      perform 1 from private.ai_limits for update;
+      v_b := private.panel_gift_budget_check(p_ai_quota);
+      if not (v_b ->> 'ok')::boolean then
+        v_r := jsonb_build_object('error', 'BUDGET_LOW', 'need', v_b -> 'need', 'free', v_b -> 'free');
+      elsif v_p.o_merge is not null then
+        update private.access_grants g set ends_at = v_p.o_ends, ai_quota = v_p.o_quota
+         where g.id = v_p.o_merge returning g.id into v_id;
+      else
+        insert into private.access_grants (user_id, kind, plan, starts_at, ends_at, ai_quota, granted_by, note)
+        values (v_uid, 'paid', 'gift', v_p.o_starts, v_p.o_ends, v_p.o_quota, 'panel:' || v_c.o_kn,
+                nullif(pg_catalog.btrim(p_note), ''))
+        returning id into v_id;
+      end if;
+      if v_id is not null then
+        insert into private.access_log (action, user_id, grant_id, actor, details)
+        values ('gift', v_uid, v_id, 'panel:' || v_c.o_kn,
+                jsonb_build_object('days', p_days, 'ai_quota', p_ai_quota, 'merged', v_p.o_merge is not null,
+                                   'starts_at', v_p.o_starts, 'ends_at', v_p.o_ends, 'total_quota', v_p.o_quota,
+                                   'note', nullif(pg_catalog.btrim(p_note), '')));
+        v_r := jsonb_build_object('result', 'gifted', 'kn_id', v_kn, 'merged', v_p.o_merge is not null,
+                 'days', p_days, 'ai_quota', p_ai_quota,
+                 'grant', (select jsonb_build_object('starts_at', g.starts_at, 'ends_at', g.ends_at, 'ai_quota', g.ai_quota,
+                                                     'ai_used', u.used, 'plan', g.plan)
+                             from private.access_grants g cross join lateral private.grant_usage(g.id) u where g.id = v_id),
+                 'access', private.access_state(v_uid));
+      end if;
+    end if;
+  exception
+    when numeric_value_out_of_range or datetime_field_overflow then
+      v_r := jsonb_build_object('error', 'GIFT_TOO_LARGE');
+    when others then
+      v_r := private.panel_error(sqlstate, sqlerrm);
+  end;
+  if v_r ? 'error' then
+    perform private.panel_refused(v_uid, 'gift', v_r);
+  end if;
+  return private.panel_request_done(p_request_id, v_r);
+end
+$$;
+
+-- Статистика панели: подарок — не подписка («с подпиской», «истекают за 7 дней» — только оплаченные сроки)
+create or replace function private.panel_student_matches(p_access jsonb, p_filter text)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select case coalesce(p_filter, 'all')
+           when 'all' then true
+           when 'paid' then p_access ->> 'status' = 'paid' and p_access ->> 'kind' = 'paid'
+                            and p_access ->> 'plan' is distinct from 'gift'
+           when 'expiring' then p_access ->> 'status' = 'paid' and p_access ->> 'kind' = 'paid'
+                                and p_access ->> 'plan' is distinct from 'gift'
+                                and (p_access ->> 'paid_until')::timestamptz <= pg_catalog.now() + interval '7 days'
+           when 'trial' then p_access ->> 'status' = 'trial'
+           when 'expired' then p_access ->> 'status' = 'expired'
+           when 'owner' then p_access ->> 'status' = 'owner'
+           when 'legacy' then p_access ->> 'kind' = 'legacy'
+           else false end
+$$;
+
+-- -------------------------------------------------------------------------------------
 -- 6. Права
 -- -------------------------------------------------------------------------------------
 
 revoke all on function
   private.premium_obligations(), private.owner_reserve_left(), private.budget_state(), private.panel_ai_state(),
   private.panel_ai_state_base(), private.panel_terms(integer, integer), private.panel_budget_check(integer),
-  private.panel_error(text, text)
+  private.panel_error(text, text), private.panel_gift_plan(uuid, integer, integer), private.panel_student_matches(jsonb, text),
+  private.gift_obligations(), private.panel_gift_budget_check(integer)
   from public, anon, authenticated, service_role;
 
 revoke all on function
@@ -599,7 +837,8 @@ revoke all on function
   public.owner_preview(text, text, text, integer, integer),
   public.owner_grant(text, uuid, text, integer, integer, text, boolean),
   public.owner_extend(text, uuid, text, integer, integer, text, timestamptz, boolean),
-  public.owner_set_budget(text, uuid, integer, integer)
+  public.owner_set_budget(text, uuid, integer, integer),
+  public.owner_gift(text, uuid, text, integer, integer, text)
   from public, anon, authenticated, service_role;
 
 grant execute on function public.get_library_paragraph(text, text, text) to authenticated;
@@ -608,7 +847,8 @@ grant execute on function
   public.owner_preview(text, text, text, integer, integer),
   public.owner_grant(text, uuid, text, integer, integer, text, boolean),
   public.owner_extend(text, uuid, text, integer, integer, text, timestamptz, boolean),
-  public.owner_set_budget(text, uuid, integer, integer)
+  public.owner_set_budget(text, uuid, integer, integer),
+  public.owner_gift(text, uuid, text, integer, integer, text)
   to authenticated;
 
 -- Таблицы public: Supabase по умолчанию даёт ролям API на новые таблицы TRUNCATE, REFERENCES, TRIGGER и (PostgreSQL 17)

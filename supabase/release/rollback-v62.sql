@@ -2,7 +2,8 @@
 -- Перед откатом вернуть клиента v61.3 на GitHub Pages: клиент v62 без get_library_paragraph библиотеку не покажет.
 -- Что делает: убирает функции v62 и возвращает функции v61.3 (тексты ниже — без изменений из
 -- 20261026120000_owner_panel.sql); удаляет private.library_paragraphs вместе с текстами (исходник — у владельца
--- вне репозитория); тариф premium выключается, а не удаляется (на него ссылаются выдачи); выдачи, ученики,
+-- вне репозитория); тариф premium выключается, а не удаляется (на него ссылаются выдачи); пометка gift остаётся
+-- (выключена; подарки после отката — обычные оплаченные сроки до своей даты); выдачи, ученики,
 -- заметки, генерации и аналитика не трогаются; бюджет ИИ (max_total_starts) не меняется.
 -- Повторный запуск: на базе без v62 остановится на первой проверке и ничего не изменит.
 begin;
@@ -16,6 +17,9 @@ begin
 end $$;
 
 drop function public.owner_set_budget(text, uuid, integer, integer);
+drop function public.owner_gift(text, uuid, text, integer, integer, text);
+drop function private.panel_gift_plan(uuid, integer, integer);
+drop function private.panel_gift_budget_check(integer);
 drop function public.owner_extend(text, uuid, text, integer, integer, text, timestamptz, boolean);
 drop function public.owner_grant(text, uuid, text, integer, integer, text, boolean);
 drop function private.panel_budget_check(integer);
@@ -28,6 +32,7 @@ drop function private.panel_ai_state();
 alter function private.panel_ai_state_base() rename to panel_ai_state;
 drop function private.budget_state();
 drop function private.owner_reserve_left();
+drop function private.gift_obligations();
 drop function private.premium_obligations();
 drop function public.get_library_paragraph(text, text, text);
 drop table private.library_paragraphs;
@@ -36,6 +41,24 @@ alter table private.access_settings drop column budget_warn_percent, drop column
   drop column budget_reserve_factor;
 
 -- ===== функции v61.3 (из 20261026120000_owner_panel.sql) =====
+create or replace function private.panel_student_matches(p_access jsonb, p_filter text)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select case coalesce(p_filter, 'all')
+           when 'all' then true
+           when 'paid' then p_access ->> 'status' = 'paid' and p_access ->> 'kind' = 'paid'
+           when 'expiring' then p_access ->> 'status' = 'paid' and p_access ->> 'kind' = 'paid'
+                                and (p_access ->> 'paid_until')::timestamptz <= pg_catalog.now() + interval '7 days'
+           when 'trial' then p_access ->> 'status' = 'trial'
+           when 'expired' then p_access ->> 'status' = 'expired'
+           when 'owner' then p_access ->> 'status' = 'owner'
+           when 'legacy' then p_access ->> 'kind' = 'legacy'
+           else false end
+$$;
+
 create or replace function public.owner_preview(p_session text, p_kn_id text, p_action text, p_days integer default null,
                                      p_ai_quota integer default null)
 returns jsonb

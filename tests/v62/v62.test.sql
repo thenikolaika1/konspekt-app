@@ -543,6 +543,166 @@ select t.ok('T5. отзыв: оба срока (текущий и будущий
   and private.premium_obligations() = :obv - 20, :'rv');
 
 -- ======================================================================
+-- G. Подарочный доступ (owner_gift)
+-- ======================================================================
+select t.lim(1000, 0);
+select t.as_user(:'uo', :'so');
+create function t.gift(p_kn text, p_days int, p_q int, p_rq uuid default gen_random_uuid()) returns jsonb language sql as
+  $$ select t.p(format('select public.owner_gift($S, %L, %L, %s, %s)', p_rq, p_kn, coalesce(p_days::text, 'null'), coalesce(p_q::text, 'null'))) $$;
+create function t.gifts(p_uid uuid) returns text language sql as
+  $$ select coalesce(string_agg((ends_at - starts_at)::text || '/' || ai_quota, ',' order by starts_at), '-') from private.access_grants
+      where user_id = p_uid and kind = 'paid' and plan = 'gift' and revoked_at is null $$;
+-- ученики для подарков: пробный период уже закончился (кроме g4)
+select t.register('GIFTCODE0001', 'KN-GBAAAA') as gu1 \gset
+select t.register('GIFTCODE0002', 'KN-GCAAAA') as gu2 \gset
+select t.register('GIFTCODE0003', 'KN-GDAAAA') as gu3 \gset
+select t.register('GIFTCODE0004', 'KN-GEAAAA') as gu4 \gset
+update private.access_grants set starts_at = starts_at - interval '8 days', ends_at = ends_at - interval '8 days'
+ where kind = 'trial' and user_id in (:'gu1', :'gu2', :'gu3');
+create table t.trial_before as select id, starts_at, ends_at, ai_quota, revoked_at from private.access_grants where kind = 'trial';
+
+-- G1–G3: 1 день + 1, 7 дней + 3, 365 дней + 100
+select t.p('select public.owner_preview($S, ''KN-GBAAAA'', ''gift'', 1, 1)') as gp1 \gset
+select t.ok('G0. предпросмотр подарка: 1 день, 1 генерация, начало сейчас, не добавление, бюджет хватает; ничего не выдано',
+  :'gp1'::jsonb ->> 'action' = 'gift' and (:'gp1'::jsonb ->> 'days')::int = 1 and (:'gp1'::jsonb ->> 'merge')::boolean = false
+  and (:'gp1'::jsonb ->> 'starts_after_current')::boolean = false and (:'gp1'::jsonb -> 'budget_check' ->> 'ok')::boolean
+  and t.gifts(:'gu1') = '-', :'gp1');
+select t.gift('KN-GBAAAA', 1, 1) as g1 \gset
+select t.ok('G1. подарок 1 день + 1 генерация: gifted, срок 1 день, 1 генерация, тариф gift, ученик paid «Подарок»',
+  :'g1'::jsonb ->> 'result' = 'gifted' and t.gifts(:'gu1') = '1 day/1' and :'g1'::jsonb -> 'grant' ->> 'plan' = 'gift'
+  and private.access_state(:'gu1') ->> 'status' = 'paid' and private.access_state(:'gu1') ->> 'plan_title' = 'Подарок'
+  and (private.access_state(:'gu1') ->> 'ai_remaining')::int = 1, :'g1');
+select t.ok('G1. по подарку открыты история и физика', t.libok(:'gu1') and (select true from (select t.as_user(:'gu1')) x)
+  and t.lib('physics', 'f7', 'p2') ? 'content');
+select t.gen(:'gu1', true) as g1a \gset
+select t.gen(:'gu1', true) as g1b \gset
+select t.ok('G1. 1 подаренная генерация: первая started и списана, вторая — отказ (лимит)', :'g1a' = 'started' and :'g1b' <> 'started'
+  and (private.access_state(:'gu1') ->> 'ai_used')::int = 1, :'g1b');
+select t.as_user(:'uo', :'so');
+select t.gift('KN-GCAAAA', 7, 3) as g2 \gset
+select t.ok('G2. подарок 7 дней + 3 генерации', :'g2'::jsonb ->> 'result' = 'gifted' and t.gifts(:'gu2') = '7 days/3'
+  and (:'g2'::jsonb -> 'grant' ->> 'ends_at')::timestamptz between now() + interval '6 days 23 hours' and now() + interval '7 days 1 hour', :'g2');
+select t.gift('KN-GDAAAA', 365, 100) as g3 \gset
+select t.ok('G3. подарок 365 дней + 100 генераций', :'g3'::jsonb ->> 'result' = 'gifted' and t.gifts(:'gu3') = '365 days/100', :'g3');
+select t.ok('G1–3. журнал: каждый подарок записан от имени панели (action gift, actor panel:KN-WAAAAA)',
+  (select count(*) from private.access_log where action = 'gift' and actor = 'panel:KN-WAAAAA' and user_id in (:'gu1', :'gu2', :'gu3')) = 3);
+
+-- G4: повторный подарок — добавляется к текущему
+select t.gift('KN-GCAAAA', 10, 2) as g4 \gset
+select t.ok('G4. повторный подарок: добавлен к текущему — один срок, 7 + 10 = 17 дней, 3 + 2 = 5 генераций, merged',
+  :'g4'::jsonb ->> 'result' = 'gifted' and (:'g4'::jsonb ->> 'merged')::boolean and t.gifts(:'gu2') = '17 days/5'
+  and (private.access_state(:'gu2') ->> 'ai_quota')::int = 5, :'g4');
+select t.gen(:'gu2', true) || ',' || t.gen(:'gu2', true) as g4u \gset
+select t.gift('KN-GCAAAA', 1, 1) as g4b \gset
+select t.ok('G4. третий подарок после 2 использованных: использованное не теряется (2 из 6), срок 18 дней',
+  t.gifts(:'gu2') = '18 days/6' and (private.access_state(:'gu2') ->> 'ai_used')::int = 2 and (private.access_state(:'gu2') ->> 'ai_remaining')::int = 4, t.gifts(:'gu2'));
+-- G5: подарок после пробного периода (и во время) — пробный не меняется и не запускается заново
+select t.ok('G5. подарок после конца пробного: пробный период не изменён (те же даты и лимит), второй пробный не выдаётся',
+  (select count(*) from private.access_grants g join t.trial_before b using (id)
+    where (g.starts_at, g.ends_at, g.ai_quota, g.revoked_at) is not distinct from (b.starts_at, b.ends_at, b.ai_quota, b.revoked_at))
+  = (select count(*) from t.trial_before)
+  and (select count(*) from private.access_grants where kind = 'trial' and user_id = :'gu2') = 1
+  and private.admin_grant_trial('KN-GCAAAA') ->> 'result' = 'trial_already_used');
+select t.p('select public.owner_preview($S, ''KN-GEAAAA'', ''gift'', 3, 2)') as gp5 \gset
+select t.ok('G5. во время пробного: предпросмотр предупреждает, что пробный на время подарка не используется', (:'gp5'::jsonb ->> 'trial_active')::boolean, :'gp5');
+-- G6: подарок ученику с действующим Premium — Premium не меняется, подарок начинается после него
+select t.register('GIFTCODE0005', 'KN-GFAAAA') as gu5 \gset
+select private.admin_grant('KN-GFAAAA', 'premium') ->> 'result' as x \gset
+create table t.prem_before as select id, starts_at, ends_at, ai_quota, plan from private.access_grants where user_id = :'gu5' and kind = 'paid';
+select private.premium_obligations() as ob6 \gset
+select t.gift('KN-GFAAAA', 5, 2) as g6 \gset
+select t.ok('G6. Premium действует: подарок начинается с конца Premium, Premium не изменён, сейчас статус «Premium»',
+  :'g6'::jsonb ->> 'result' = 'gifted'
+  and (:'g6'::jsonb -> 'grant' ->> 'starts_at')::timestamptz = (select ends_at from t.prem_before)
+  and (select count(*) from private.access_grants g join t.prem_before b using (id) where (g.starts_at, g.ends_at, g.ai_quota, g.plan) = (b.starts_at, b.ends_at, b.ai_quota, b.plan)) = 1
+  and private.access_state(:'gu5') ->> 'plan_title' = 'Premium', :'g6');
+select t.ok('G6. подарок не входит в резерв Premium: обязательства те же', private.premium_obligations() = :ob6, private.premium_obligations()::text);
+select t.gift('KN-GFAAAA', 5, 2) as g6b \gset
+select t.ok('G6. второй подарок после Premium добавляется к будущему подарку (Premium по-прежнему не тронут)',
+  (:'g6b'::jsonb ->> 'merged')::boolean and t.gifts(:'gu5') = '10 days/4'
+  and (select count(*) from private.access_grants g join t.prem_before b using (id) where (g.starts_at, g.ends_at, g.ai_quota) = (b.starts_at, b.ends_at, b.ai_quota)) = 1, :'g6b');
+select t.age(:'gu5', interval '30 days 1 minute');
+select t.ok('G6. после конца Premium действует подарок: 4 генерации, «Подарок»', private.access_state(:'gu5') ->> 'plan_title' = 'Подарок'
+  and (private.access_state(:'gu5') ->> 'ai_remaining')::int = 4, private.access_state(:'gu5')::text);
+-- G7: особый ручной доступ и владелец — подарок не выдаётся, доступ не меняется
+do $$ declare v uuid; begin
+  update private.access_settings set trial_on_register = false;
+  insert into auth.users (email) values (private.kn_email('KN-GMAAAA')) returning id into v;
+  insert into private.user_entitlements (user_id, resource, plan, quota, source) values (v, 'text_generation', 'beta', 1000, 'manual');
+  update private.access_settings set trial_on_register = true;
+end $$;
+select id as gum from auth.users where email = private.kn_email('KN-GMAAAA') \gset
+select private.access_state(:'gum') as gmb \gset
+select t.gift('KN-GMAAAA', 30, 10) as g7 \gset
+select t.ok('G7. ручной доступ (старый служебный аккаунт): GIFT_MANUAL_ACCESS, выдач нет, доступ тот же',
+  :'g7'::jsonb ->> 'error' = 'GIFT_MANUAL_ACCESS' and not exists (select 1 from private.access_grants where user_id = :'gum')
+  and (private.access_state(:'gum') - 'server_now') = (:'gmb'::jsonb - 'server_now'), :'g7');
+select t.ok('G7. владельцу подарок не выдаётся (GIFT_OWNER)', t.gift('KN-WAAAAA', 7, 1) ->> 'error' = 'GIFT_OWNER');
+-- G8: бюджет
+select t.lim(500, 500 - (t.bi('premium_reserve') + t.bi('owner_reserve_left') + ceil(t.bi('gift_obligations') * 1.5)::int + 2));   -- свободно для подарков 2
+select max_total_starts as gmax from private.ai_limits \gset
+select t.p('select public.owner_preview($S, ''KN-GEAAAA'', ''gift'', 7, 2)') as gp8 \gset
+select t.gift('KN-GEAAAA', 7, 2) as g8 \gset
+select t.ok('G8. мало бюджета (свободно для подарков 2, нужно ceil(2 × 1,5) = 3): предпросмотр предупреждает, выдача → BUDGET_LOW, подарка нет',
+  not (:'gp8'::jsonb -> 'budget_check' ->> 'ok')::boolean and :'g8'::jsonb ->> 'error' = 'BUDGET_LOW'
+  and (:'g8'::jsonb ->> 'need')::int = 3 and t.gifts(:'gu4') = '-', :'g8');
+select t.ok('G8. бюджет не увеличен автоматически', (select max_total_starts from private.ai_limits) = :gmax);
+select t.gift('KN-GEAAAA', 7, 1) as g8b \gset
+select t.ok('G8. на 1 генерацию (нужно 2) хватает → выдано', :'g8b'::jsonb ->> 'result' = 'gifted', :'g8b');
+select t.ok('G8. уже обещанные подарки учитываются при новом: после выданного подарка на 1 свободно 2 − 2 = 0 → следующий BUDGET_LOW',
+  t.gift('KN-GEAAAA', 1, 1) ->> 'error' = 'BUDGET_LOW');
+select t.ok('G8. Premium продаётся без учёта подарков (оплаченное важнее): предпросмотр Premium при том же бюджете — ok',
+  (t.p('select public.owner_preview($S, ''KN-GEAAAA'', ''extend'')') -> 'budget_check' ->> 'free')::int >= 2);
+select t.lim(500, 500 - (t.bi('premium_reserve') + t.bi('owner_reserve_left')));      -- свободно 0: только резерв
+select t.gen(:'gu4', true) as g8g \gset
+select t.ok('G8. свободно 0 (только резерв Premium): подарочная генерация на паузе (premium_reserve) — подарки не впереди оплаченных',
+  :'g8g' = 'ai_paused:premium_reserve', :'g8g');
+select t.lim(1000, 0);
+select t.gen(:'gu4', true) as g8h \gset
+select t.ok('G8. когда бюджет есть — подарочная генерация идёт', :'g8h' = 'started', :'g8h');
+-- G9: ученик и гость не могут выдать подарок
+select t.as_user(:'gu2', t.login(:'gu2'));
+select t.ok('G9. ученик: owner_gift → FORBIDDEN, подарок не выдан', t.p('select public.owner_gift($S, gen_random_uuid(), ''KN-GCAAAA'', 100, 100)') ->> 'error' = 'FORBIDDEN'
+  and t.gifts(:'gu2') = '18 days/6');
+select t.as_user(:'ug', null, true);
+select t.ok('G9. гость: FORBIDDEN', t.api('select public.owner_gift(''x'', gen_random_uuid(), ''KN-GCAAAA'', 100, 100)') ->> 'error' = 'FORBIDDEN');
+select t.ok('G9. закрытая функция плана подарка недоступна ролям API', not has_function_privilege('authenticated', 'private.panel_gift_plan(uuid,integer,integer)', 'execute')
+  and has_function_privilege('authenticated', 'public.owner_gift(text,uuid,text,integer,integer,text)', 'execute')
+  and not has_function_privilege('anon', 'public.owner_gift(text,uuid,text,integer,integer,text)', 'execute'));
+select t.as_user(:'uo', :'so');
+update t.ctx set method = 'GET';
+select t.ok('G9. GET → METHOD_NOT_ALLOWED', t.gift('KN-GCAAAA', 1, 1) ->> 'error' = 'METHOD_NOT_ALLOWED' and t.gifts(:'gu2') = '18 days/6');
+update t.ctx set method = 'POST';
+-- G11: повтор после обрыва сети
+select gen_random_uuid() as grq \gset
+select t.gift('KN-GDAAAA', 5, 5, :'grq') as g11a \gset
+select t.gift('KN-GDAAAA', 5, 5, :'grq') as g11b \gset
+select t.ok('G11. тот же запрос повторно (после обрыва): replayed, подарено один раз (370 дней, 105)',
+  :'g11a'::jsonb ->> 'result' = 'gifted' and (:'g11b'::jsonb ->> 'replayed')::boolean and t.gifts(:'gu3') = '370 days/105', t.gifts(:'gu3'));
+select t.ok('G11. тот же request_id с другими числами → REQUEST_REUSED', t.gift('KN-GDAAAA', 6, 5, :'grq') ->> 'error' = 'REQUEST_REUSED');
+-- G12: неверные и слишком большие значения
+select t.ok('G12. 0 и отрицательные дни/генерации, NULL → GIFT_INVALID (предпросмотр и выдача)',
+  t.gift('KN-GDAAAA', 0, 1) ->> 'error' = 'GIFT_INVALID' and t.gift('KN-GDAAAA', 1, 0) ->> 'error' = 'GIFT_INVALID'
+  and t.gift('KN-GDAAAA', -5, 1) ->> 'error' = 'GIFT_INVALID' and t.gift('KN-GDAAAA', null, 1) ->> 'error' = 'GIFT_INVALID'
+  and t.p('select public.owner_preview($S, ''KN-GDAAAA'', ''gift'', 0, 1)') ->> 'error' = 'GIFT_INVALID');
+select t.ok('G12. 3651 день или 1001 генерация за раз → GIFT_INVALID', t.gift('KN-GDAAAA', 3651, 1) ->> 'error' = 'GIFT_INVALID'
+  and t.gift('KN-GDAAAA', 1, 1001) ->> 'error' = 'GIFT_INVALID');
+select t.ok('G12. итог больше 1000 генераций (105 + 900) или дальше 3650 дней (370 + 3500) → GIFT_TOO_LARGE, ничего не изменилось',
+  t.gift('KN-GDAAAA', 1, 900) ->> 'error' = 'GIFT_TOO_LARGE' and t.gift('KN-GDAAAA', 3500, 1) ->> 'error' = 'GIFT_TOO_LARGE'
+  and t.gifts(:'gu3') = '370 days/105');
+select t.ok('G12. ID несуществующего ученика → USER_NOT_FOUND; неверный формат → INVALID_ID',
+  t.gift('KN-ZZZZZZ', 1, 1) ->> 'error' = 'USER_NOT_FOUND' and t.gift('abc', 1, 1) ->> 'error' = 'INVALID_ID');
+select t.ok('G12. отказы записаны в журнал (panel_refused, op gift)', (select count(*) from private.access_log where action = 'panel_refused' and details ->> 'op' = 'gift') >= 8);
+-- подарок и статистика, отзыв
+select t.ok('G13. в статистике панели подарок — не подписка: «с подпиской» не включает подарки, «все» — включает',
+  not private.panel_student_matches(private.access_state(:'gu2'), 'paid') and not private.panel_student_matches(private.access_state(:'gu2'), 'expiring')
+  and private.panel_student_matches(private.access_state(:'gu2'), 'all'));
+select t.p('select public.owner_revoke($S, gen_random_uuid(), ''KN-GCAAAA'', ''тест'', 1)') as g13 \gset
+select t.ok('G13. отзыв доступа отзывает и подарок; библиотека закрыта', :'g13'::jsonb ->> 'result' = 'revoked' and t.gifts(:'gu2') = '-' and not t.libok(:'gu2'), :'g13');
+select t.as_user(:'uo', :'so');
+select t.ok('G14. после отзыва можно подарить снова — новый подарок с текущего момента', t.gift('KN-GCAAAA', 2, 1) ->> 'result' = 'gifted' and t.gifts(:'gu2') = '2 days/1');
+
+-- ======================================================================
 -- Итог
 -- ======================================================================
 select (case when ok then 'PASS ' else 'FAIL ' end) || name || case when not ok and info is not null then ' → ' || left(info, 600) else '' end from t.results order by n;

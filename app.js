@@ -392,6 +392,7 @@
         : a.kind === "legacy" ? "Бесплатное тестирование завершено"
         : a.kind === "owner" ? "Доступ закончился"
         : a.status === "none" || !a.kind ? "Библиотека — в Premium"
+        : a.plan === "gift" ? "Подарочный доступ закончился"
         : "Premium закончился";
     const lead = inLibrary
       ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
@@ -456,7 +457,7 @@
     let status, renew = true;
     if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
     else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
-    else if (a.status === "paid") status = (a.plan_title || "Оплачен") + " до " + msk(until);
+    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + (a.plan_title || "Оплачен") + " до " + msk(until);
     else if (a.status === "trial") status = "Пробный период до " + msk(until);
     else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
     if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));

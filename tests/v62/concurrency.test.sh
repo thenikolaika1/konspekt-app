@@ -120,6 +120,25 @@ hold
 check "5. при свободных 0: Premium started, пробный premium_reserve" "$(cat "$OUT/p")/$(cat "$OUT/q")" "started/premium_reserve"
 check "5. миграция v62 не меняет max_in_flight (в production остаётся 1)" \
   "$(grep -c 'max_in_flight *=' "$HERE/../../supabase/migrations/20261028120000_v62_paid_library.sql")" "0"
+# 6. подарки: два разных подарка одному ученику одновременно → оба учтены одним сроком (7+5 дней, 2+3 генерации)
+$P -d $DB -c "update private.ai_limits set max_total_starts = total_starts + 500 where id" >/dev/null
+gift() { api "select coalesce(r ->> 'result', r ->> 'error') || coalesce('/' || (r ->> 'replayed'), '') from (select public.owner_gift('$TOK', '$1', '$2', $3, $4) r) x"; }
+GQ="select coalesce(string_agg((ends_at - starts_at)::text || '/' || ai_quota, ',' order by starts_at), '-') from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SRAAAA') and g.plan = 'gift' and g.revoked_at is null"
+hold
+(gift "$($P -d $DB -c "select gen_random_uuid()")" KN-SRAAAA 7 2 > "$OUT/ga") & (gift "$($P -d $DB -c "select gen_random_uuid()")" KN-SRAAAA 5 3 > "$OUT/gb") & wait
+check "6. два подарка одному ученику одновременно: оба gifted" "$(cat "$OUT/ga" "$OUT/gb" | grep -c '^gifted')" "2"
+check "6. итог — один подарочный срок 12 дней и 5 генераций (ничего не потеряно)" "$($P -d $DB -c "$GQ")" "12 days/5"
+# двойное нажатие «Подтвердить подарок» (один request_id) → подарено один раз
+RQ=$($P -d $DB -c "select gen_random_uuid()")
+hold
+(gift "$RQ" KN-SRAAAA 1 1 > "$OUT/gc") & (gift "$RQ" KN-SRAAAA 1 1 > "$OUT/gd") & wait
+check "6. двойное нажатие: один подарок, второй ответ — повтор (replayed)" "$($P -d $DB -c "$GQ")/$(cat "$OUT/gc" "$OUT/gd" | grep -c 'gifted/true')" "13 days/6/1"
+# два подарка разным ученикам при свободном бюджете на один (нужно ceil(10 × 1,5) = 15; свободно 15 сверх уже обещанных подарков)
+$P -d $DB -c "select public.t_free(15 + ceil((private.budget_state() ->> 'gift_obligations')::int * 1.5)::int)" >/dev/null
+hold
+(gift "$($P -d $DB -c "select gen_random_uuid()")" KN-SSAAAA 30 10 > "$OUT/ge") & (gift "$($P -d $DB -c "select gen_random_uuid()")" KN-STAAAA 30 10 > "$OUT/gf") & wait
+check "6. два подарка при бюджете на один: один gifted, второй BUDGET_LOW" "$(cat "$OUT/ge" "$OUT/gf" | grep -c '^gifted')/$(cat "$OUT/ge" "$OUT/gf" | grep -c BUDGET_LOW)" "1/1"
+check "6. ошибок и deadlock нет" "$(cat "$OUT"/g[a-f] | grep -ci 'error\|deadlock')" "0"
 rm -rf "$OUT"
 echo "ИТОГО: $pass PASS, $fail FAIL"
 [ $fail = 0 ]

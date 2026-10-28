@@ -123,7 +123,7 @@ async function rpc(fn, args, token, method = "POST") {
     const api = await (await fetch("http://127.0.0.1:" + PORT_PGRST + "/", { headers: { authorization: "Bearer " + T.owner } })).json();
     const paths = Object.keys(api.paths || {});
     const ownerPaths = paths.filter((p) => p.startsWith("/rpc/owner_"));
-    check("P1. PostgREST 12.2.3 запущен, в схеме API 19 функций панели (v62: + owner_set_budget)", ownerPaths.length === 19, ownerPaths);
+    check("P1. PostgREST 12.2.3 запущен, в схеме API 20 функций панели (v62: + owner_set_budget, owner_gift)", ownerPaths.length === 20, ownerPaths);
     check("P1. закрытые таблицы и admin_* не опубликованы в API", !paths.some((p) => /owner_panel|access_grants|beta_invites|admin_|panel_/.test(p.replace("/rpc/owner_panel_state", "").replace("/rpc/owner_panel_setup", ""))), paths.filter((p) => /admin_|panel_|private/.test(p)));
 
     // доступ без входа, с поддельным и просроченным JWT
@@ -229,6 +229,20 @@ async function rpc(fn, args, token, method = "POST") {
     r = await rpc("owner_grant", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 14, p_ai_quota: 3, p_custom: true }, T.owner);
     check("C1. с p_custom: true (JSON boolean) → granted, без тарифа", r.body.result === "granted" && r.body.grant?.plan === null, r.body);
     psql(DB, "update private.access_grants set revoked_at = now() where kind = 'paid' and user_id = (select id from auth.users where email = private.kn_email('KN-TSBAAA'))");
+    // подарок через PostgREST: POST работает; дробное и слишком большое число отклоняет PostgREST до функции
+    r = await rpc("owner_gift", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 3, p_ai_quota: 2 }, T.owner);
+    check("C3. owner_gift через PostgREST → gifted, тариф gift", r.body.result === "gifted" && r.body.grant?.plan === "gift", r.body);
+    const giftsBefore = psql(DB, "select count(*) || '/' || coalesce(sum(ai_quota), 0) from private.access_grants where plan = 'gift'");
+    r = await rpc("owner_gift", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 99999999999, p_ai_quota: 1 }, T.owner);
+    check("C3. дни больше int (переполнение) → HTTP 400 от PostgREST, функция не выполнялась", r.status === 400, r);
+    r = await rpc("owner_gift", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 1.5, p_ai_quota: 1 }, T.owner);
+    check("C3. дробные дни → HTTP 400 (только целые)", r.status === 400, r);
+    r = await rpc("owner_gift", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: "abc", p_ai_quota: 1 }, T.owner);
+    check("C3. текст вместо числа → HTTP 400", r.status === 400, r);
+    check("C3. после отклонённых запросов подарков столько же", psql(DB, "select count(*) || '/' || coalesce(sum(ai_quota), 0) from private.access_grants where plan = 'gift'") === giftsBefore);
+    r = await rpc("owner_gift", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 3, p_ai_quota: 2 }, T.student);
+    check("C3. ученик с ключом сессии владельца → FORBIDDEN", r.body.error === "FORBIDDEN", r.body);
+    psql(DB, "update private.access_grants set revoked_at = now() where plan = 'gift'");
     r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 3, p_expect_budget: 100 }, T.owner);
     check("C2. owner_set_budget ниже минимума → BUDGET_TOO_LOW", r.body.error === "BUDGET_TOO_LOW" && typeof r.body.min === "number", r.body);
     r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 120, p_expect_budget: 100 }, T.owner);
@@ -245,12 +259,12 @@ async function rpc(fn, args, token, method = "POST") {
     const withSecrets = rpcs.filter((f) => (props["/rpc/" + f]?.post?.parameters || []).some((x) => x.schema?.properties
       ? Object.keys(x.schema.properties).some((k) => secretArgs.includes(k))
       : false));
-    check("G1. функции API для вошедшего: get_library_paragraph, get_my_access, get_my_access_v2, get_plans, track и 19 owner_* (redeem_beta_invite убрана)",
-      JSON.stringify(rpcs) === JSON.stringify(["get_library_paragraph", "get_my_access", "get_my_access_v2", "get_plans", "owner_ai", "owner_change_password", "owner_extend",
+    check("G1. функции API для вошедшего: get_library_paragraph, get_my_access, get_my_access_v2, get_plans, track и 20 owner_* (redeem_beta_invite убрана)",
+      JSON.stringify(rpcs) === JSON.stringify(["get_library_paragraph", "get_my_access", "get_my_access_v2", "get_plans", "owner_ai", "owner_change_password", "owner_extend", "owner_gift",
         "owner_grant", "owner_history", "owner_invite_create", "owner_invite_revoke", "owner_invites", "owner_lock", "owner_lock_all", "owner_overview",
         "owner_panel_setup", "owner_panel_state", "owner_preview", "owner_revoke", "owner_set_budget", "owner_student", "owner_students", "owner_unlock", "track"]), rpcs);
-    check("G1. функции с секретами в аргументах — только owner_* (18: все, кроме owner_panel_state)",
-      withSecrets.length === 18 && withSecrets.every((f) => f.startsWith("owner_")), withSecrets);
+    check("G1. функции с секретами в аргументах — только owner_* (19: все, кроме owner_panel_state)",
+      withSecrets.length === 19 && withSecrets.every((f) => f.startsWith("owner_")), withSecrets);
     r = await rpc("redeem_beta_invite", { p_code: "AAAA-BBBB-CCCC" }, T.student);
     check("G1. старая redeem_beta_invite(p_code) через API — отказ прав (403, 42501: нет права на функцию)", r.status === 403 && r.body.code === "42501", r);
     const before = psql(DB, "select (select failed_count from private.owner_panel_secrets) || '/' || (select count(*) from private.owner_panel_sessions) || '/' || (select count(*) from private.owner_panel_sessions where revoked_at is not null) || '/' || (select count(*) from private.access_grants) || '/' || (select count(*) from private.beta_invites) || '/' || (select count(*) from private.owner_requests)");
@@ -264,6 +278,7 @@ async function rpc(fn, args, token, method = "POST") {
       ["owner_grant", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 30, p_ai_quota: 10 }],
       ["owner_extend", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 10 }],
       ["owner_set_budget", { p_session: S, p_request_id: crypto.randomUUID(), p_new_budget: 500, p_expect_budget: 100 }],
+      ["owner_gift", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 30, p_ai_quota: 10 }],
       ["get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" }],
       ["owner_revoke", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_expect_periods: 1 }],
       ["owner_invite_create", { p_session: S, p_request_id: crypto.randomUUID(), p_label: "GET", p_valid_days: 7 }],
@@ -272,8 +287,8 @@ async function rpc(fn, args, token, method = "POST") {
     ];
     const getR = [];
     for (const [f, a] of GET_CALLS) getR.push([f, await rpc(f, a, T.owner, "GET")]);
-    check("G2. все 19 функций панели и get_library_paragraph через GET (с верными паролем и ключом сессии, у владельца) → METHOD_NOT_ALLOWED, без текста",
-      getR.length === 20 && !getR.some(([, x]) => JSON.stringify(x.body).includes("ТЕСТОВЫЙ-ТЕКСТ")) && getR.every(([, x]) => x.status === 200 && x.body?.error === "METHOD_NOT_ALLOWED"),
+    check("G2. все 20 функций панели и get_library_paragraph через GET (с верными паролем и ключом сессии, у владельца) → METHOD_NOT_ALLOWED, без текста",
+      getR.length === 21 && !getR.some(([, x]) => JSON.stringify(x.body).includes("ТЕСТОВЫЙ-ТЕКСТ")) && getR.every(([, x]) => x.status === 200 && x.body?.error === "METHOD_NOT_ALLOWED"),
       getR.filter(([, x]) => x.body?.error !== "METHOD_NOT_ALLOWED").map(([f, x]) => f + ":" + x.status + ":" + JSON.stringify(x.body).slice(0, 80)));
     const headR = [];
     for (const [f, a] of GET_CALLS) {
@@ -341,7 +356,7 @@ async function rpc(fn, args, token, method = "POST") {
     && lines.filter((l) => /"POST \/rpc\//.test(l)).every((l) => /"POST \/rpc\/[a-z_0-9]+ HTTP/.test(l)), inPost.map((v) => v.slice(0, 4) + "…"));
   const getLines = lines.filter((l) => /"(GET|HEAD) \/rpc\/owner_/.test(l));
   check("P16. (ограничение) адрес GET-запроса шлюз пишет в журнал до базы: секреты есть только в строках нарочных GET/HEAD этого теста",
-    getLines.length === 38 && secrets.filter((v) => v && lines.some((l) => l.includes(v))).every((v) => getLines.some((l) => l.includes(v))), getLines.length);
+    getLines.length === 40 && secrets.filter((v) => v && lines.some((l) => l.includes(v))).every((v) => getLines.some((l) => l.includes(v))), getLines.length);
   console.log("ИТОГО: " + pass + " PASS, " + fail + " FAIL");
   process.exit(fail ? 1 : 0);
 })();

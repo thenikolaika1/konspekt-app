@@ -83,8 +83,8 @@ create table t.fx as
    group by r;
 select t.ok('S5. anon (без входа) не может вызвать ни одной функции приложения', not exists (select 1 from t.fx where r = 'anon'),
   (select fns from t.fx where r = 'anon'));
-select t.ok('S5. authenticated: только get_library_paragraph, get_my_access(_v2), get_plans, track и 19 функций панели owner_*',
-  (select fns from t.fx where r = 'authenticated') = 'get_library_paragraph,get_my_access,get_my_access_v2,get_plans,owner_ai,owner_change_password,owner_extend,owner_grant,owner_history,owner_invite_create,owner_invite_revoke,owner_invites,owner_lock,owner_lock_all,owner_overview,owner_panel_setup,owner_panel_state,owner_preview,owner_revoke,owner_set_budget,owner_student,owner_students,owner_unlock,track',
+select t.ok('S5. authenticated: только get_library_paragraph, get_my_access(_v2), get_plans, track и 20 функций панели owner_*',
+  (select fns from t.fx where r = 'authenticated') = 'get_library_paragraph,get_my_access,get_my_access_v2,get_plans,owner_ai,owner_change_password,owner_extend,owner_gift,owner_grant,owner_history,owner_invite_create,owner_invite_revoke,owner_invites,owner_lock,owner_lock_all,owner_overview,owner_panel_setup,owner_panel_state,owner_preview,owner_revoke,owner_set_budget,owner_student,owner_students,owner_unlock,track',
   (select fns from t.fx where r = 'authenticated'));
 select t.ok('S5. service_role (Edge Functions): только регистрация и проверка запуска',
   (select fns from t.fx where r = 'service_role') = 'register_invite_begin,register_invite_finish,start_text_generation,start_text_generation_v2',

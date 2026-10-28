@@ -94,6 +94,10 @@
     CUSTOM_TERMS_NOT_CONFIRMED: "Условия отличаются от Premium (30 дней, 10 генераций) — подтверди нестандартные условия.",
     BUDGET_LOW: "Бюджета ИИ не хватает на этот срок — сначала увеличь бюджет на экране «ИИ».",
     BUDGET_TOO_LOW: "Бюджет не может быть меньше уже израсходованного и резерва оплаченных генераций.",
+    GIFT_INVALID: "Дни и генерации — целые числа от 1 (не больше 3650 дней и 1000 генераций за один подарок).",
+    GIFT_TOO_LARGE: "Слишком большой подарок: в подарочном сроке может быть не больше 1000 генераций и не дальше 3650 дней от сегодня.",
+    GIFT_OWNER: "Это аккаунт владельца — у него и так бессрочный доступ.",
+    GIFT_MANUAL_ACCESS: "У ученика особый ручной доступ — подарок его заменил бы, поэтому не выдаётся. Такой доступ меняют только через SQL Editor.",
     SERVER_ERROR: "Ошибка сервера. Попробуй ещё раз.",
     NETWORK: "Нет подключения к интернету.",
     CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
@@ -104,7 +108,7 @@
     if (r.error === "LOCKED") return "Слишком много неверных попыток. Попробуй после " + (r.locked_until ? dateTime(r.locked_until) : "паузы") + ".";
     if (r.error === "INVALID_INPUT") return r.message || "Проверь введённые данные.";
     if (r.error === "BUDGET_LOW" && r.need !== undefined)
-      return "Бюджета ИИ не хватает: на этот срок нужно " + r.need + " " + plural(r.need, "запуск", "запуска", "запусков") + ", свободно " + Math.max(0, r.free) +
+      return "Бюджета ИИ не хватает: на " + (r.gift ? "этот подарок" : "этот срок") + " нужно " + r.need + " " + plural(r.need, "запуск", "запуска", "запусков") + ", свободно " + Math.max(0, r.free) +
         ". Сначала увеличь бюджет на экране «ИИ».";
     if (r.error === "BUDGET_TOO_LOW" && r.min !== undefined) return "Бюджет не может быть меньше " + r.min + ": это израсходованные запуски и резерв оплаченных генераций.";
     return ERR[r.error] || ERR.SERVER_ERROR;
@@ -293,6 +297,7 @@
       return shell("Главная",
         '<section class="ow-hello"><p>Привет, <b class="ow-mono">' + esc(d.owner_kn) + "</b></p><h1>Konspekt by NK</h1></section>" +
         '<div class="ow-quick"><button class="ow-btn ow-primary" data-ow-go="grant">' + icon("plus") + "Выдать Premium</button>" +
+        '<button class="ow-btn ow-secondary" data-ow-go="gift">🎁 Подарить доступ</button>' +
         '<button class="ow-btn ow-secondary" data-ow-go="invite-new">' + icon("ticket") + "Приглашение</button></div>" +
         '<section class="ow-card"><h2>Ученики</h2><div class="ow-big" data-ow-go="students"><b>' + esc(s.total) + "</b><span>всего зарегистрировано</span></div>" +
         '<div class="ow-stats">' + stat(s.paid, "с подпиской", "subs", "blue") + stat(s.trial, "на пробном", "students:trial", "mint") +
@@ -336,10 +341,11 @@
         "<dt>Регистрация</dt><dd>" + esc(date(d.registered_at)) + "</dd>" +
         "<dt>Последняя генерация</dt><dd>" + esc(d.last_generation_at ? dateTime(d.last_generation_at) : "не было") + "</dd>" +
         "</dl></section>" +
-        (periods.length ? '<section class="ow-card"><h2>Оплаченные сроки</h2>' + periodList(periods) + "</section>" : "") +
+        (periods.length ? '<section class="ow-card"><h2>Сроки доступа</h2>' + periodList(periods) + "</section>" : "") +
         '<div class="ow-actions">' +
         (periods.length ? "" : '<button class="ow-btn ow-primary" data-ow-act="grant">Выдать Premium</button>') +
         (hasPaid ? '<button class="ow-btn ' + (periods.length ? "ow-primary" : "ow-secondary") + '" data-ow-act="extend">Продлить</button>' : "") +
+        (a.status !== "owner" ? '<button class="ow-btn ow-secondary" data-ow-act="gift">🎁 Подарить доступ</button>' : "") +
         (periods.length ? '<button class="ow-btn ow-danger" data-ow-act="revoke">Отозвать доступ</button>' : "") + "</div>" +
         '<section class="ow-card"><h2>История</h2>' + (d.history.length ? '<ul class="ow-events">' + d.history.map((h) => eventItem({ ...h, type: h.action, kn_id: null, by: actorKind(h.actor) })).join("") + "</ul>" : empty("Пока пусто", "")) + "</section>");
     },
@@ -367,6 +373,47 @@
         '<div class="ow-actions two"><button class="ow-btn ow-secondary" data-ow-back>Отмена</button>' +
         '<button class="ow-btn ow-primary" data-ow-act="commit"' + (st.busy || (p.budget_check && !p.budget_check.ok) ? " disabled" : "") + ">" +
         (st.busy ? "Выполняем…" : r.action === "grant" ? "Подтвердить выдачу" : "Подтвердить продление") + "</button></div>",
+        { nav: false });
+    },
+    // подарок: форма → предпросмотр сервера → подтверждение → результат
+    gift(r) {
+      r.days = r.days ?? 7;
+      r.quota = r.quota ?? 1;
+      return shell("🎁 Подарить доступ",
+        '<form class="ow-form" data-ow-form="gift">' +
+        '<p class="ow-note">Бесплатный доступ к истории, физике и ИИ по фото на выбранный срок — подарок, повторное тестирование или особое предложение. Это не Premium: в статистике подписок не считается.</p>' +
+        '<label class="ow-label" for="owKn">ID ученика</label>' +
+        '<input id="owKn" class="ow-field ow-mono" value="' + esc(r.kn || "") + '" placeholder="KN-ABC234" maxlength="12" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" required' + (r.lockKn ? " readonly" : "") + ">" +
+        '<label class="ow-label" for="owGiftDays">Количество дней</label>' +
+        '<input id="owGiftDays" class="ow-field" type="number" inputmode="numeric" min="1" step="1" value="' + esc(r.days) + '" required>' +
+        '<label class="ow-label" for="owGiftQuota">Количество генераций ИИ</label>' +
+        '<input id="owGiftQuota" class="ow-field" type="number" inputmode="numeric" min="1" step="1" value="' + esc(r.quota) + '" required>' +
+        '<label class="ow-label" for="owNote">Комментарий (видишь только ты)</label>' +
+        '<input id="owNote" class="ow-field" maxlength="200" placeholder="Например: подарок за отзыв" value="' + esc(r.note || "") + '">' +
+        (r.error ? '<p class="ow-error" role="alert">' + esc(r.error) + "</p>" : '<p class="ow-error" role="alert"></p>') +
+        '<div class="ow-actions two"><button class="ow-btn ow-secondary" type="button" data-ow-back>Отмена</button>' +
+        '<button class="ow-btn ow-primary" type="submit"' + (st.busy ? " disabled" : "") + ">" + (st.busy ? "Проверяем…" : "Продолжить") + "</button></div></form>" +
+        '<p class="ow-note">Если у ученика уже есть подарок, новый добавится к нему: дни — к сроку, генерации — к лимиту. Действующий Premium подарок не меняет: начнётся после него.</p>',
+        { nav: false });
+    },
+    "gift-confirm"(r) {
+      const p = r.preview;
+      const low = p.budget_check && !p.budget_check.ok;
+      return shell("Подтверди подарок",
+        '<section class="ow-card ow-summary"><p class="ow-gift-lead">Вы собираетесь подарить ученику <b class="ow-mono">' + esc(p.kn_id) + "</b>:</p>" +
+        '<ul class="ow-gift-list"><li>🎁 Доступ: <b>' + esc(days(p.days)) + "</b></li><li>🤖 Генерации ИИ: <b>" + esc(p.ai_quota) + "</b></li>" +
+        "<li>💰 Стоимость для ученика: <b>бесплатно</b></li></ul>" +
+        '<dl class="ow-dl">' +
+        "<dt>Начало</dt><dd>" + esc(p.merge ? "уже идёт подарок — добавится к нему" : p.starts_after_current ? date(p.starts_at) + " (после текущего Premium)" : "сразу после подтверждения") + "</dd>" +
+        "<dt>Доступ по подарку до</dt><dd>" + esc(date(p.ends_at)) + "</dd>" +
+        (p.merge ? "<dt>Генераций в подарке</dt><dd>всего " + esc(p.total_quota) + "</dd>" : "") +
+        (r.note ? "<dt>Комментарий</dt><dd>" + esc(r.note) + "</dd>" : "") + "</dl>" +
+        (p.trial_active ? '<p class="ow-note">Пробный период ученика на время подарка не используется; его срок не меняется.</p>' : "") +
+        (low ? '<p class="ow-error" role="alert">' + esc(errText({ error: "BUDGET_LOW", gift: true, need: p.budget_check.need, free: p.budget_check.free })) + "</p>" : "") +
+        "<p><b>Подтвердить выдачу?</b></p></section>" +
+        (r.error ? '<p class="ow-error" role="alert">' + esc(r.error) + "</p>" : "") +
+        '<div class="ow-actions two"><button class="ow-btn ow-secondary" data-ow-back>Отмена</button>' +
+        '<button class="ow-btn ow-primary" data-ow-act="gift-commit"' + (st.busy || low ? " disabled" : "") + ">" + (st.busy ? "Выдаём…" : "Подтвердить подарок") + "</button></div>",
         { nav: false });
     },
     revoke(r) {
@@ -400,6 +447,8 @@
         (ok && r.res.kn_id ? '<dl class="ow-dl"><dt>Ученик</dt><dd class="ow-mono">' + esc(r.res.kn_id) + "</dd>" +
           (g ? "<dt>Срок</dt><dd>" + esc(date(g.starts_at)) + " — " + esc(date(g.ends_at)) + "</dd><dt>Лимит</dt><dd>" + esc(gens(g.ai_quota)) + "</dd>" : "") +
           (r.res.revoked !== undefined ? "<dt>Отозвано сроков</dt><dd>" + esc(r.res.revoked) + "</dd>" : "") +
+          (r.res.result === "gifted" ? "<dt>Подарено</dt><dd>" + esc(days(r.res.days) + ", " + gens(r.res.ai_quota)) + (r.res.merged ? " (добавлено к подарку)" : "") + "</dd>" +
+            "<dt>Доступ до</dt><dd>" + esc(date(g.ends_at)) + "</dd>" : "") +
           (a ? "<dt>Статус сейчас</dt><dd>" + badge(a) + " " + esc(a.paid_until || a.ends_at ? "до " + date(a.paid_until || a.ends_at) : "") + " " + esc(aiLine(a)) + "</dd>" : "") + "</dl>" : "") +
         (r.res.replayed ? '<p class="ow-note">Это повтор уже выполненной операции — второй раз ничего не изменено.</p>' : "") +
         "</section>" +
@@ -596,6 +645,8 @@
       '<div class="ow-stats four">' + stat(b.remaining, "осталось") + stat(b.premium_reserve, "резерв Premium", null, "blue") +
       stat(b.owner_reserve_left, "твой резерв") + stat(Math.max(0, b.free), "свободно", null, b.free > 0 ? "mint" : "wine") + "</div>" +
       '<dl class="ow-dl"><dt>Обязательства</dt><dd>' + esc(b.obligations) + " " + plural(b.obligations, "генерация", "генерации", "генераций") + " у учеников с Premium</dd>" +
+      (b.gift_obligations ? "<dt>Подарки</dt><dd>🎁 " + esc(b.gift_obligations) + " " + plural(b.gift_obligations, "генерация обещана", "генерации обещано", "генераций обещано") +
+        " (не в резерве: идут после оплаченных)</dd>" : "") +
       "<dt>Запас</dt><dd>× " + esc(String(b.factor).replace(".", ",")) + " на неудачи и повторы (оценка, не гарантия)</dd>" +
       "<dt>Можно продать</dt><dd>ещё " + esc(b.can_sell) + " " + plural(b.can_sell, "Premium", "Premium", "Premium") + " без увеличения бюджета</dd></dl>" +
       '<button class="ow-btn ow-secondary ow-wide" data-ow-go="budget">Изменить бюджет</button></section>';
@@ -605,7 +656,9 @@
     if (a.status === "paid" && a.plan_title) return a.plan_title;
     return { owner: "Владелец", paid: "Оплаченная подписка", trial: "Пробный период", expired: "Доступ закончился", none: "Без доступа" }[a.status] || "—";
   }
-  const periodList = (ps) => '<ul class="ow-periods">' + ps.map((p) => "<li><b>" + esc(date(p.starts_at)) + " — " + esc(date(p.ends_at)) + "</b><span>ИИ: " + esc(p.ai_used ?? 0) + " из " + esc(p.ai_quota) + "</span></li>").join("") + "</ul>";
+  const planLabel = (code) => (code === "gift" ? "🎁 Подарок" : code === "premium" ? "Premium" : "Нестандартные условия");
+  const periodList = (ps) => '<ul class="ow-periods">' + ps.map((p) => "<li><b>" + esc(date(p.starts_at)) + " — " + esc(date(p.ends_at)) + "</b><span>" +
+    esc(planLabel(p.plan)) + " · ИИ: " + esc(p.ai_used ?? 0) + " из " + esc(p.ai_quota) + "</span></li>").join("") + "</ul>";
   const more = (r, d) => (d.items.length < d.total ? '<button class="ow-btn ow-secondary ow-wide" data-ow-act="more">Показать ещё (' + esc(d.total - d.items.length) + ")</button>" : "");
   function studentList(r) {
     if (r.error) return errorBox(r.error);
@@ -636,6 +689,7 @@
     password_changed: ["Пароль панели изменён", "lock"], password_reset: ["Пароль панели сброшен", "lock"], unlock_failed: ["Неверный пароль панели", "warn"],
     locked: ["Пауза после неверных паролей", "warn"], sessions_revoked: ["Закрыты сессии панели", "lock"],
     budget: ["Изменён бюджет ИИ", "card"],
+    gift: ["🎁 Подарок", "spark"],
   };
   function eventText(e) {
     const x = e.details || {};
@@ -650,9 +704,11 @@
       case "invite_revoke":
         return x.label || "без подписи";
       case "panel_refused":
-        return ({ grant: "выдача", extend: "продление", revoke: "отзыв", invite_create: "приглашение", invite_revoke: "отзыв кода", budget: "бюджет" }[x.op] || x.op || "") + ": " + (ERR[x.error] || x.error || "");
+        return ({ grant: "выдача", extend: "продление", revoke: "отзыв", invite_create: "приглашение", invite_revoke: "отзыв кода", budget: "бюджет", gift: "подарок" }[x.op] || x.op || "") + ": " + (ERR[x.error] || x.error || "");
       case "budget":
         return (x.from ?? "?") + " → " + (x.to ?? "?") + " запусков";
+      case "gift":
+        return [x.days ? days(x.days) : "", x.ai_quota ? gens(x.ai_quota) : "", x.ends_at ? "до " + date(x.ends_at) : "", x.merged ? "добавлено к подарку" : "", x.note || ""].filter(Boolean).join(" · ");
       case "locked":
         return x.until ? "до " + dateTime(x.until) : "";
       case "unlock_failed":
@@ -776,6 +832,24 @@
           return reset({ name: "home" });
         }
         r.error = errText(res);
+      });
+    }
+    if (kind === "gift") {
+      r.kn = val("owKn").trim();
+      r.note = val("owNote").trim();
+      const d = val("owGiftDays").trim(), q = val("owGiftQuota").trim();
+      r.days = d;
+      r.quota = q;
+      // только целые положительные числа; пределы — технические (переполнение дат и типов), не тарифные
+      if (!/^\d{1,6}$/.test(d) || +d < 1) return (r.error = "Количество дней — целое число от 1."), render();
+      if (!/^\d{1,6}$/.test(q) || +q < 1) return (r.error = "Количество генераций — целое число от 1."), render();
+      if (+d > 3650) return (r.error = "Не больше 3650 дней (10 лет) за один подарок."), render();
+      if (+q > 1000) return (r.error = "Не больше 1000 генераций за один подарок."), render();
+      r.error = null;
+      return busy(async () => {
+        const res = await call("owner_preview", { p_kn_id: r.kn, p_action: "gift", p_days: +d, p_ai_quota: +q });
+        if (res.error) return (r.error = errText(res));
+        push({ name: "gift-confirm", preview: res, note: r.note, requestId: uuid() });
       });
     }
     if (kind === "sub") {
@@ -907,6 +981,17 @@
         return push({ name: "grant", kn: r.data.kn_id, lockKn: true });
       case "extend":
         return push({ name: "extend", kn: r.data.kn_id, lockKn: true });
+      case "gift":
+        return push({ name: "gift", kn: r.data.kn_id, lockKn: true });
+      case "gift-commit":
+        return busy(async () => {
+          const p = r.preview;
+          const res = await call("owner_gift", { p_request_id: r.requestId, p_kn_id: p.kn_id, p_days: p.days, p_ai_quota: p.ai_quota, p_note: r.note || null });
+          if (res.error === "BUDGET_LOW") return (r.error = errText({ ...res, gift: true }));
+          st.stack.pop();
+          st.stack.pop();
+          showResult({ name: "result", res, okTitle: "🎁 Подарок выдан", kn: p.kn_id });
+        });
       case "revoke":
         return push({ name: "revoke", kn: r.data.kn_id });
       case "to-student":
