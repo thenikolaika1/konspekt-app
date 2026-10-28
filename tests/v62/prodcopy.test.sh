@@ -143,6 +143,14 @@ check "1б. пробный прогон: все шаги и самопровер
 check "1б. после пробного прогона база как была: данные, функции, таблицы и права, нет таблицы текстов" \
   "$($P -d $DB -c "$DATA")|$($P -d $DB -c "$FUNCS")|$($P -d $DB -c "$RELS")|$($P -d $DB -c "select to_regclass('private.library_paragraphs') is null")" "$D0|$F0|$R0|t"
 
+# занятая база: другой запрос держит access_settings (как идущая генерация) — пробный прогон не ждёт дольше 5 с и откатывается
+$P -d $DB -c "begin" -c "select count(*) from private.access_settings" -c "select pg_sleep(12)" -c "commit" >/dev/null 2>&1 &
+HOLD=$!; sleep 1
+T0=$(date +%s); OUTL=$($P -d $DB -v ON_ERROR_STOP=1 -f "$DRY" 2>&1); RCL=$?; T1=$(date +%s); wait $HOLD
+check "1б. база занята другим запросом: пробный прогон остановился по lock_timeout за ≤ 7 с, не дожидаясь" \
+  "$RCL/$(echo "$OUTL" | grep -c 'lock timeout')/$([ $((T1 - T0)) -le 7 ] && echo fast)" "3/1/fast"
+check "1б. после остановки по lock_timeout база как была" "$($P -d $DB -c "$DATA")|$($P -d $DB -c "$FUNCS")" "$D0|$F0"
+
 # ---------- 2. миграция ----------
 OUTM=$($P -d $DB -v ON_ERROR_STOP=1 -f "$M/20261028120000_v62_paid_library.sql" 2>&1); RC=$?
 check "2. миграция v62 применилась на копии production" "$RC" "0"; [ $RC = 0 ] || echo "$OUTM" | head -5
