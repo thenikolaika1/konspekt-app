@@ -6,13 +6,13 @@
 //
 // Печатает SQL-миграцию: upsert всех материалов каталога по постоянному id и retired = true для id,
 // которых в каталоге больше нет (строки не удаляются — старые просмотры остаются в отчётах).
-// Запускать после каждого изменения js/library-catalog.js, которое добавляет, убирает или переименовывает материалы.
+// Запускать после каждого изменения js/library-index.js (tools/library-split.mjs), которое добавляет, убирает или переименовывает материалы.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const ctx = vm.createContext({ console });
 ctx.window = ctx;
-for (const f of ["js/study-content.js", "js/library.js", "js/library-catalog.js"]) {
+for (const f of ["js/study-content.js", "js/library.js", "js/library-index.js"]) {
   vm.runInContext(readFileSync(f, "utf8"), ctx, { filename: f });
 }
 const catalog = ctx.K.library.catalog();

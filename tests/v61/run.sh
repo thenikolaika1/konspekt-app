@@ -9,7 +9,7 @@ P="psql -h ${PGHOST:-/var/lib/postgresql/pg61} -p ${PGPORT:-54361} -U postgres -
 $P -d postgres -c "drop database if exists base61" -c "create database base61" >/dev/null
 $P -d base61 -v ON_ERROR_STOP=1 -f "$HERE/bootstrap.sql" >/dev/null
 for f in "$ROOT"/supabase/migrations/*.sql; do
-  case "$f" in *paid_access.sql|*owner_panel.sql) continue ;; esac
+  case "$f" in *paid_access.sql|*owner_panel.sql|*v62_paid_library.sql) continue ;; esac
   $P -d base61 -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || echo "миграция не применилась (ожидаемо только для ff_signup_hook без supabase_auth_admin): $(basename "$f")"
 done
 # 1. сценарии сервера

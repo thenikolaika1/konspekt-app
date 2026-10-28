@@ -30,6 +30,7 @@ const check = (n, ok, x) => (ok ? pass++ : fail++, console.log((ok ? "PASS " : "
 psql("postgres", "drop database if exists " + DB + "; create database " + DB + " template base61;");
 psql(DB, fs.readFileSync(ROOT + "/supabase/migrations/20261024150000_paid_access.sql", "utf8"));
 psql(DB, fs.readFileSync(ROOT + "/supabase/migrations/20261026120000_owner_panel.sql", "utf8"));
+psql(DB, fs.readFileSync(ROOT + "/supabase/migrations/20261028120000_v62_paid_library.sql", "utf8"));  // v62
 psql(DB, `
 create function public.t_reg(p_code text, p_kn text) returns uuid language plpgsql as $$
 declare r jsonb; v uuid;
@@ -41,7 +42,9 @@ begin
   return v;
 end $$;
 revoke all on function public.t_reg(text, text) from public, anon, authenticated;
-update private.ai_limits set max_total_starts = 40, total_starts = 7 where id;
+update private.ai_limits set max_total_starts = 100, total_starts = 7 where id;
+-- v62: тестовый текст библиотеки (не настоящий конспект)
+insert into private.library_paragraphs (subject_id, book_id, paragraph_id, content) values ('history', 'h8', 'p1', '{"meta":{"title":"ТЕСТОВЫЙ-ТЕКСТ-PGRST"}}');
 select public.t_reg('PGRSTOWNER01', 'KN-TWAAAA'), public.t_reg('PGRSTSTUD001', 'KN-TSAAAA'), public.t_reg('PGRSTSTUD002', 'KN-TSBAAA');
 select private.admin_set_owner('KN-TWAAAA');
 -- PostgREST входит как authenticator (как в Supabase) и переключается на роль из JWT
@@ -120,7 +123,7 @@ async function rpc(fn, args, token, method = "POST") {
     const api = await (await fetch("http://127.0.0.1:" + PORT_PGRST + "/", { headers: { authorization: "Bearer " + T.owner } })).json();
     const paths = Object.keys(api.paths || {});
     const ownerPaths = paths.filter((p) => p.startsWith("/rpc/owner_"));
-    check("P1. PostgREST 12.2.3 запущен, в схеме API 18 функций панели", ownerPaths.length === 18, ownerPaths);
+    check("P1. PostgREST 12.2.3 запущен, в схеме API 19 функций панели (v62: + owner_set_budget)", ownerPaths.length === 19, ownerPaths);
     check("P1. закрытые таблицы и admin_* не опубликованы в API", !paths.some((p) => /owner_panel|access_grants|beta_invites|admin_|panel_/.test(p.replace("/rpc/owner_panel_state", "").replace("/rpc/owner_panel_setup", ""))), paths.filter((p) => /admin_|panel_|private/.test(p)));
 
     // доступ без входа, с поддельным и просроченным JWT
@@ -166,7 +169,7 @@ async function rpc(fn, args, token, method = "POST") {
     // GET с ключом в адресе — запрещён для изменяемых функций
     // все данные и действия
     r = await rpc("owner_overview", { p_session: tok }, T.owner);
-    check("P9. owner_overview: 3 ученика, бюджет 40/7", r.body.students?.total === 3 && r.body.ai?.budget === 40 && r.body.ai?.used === 7, r.body);
+    check("P9. owner_overview: 3 ученика, бюджет 100/7", r.body.students?.total === 3 && r.body.ai?.budget === 100 && r.body.ai?.used === 7, r.body);
     r = await rpc("owner_students", { p_session: tok }, T.owner);
     check("P9. owner_students только с p_session (остальное — значения по умолчанию)", r.body.total === 3 && r.body.limit === 20, r.body);
     r = await rpc("owner_students", { p_session: tok, p_query: "kn-ts", p_filter: "trial", p_limit: 1, p_offset: 1 }, T.owner);
@@ -175,12 +178,12 @@ async function rpc(fn, args, token, method = "POST") {
     check("P9. неизвестный аргумент → PGRST202 (имена аргументов клиента должны совпадать — проверено тестом интерфейса)", r.status === 404 && r.body.code === "PGRST202", r);
     r = await rpc("owner_student", { p_session: tok, p_kn_id: "kn-tsaaaa" }, T.owner);
     check("P9. owner_student", r.body.kn_id === "KN-TSAAAA" && Array.isArray(r.body.history), r.body);
-    const pv = (await rpc("owner_preview", { p_session: tok, p_kn_id: "KN-TSAAAA", p_action: "grant", p_days: 30, p_ai_quota: 20 }, T.owner)).body;
-    check("P10. owner_preview выдачи: даты сервера", pv.days === 30 && pv.ai_quota === 20 && !!pv.ends_at, pv);
+    const pv = (await rpc("owner_preview", { p_session: tok, p_kn_id: "KN-TSAAAA", p_action: "grant", p_days: 30, p_ai_quota: 10 }, T.owner)).body;
+    check("P10. owner_preview выдачи: даты сервера, Premium, проверка бюджета", pv.days === 30 && pv.ai_quota === 10 && !!pv.ends_at && pv.plan === "premium" && pv.custom === false && pv.budget_check?.ok === true, pv);
     const rq = crypto.randomUUID();
-    r = await rpc("owner_grant", { p_session: tok, p_request_id: rq, p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 20, p_note: "тест" }, T.owner);
+    r = await rpc("owner_grant", { p_session: tok, p_request_id: rq, p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 10, p_note: "тест" }, T.owner);
     check("P10. owner_grant (uuid строкой) → granted, статус с сервера", r.body.result === "granted" && r.body.access?.status === "paid", r.body);
-    r = await rpc("owner_grant", { p_session: tok, p_request_id: rq, p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 20, p_note: "тест" }, T.owner);
+    r = await rpc("owner_grant", { p_session: tok, p_request_id: rq, p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 10, p_note: "тест" }, T.owner);
     check("P10. повтор того же запроса → replayed", r.body.replayed === true, r.body);
     const pe = (await rpc("owner_preview", { p_session: tok, p_kn_id: "KN-TSAAAA", p_action: "extend", p_days: 30, p_ai_quota: 10 }, T.owner)).body;
     r = await rpc("owner_extend", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 10, p_note: null, p_expect_starts_at: pe.starts_at }, T.owner);
@@ -200,9 +203,40 @@ async function rpc(fn, args, token, method = "POST") {
     r = await rpc("owner_invite_revoke", { p_session: tok, p_request_id: crypto.randomUUID(), p_invite_id: inv.invite_id }, T.owner);
     check("P11. owner_invite_revoke → revoked", r.body.result === "revoked", r.body);
     r = await rpc("owner_ai", { p_session: tok }, T.owner);
-    check("P12. owner_ai", r.body.budget === 40 && Array.isArray(r.body.days) && r.body.days.length === 7, r.body);
+    check("P12. owner_ai (v62: с резервом)", r.body.budget === 100 && typeof r.body.reserve?.premium_reserve === "number" && Array.isArray(r.body.days) && r.body.days.length === 7, r.body);
     r = await rpc("owner_history", { p_session: tok, p_limit: 5, p_offset: 0 }, T.owner);
     check("P12. owner_history: страница из 5", r.body.items?.length === 5 && r.body.total > 5, r.body);
+
+    // ---------- v62: библиотека, нестандартные условия, бюджет — через настоящий PostgREST ----------
+    r = await rpc("get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" }, T.student);
+    check("L1. ученик на пробном (POST) → текст", r.status === 200 && r.body.content?.meta?.title === "ТЕСТОВЫЙ-ТЕКСТ-PGRST" && r.body.access_status === "trial", r);
+    r = await rpc("get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" });
+    check("L2. без входа (anon) → 401/42501, текста нет", r.status === 401 && r.body.code === "42501" && !JSON.stringify(r.body).includes("ТЕСТОВЫЙ"), r);
+    r = await rpc("get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" }, T.forged);
+    check("L2. поддельный JWT → 401", r.status === 401, r);
+    r = await rpc("get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1", p_user_id: US }, T.student);
+    check("L3. лишний аргумент «ID пользователя» → PGRST202 (подменить пользователя нельзя)", r.status === 404 && r.body.code === "PGRST202", r);
+    psql(DB, "update private.access_grants set starts_at = starts_at - interval '8 days', ends_at = ends_at - interval '8 days' where user_id = '" + US + "' and kind = 'trial'");
+    psql(DB, "update private.access_grants set revoked_at = now() where user_id = '" + US + "' and kind = 'paid'");
+    r = await rpc("get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" }, T.student);
+    check("L4. после конца срока → ACCESS_REQUIRED с состоянием expired, без текста", r.body.error === "ACCESS_REQUIRED" && r.body.access?.status === "expired" && !JSON.stringify(r.body).includes("ТЕСТОВЫЙ"), r.body);
+    for (const t of ["private.library_paragraphs", "library_paragraphs"]) {
+      const res = await fetch("http://127.0.0.1:" + PORT_PGRST + "/" + t, { headers: { authorization: "Bearer " + T.owner } });
+      check("L5. таблица текстов не опубликована в API (" + t + ")", res.status === 404 || res.status === 400, res.status);
+    }
+    r = await rpc("owner_grant", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 14, p_ai_quota: 3 }, T.owner);
+    check("C1. нестандартные условия без p_custom → CUSTOM_TERMS_NOT_CONFIRMED", r.body.error === "CUSTOM_TERMS_NOT_CONFIRMED", r.body);
+    r = await rpc("owner_grant", { p_session: tok, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 14, p_ai_quota: 3, p_custom: true }, T.owner);
+    check("C1. с p_custom: true (JSON boolean) → granted, без тарифа", r.body.result === "granted" && r.body.grant?.plan === null, r.body);
+    psql(DB, "update private.access_grants set revoked_at = now() where kind = 'paid' and user_id = (select id from auth.users where email = private.kn_email('KN-TSBAAA'))");
+    r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 3, p_expect_budget: 100 }, T.owner);
+    check("C2. owner_set_budget ниже минимума → BUDGET_TOO_LOW", r.body.error === "BUDGET_TOO_LOW" && typeof r.body.min === "number", r.body);
+    r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 120, p_expect_budget: 100 }, T.owner);
+    check("C2. owner_set_budget 100 → 120", r.body.result === "budget_set" && r.body.budget === 120, r.body);
+    r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 100, p_expect_budget: 120 }, T.owner);
+    check("C2. и обратно 120 → 100", r.body.result === "budget_set", r.body);
+    r = await rpc("owner_set_budget", { p_session: tok, p_request_id: crypto.randomUUID(), p_new_budget: 500, p_expect_budget: 100 }, T.student);
+    check("C2. ученик с ключом сессии владельца → FORBIDDEN", r.body.error === "FORBIDDEN", r.body);
 
     // ---------- запрет GET/HEAD: точный список функций API и функций с секретами ----------
     const rpcs = paths.filter((p) => p.startsWith("/rpc/")).map((p) => p.slice(5)).sort();
@@ -211,12 +245,12 @@ async function rpc(fn, args, token, method = "POST") {
     const withSecrets = rpcs.filter((f) => (props["/rpc/" + f]?.post?.parameters || []).some((x) => x.schema?.properties
       ? Object.keys(x.schema.properties).some((k) => secretArgs.includes(k))
       : false));
-    check("G1. функции API для вошедшего: get_my_access, get_my_access_v2, get_plans, track и 18 owner_* (redeem_beta_invite убрана)",
-      JSON.stringify(rpcs) === JSON.stringify(["get_my_access", "get_my_access_v2", "get_plans", "owner_ai", "owner_change_password", "owner_extend",
+    check("G1. функции API для вошедшего: get_library_paragraph, get_my_access, get_my_access_v2, get_plans, track и 19 owner_* (redeem_beta_invite убрана)",
+      JSON.stringify(rpcs) === JSON.stringify(["get_library_paragraph", "get_my_access", "get_my_access_v2", "get_plans", "owner_ai", "owner_change_password", "owner_extend",
         "owner_grant", "owner_history", "owner_invite_create", "owner_invite_revoke", "owner_invites", "owner_lock", "owner_lock_all", "owner_overview",
-        "owner_panel_setup", "owner_panel_state", "owner_preview", "owner_revoke", "owner_student", "owner_students", "owner_unlock", "track"]), rpcs);
-    check("G1. функции с секретами в аргументах — только owner_* (17: все, кроме owner_panel_state)",
-      withSecrets.length === 17 && withSecrets.every((f) => f.startsWith("owner_")), withSecrets);
+        "owner_panel_setup", "owner_panel_state", "owner_preview", "owner_revoke", "owner_set_budget", "owner_student", "owner_students", "owner_unlock", "track"]), rpcs);
+    check("G1. функции с секретами в аргументах — только owner_* (18: все, кроме owner_panel_state)",
+      withSecrets.length === 18 && withSecrets.every((f) => f.startsWith("owner_")), withSecrets);
     r = await rpc("redeem_beta_invite", { p_code: "AAAA-BBBB-CCCC" }, T.student);
     check("G1. старая redeem_beta_invite(p_code) через API — отказ прав (403, 42501: нет права на функцию)", r.status === 403 && r.body.code === "42501", r);
     const before = psql(DB, "select (select failed_count from private.owner_panel_secrets) || '/' || (select count(*) from private.owner_panel_sessions) || '/' || (select count(*) from private.owner_panel_sessions where revoked_at is not null) || '/' || (select count(*) from private.access_grants) || '/' || (select count(*) from private.beta_invites) || '/' || (select count(*) from private.owner_requests)");
@@ -226,9 +260,11 @@ async function rpc(fn, args, token, method = "POST") {
       ["owner_panel_state", {}], ["owner_panel_setup", { p_setup_code: code, p_new_password: NEWPW }], ["owner_unlock", { p_password: PW }],
       ["owner_lock", { p_session: S }], ["owner_lock_all", { p_session: S }], ["owner_change_password", { p_session: S, p_current_password: PW, p_new_password: NEWPW }],
       ["owner_overview", { p_session: S }], ["owner_students", { p_session: S }], ["owner_student", { p_session: S, p_kn_id: "KN-TSAAAA" }],
-      ["owner_preview", { p_session: S, p_kn_id: "KN-TSBAAA", p_action: "grant", p_days: 30, p_ai_quota: 20 }],
-      ["owner_grant", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 30, p_ai_quota: 20 }],
-      ["owner_extend", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 20 }],
+      ["owner_preview", { p_session: S, p_kn_id: "KN-TSBAAA", p_action: "grant", p_days: 30, p_ai_quota: 10 }],
+      ["owner_grant", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 30, p_ai_quota: 10 }],
+      ["owner_extend", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_days: 30, p_ai_quota: 10 }],
+      ["owner_set_budget", { p_session: S, p_request_id: crypto.randomUUID(), p_new_budget: 500, p_expect_budget: 100 }],
+      ["get_library_paragraph", { p_subject: "history", p_book: "h8", p_paragraph: "p1" }],
       ["owner_revoke", { p_session: S, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSAAAA", p_expect_periods: 1 }],
       ["owner_invite_create", { p_session: S, p_request_id: crypto.randomUUID(), p_label: "GET", p_valid_days: 7 }],
       ["owner_invites", { p_session: S }], ["owner_invite_revoke", { p_session: S, p_request_id: crypto.randomUUID(), p_invite_id: crypto.randomUUID() }],
@@ -236,8 +272,8 @@ async function rpc(fn, args, token, method = "POST") {
     ];
     const getR = [];
     for (const [f, a] of GET_CALLS) getR.push([f, await rpc(f, a, T.owner, "GET")]);
-    check("G2. все 18 функций панели через GET (с верными паролем и ключом сессии) → METHOD_NOT_ALLOWED",
-      getR.length === 18 && getR.every(([, x]) => x.status === 200 && x.body?.error === "METHOD_NOT_ALLOWED"),
+    check("G2. все 19 функций панели и get_library_paragraph через GET (с верными паролем и ключом сессии, у владельца) → METHOD_NOT_ALLOWED, без текста",
+      getR.length === 20 && !getR.some(([, x]) => JSON.stringify(x.body).includes("ТЕСТОВЫЙ-ТЕКСТ")) && getR.every(([, x]) => x.status === 200 && x.body?.error === "METHOD_NOT_ALLOWED"),
       getR.filter(([, x]) => x.body?.error !== "METHOD_NOT_ALLOWED").map(([f, x]) => f + ":" + x.status + ":" + JSON.stringify(x.body).slice(0, 80)));
     const headR = [];
     for (const [f, a] of GET_CALLS) {
@@ -245,7 +281,7 @@ async function rpc(fn, args, token, method = "POST") {
       headR.push(res.status);
     }
     const after = psql(DB, "select (select failed_count from private.owner_panel_secrets) || '/' || (select count(*) from private.owner_panel_sessions) || '/' || (select count(*) from private.owner_panel_sessions where revoked_at is not null) || '/' || (select count(*) from private.access_grants) || '/' || (select count(*) from private.beta_invites) || '/' || (select count(*) from private.owner_requests)");
-    check("G3. через GET и HEAD ничего не выполнилось: попытки пароля, сессии, выдачи, коды, операции — без изменений", before === after, { before, after, headR });
+    check("G3. через GET и HEAD ничего не выполнилось (и бюджет тот же: " + psql(DB, "select max_total_starts from private.ai_limits") + "): попытки пароля, сессии, выдачи, коды, операции — без изменений", before === after, { before, after, headR });
     check("G4. ответ отказа не содержит аргументов", getR.every(([, x]) => !secrets.some((v) => v && JSON.stringify(x.body).includes(v))));
     r = await rpc("owner_overview", { p_session: tok }, T.owner);
     check("G5. после этого POST работает как раньше (та же сессия)", r.body.students?.total === 3, r.body);
@@ -263,7 +299,7 @@ async function rpc(fn, args, token, method = "POST") {
     const tok2 = data?.session;
     secrets.push(tok2);
     check("P13. supabase-js (сборка приложения): rpc owner_unlock → сессия", !error && /^[0-9a-f]{64}$/.test(tok2 || ""), { data, error });
-    ({ data, error } = await sb.rpc("owner_grant", { p_session: tok2, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 7, p_ai_quota: 3, p_note: null }));
+    ({ data, error } = await sb.rpc("owner_grant", { p_session: tok2, p_request_id: crypto.randomUUID(), p_kn_id: "KN-TSBAAA", p_days: 7, p_ai_quota: 3, p_note: null, p_custom: true }));
     check("P13. supabase-js: rpc owner_grant → granted (объект, как ждёт js/owner.js)", !error && data?.result === "granted" && typeof data === "object", { data, error });
     ({ data, error } = await sb.rpc("owner_overview", { p_session: tok2 }));
     check("P13. supabase-js: rpc owner_overview → объект", !error && data?.students?.total === 3, { error });
@@ -305,7 +341,7 @@ async function rpc(fn, args, token, method = "POST") {
     && lines.filter((l) => /"POST \/rpc\//.test(l)).every((l) => /"POST \/rpc\/[a-z_0-9]+ HTTP/.test(l)), inPost.map((v) => v.slice(0, 4) + "…"));
   const getLines = lines.filter((l) => /"(GET|HEAD) \/rpc\/owner_/.test(l));
   check("P16. (ограничение) адрес GET-запроса шлюз пишет в журнал до базы: секреты есть только в строках нарочных GET/HEAD этого теста",
-    getLines.length === 36 && secrets.filter((v) => v && lines.some((l) => l.includes(v))).every((v) => getLines.some((l) => l.includes(v))), getLines.length);
+    getLines.length === 38 && secrets.filter((v) => v && lines.some((l) => l.includes(v))).every((v) => getLines.some((l) => l.includes(v))), getLines.length);
   console.log("ИТОГО: " + pass + " PASS, " + fail + " FAIL");
   process.exit(fail ? 1 : 0);
 })();

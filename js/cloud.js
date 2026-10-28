@@ -432,6 +432,21 @@
   }
 
   /**
+   * Готовый конспект библиотеки (v62): текст — только с сервера, public.get_library_paragraph (POST; доступ проверяет
+   * сервер: владелец, пробный период или Premium). Ответ — StudyContent; отказ — Error с кодом ACCESS_REQUIRED
+   * (e.access — состояние доступа с сервера) или NOT_FOUND; без ответа сервера — connectionError, как у других вызовов.
+   */
+  async function libraryParagraph(subjectId, bookId, paragraphId) {
+    await ensureUser();
+    const data = await retryNetwork(() =>
+      callRpc("get_library_paragraph", { p_subject: subjectId, p_book: bookId, p_paragraph: paragraphId }, "LIBRARY_FAILED"));
+    if (data && typeof data === "object" && data.content && typeof data.content === "object") return data.content;
+    const err = new Error(data?.error === "ACCESS_REQUIRED" || data?.error === "NOT_FOUND" ? data.error : "LIBRARY_FAILED");
+    if (data?.access && typeof data.access === "object") err.access = data.access;
+    throw err;
+  }
+
+  /**
    * Панель владельца (js/owner.js): только функции public.owner_* — каждая сама проверяет на сервере роль владельца,
    * пароль панели и её сессию (миграция 20261026120000). Ответ — объект; отказ приходит как { error }.
    * Повтор при сбое связи безопасен: изменяющие действия идут с идентификатором операции (request_id).
@@ -637,7 +652,7 @@
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
-    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, track, ownerRpc,
+    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, libraryParagraph, track, ownerRpc,
     peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
     registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };

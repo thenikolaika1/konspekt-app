@@ -374,7 +374,13 @@
     const c = window.K.config?.ownerContact;
     return c && c.url && c.label
       ? '<a class="' + (cls || "primary wide") + '" href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.label) + "</a>"
-      : '<p class="ended-contact">Напиши Николаю лично.</p>';
+      : '<p class="ended-contact">Контакт для оплаты скоро появится здесь. Пока напиши Николаю лично — как вы обычно общаетесь.</p>';
+  }
+  // единственный тариф (Premium) — из private.plans через get_plans; пока не загружен — без цены
+  const premiumPlan = () => (S.plans.state === "list" ? S.plans.items[0] || null : null);
+  function premiumCta() {
+    const p = premiumPlan();
+    return p ? p.title + (p.price_label ? " за " + p.price_label : "") : "Подключить Premium";
   }
 
   // «Доступ закончился»: на главной (с панелью вкладок) и вместо полного текста готового конспекта (с «Назад»)
@@ -385,10 +391,11 @@
       a.kind === "trial" ? "Пробный период закончился"
         : a.kind === "legacy" ? "Бесплатное тестирование завершено"
         : a.kind === "owner" ? "Доступ закончился"
-        : "Оплаченный доступ закончился";
+        : a.status === "none" || !a.kind ? "Библиотека — в Premium"
+        : "Premium закончился";
     const lead = inLibrary
-      ? "Полный текст готовых конспектов открывается с действующим доступом. Список предметов и параграфов остаётся виден."
-      : "Готовые конспекты и ИИ по фото доступны по подписке. Оплата — вне приложения, после неё Николай откроет доступ.";
+      ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
+      : "История, физика и ИИ по фото — в Premium: 30 дней, 10 конспектов по фото. Оплата — вне приложения, после неё Николай откроет доступ.";
     const notes = store.listNotes().length;
     return (
       app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
@@ -399,7 +406,7 @@
       '<p class="ended-lead">' + lead + "</p>" +
       '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
       '<div class="ended-actions">' +
-      '<button class="primary wide" data-go="tariffs">Посмотреть тарифы</button>' +
+      '<button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button>" +
       contactBlock("secondary wide") +
       (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
       "</div></div>"
@@ -411,29 +418,32 @@
     const p = S.plans;
     const card = (x) =>
       '<div class="plan-card"><div class="plan-top"><b>' + esc(x.title) + "</b>" + (x.price_label ? '<span class="plan-price">' + esc(x.price_label) + "</span>" : "") + "</div>" +
-      '<ul class="plan-facts"><li>' + icon("check") + "Все готовые конспекты библиотеки</li><li>" + icon("check") + "ИИ по фото: " + esc(String(x.ai_quota)) + " " +
-      pluralForm(x.ai_quota, "генерация", "генерации", "генераций") + " на срок</li><li>" + icon("check") + "Срок: " + esc(daysText(x.days)) + "</li></ul>" +
+      '<ul class="plan-facts"><li>' + icon("check") + "История и физика — все готовые конспекты</li><li>" + icon("check") + "ИИ по фото: " + esc(String(x.ai_quota)) + " " +
+      pluralForm(x.ai_quota, "конспект", "конспекта", "конспектов") + " за срок (считаются только удачные)</li><li>" + icon("check") + "Срок: " + esc(daysText(x.days)) +
+      "</li><li>" + icon("check") + "Твои личные конспекты остаются с тобой и после окончания срока</li></ul>" +
       (x.description ? '<p class="plan-desc">' + esc(x.description) + "</p>" : "") + "</div>";
     const body =
       p.state === "list" && p.items.length
         ? '<div class="plan-list">' + p.items.map(card).join("") + "</div>"
         : p.state === "list"
-          ? emptyState("Тарифы пока не опубликованы", "Условия доступа уточняются лично — напиши Николаю.")
+          ? emptyState("Premium пока не опубликован", "Условия доступа уточняются лично — напиши Николаю.")
           : p.state === "error"
             ? emptyState("Не удалось загрузить тарифы", "Проверь подключение к интернету и открой экран ещё раз.")
             : '<div class="plan-loading" role="status">Загружаем тарифы…</div>';
     return (
-      app("tariffs-screen") + DECO.head() + head("Тарифы", "Готовые конспекты и ИИ по фото") + body +
-      '<div class="plan-how"><b>Как подключить</b><p>Оплата — наличными или переводом по договорённости, вне приложения. После оплаты Николай вручную откроет доступ к твоему ID.</p>' +
+      app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body +
+      '<div class="plan-how"><b>Как подключить</b><p>Оплата — по договорённости, вне приложения. После оплаты Николай вручную включит Premium на твой ID. ' +
+      "Продлить можно заранее: новые 30 дней начнутся сразу после текущих, неиспользованные конспекты по фото на новый срок не переносятся.</p>" +
       contactBlock() + "</div></div>"
     );
   }
+  let plansAsked = false;
   function loadPlans() {
     S.plans = { state: "loading", items: [] };
     cloud
       .getPlans()
       .then((items) => (S.plans = { state: "list", items }), () => (S.plans = { state: "error", items: [] }))
-      .then(() => S.screen === "tariffs" && render());
+      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && render());
   }
 
   // «Мой доступ» в профиле: статус, срок, дни, генерации — только по ответу сервера
@@ -446,7 +456,7 @@
     let status, renew = true;
     if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
     else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
-    else if (a.status === "paid") status = "Оплачен до " + msk(until);
+    else if (a.status === "paid") status = (a.plan_title || "Оплачен") + " до " + msk(until);
     else if (a.status === "trial") status = "Пробный период до " + msk(until);
     else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
     if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));
@@ -455,7 +465,7 @@
     return (
       '<h3 class="pf-h">Мой доступ</h3><div class="access-card status-' + esc(a.status) + '"><b class="access-status">' + esc(status) + "</b>" +
       rows.map((r) => '<span class="access-row">' + esc(r) + "</span>").join("") +
-      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить доступ" : "Тарифы и продление") + "</button>" : "") +
+      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить Premium" : "Premium и продление") + "</button>" : "") +
       "</div>"
     );
   }
@@ -477,10 +487,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=61";
+        css.href = "./owner.css?v=62";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=61";
+        js.src = "./js/owner.js?v=62";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -493,6 +503,15 @@
   }
 
   // строка на главной во время пробного периода (без всплывающих окон)
+  // за 3 дня до конца оплаченного срока (с учётом продления заранее — paid_until) — напоминание на главной
+  function premiumLine() {
+    const a = accessV2();
+    if (a?.status !== "paid" || a.kind !== "paid") return "";
+    const left = daysLeft(a);
+    if (left === null || left > 3) return "";
+    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(a.plan_title || "Premium") + " закончится " +
+      (left <= 1 ? "в течение суток" : "через " + esc(daysText(left))) + " · продлить</span>" + icon("chev") + "</button>";
+  }
   function trialLine() {
     const a = accessV2();
     if (a?.status !== "trial" || a.kind !== "trial") return "";
@@ -577,7 +596,7 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div>' + trialLine() + '<div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div>' + trialLine() + premiumLine() + '<div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
       bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
@@ -722,10 +741,10 @@
     });
     // номер параграфа — отдельной меткой, название — крупно; без номера (итоги главы) — значок
     const row = (p) =>
-      '<button class="lib-par' + (p.content ? "" : " soon") + '" data-lib-paragraph="' + esc(p.id) + '" aria-label="' + esc(paragraphLabel(p)) + '">' +
+      '<button class="lib-par' + (library.ready(p) ? "" : " soon") + '" data-lib-paragraph="' + esc(p.id) + '" aria-label="' + esc(paragraphLabel(p)) + '">' +
       '<span class="lib-par-num' + (p.number ? "" : " extra") + '">' + (p.number ? "§&nbsp;" + esc(p.number) : icon("sparkle")) + "</span>" +
       '<span class="lib-par-title">' + esc(p.title) + (p.kind ? '<span class="lib-par-kind">' + esc(p.kind) + "</span>" : "") + "</span>" +
-      (p.content ? '<span class="chev">' + icon("chev") + "</span>" : '<span class="lib-soon">Скоро</span>') + "</button>";
+      (library.ready(p) ? '<span class="chev">' + icon("chev") + "</span>" : '<span class="lib-soon">Скоро</span>') + "</button>";
     const hero =
       '<div class="lib-book-hero">' + LIB_DECO + libCover(b, "big") + '<div class="lib-book-text"><span class="lib-kicker">' + esc(s.title) + "</span><b>" + esc(b.title) + "</b>" +
       (b.authors || b.publisher ? '<span class="lib-book-authors">' + esc([b.authors, b.publisher].filter(Boolean).join(" · ")) + "</span>" : "") +
@@ -744,25 +763,73 @@
     );
   }
 
-  // готовый конспект: сохранённый материал тем же просмотрщиком, что и конспекты по фото; AI не вызывается
+  // готовый конспект: сохранённый материал тем же просмотрщиком, что и конспекты по фото; AI не вызывается.
+  // v62: текст приходит с сервера (только с доступом) и живёт в памяти страницы — K.library.load / forget
   function libraryParagraph() {
     const p = library.paragraph(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
-    if (!p || !p.content) return libraryBook();
+    if (!p || !library.ready(p)) return libraryBook();
+    const content = library.text(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
+    if (!content) return libraryLoading(p);
     const b = library.book(S.lib.subjectId, S.lib.bookId);
     let view;
     try {
-      // данные каталога проходят ту же проверку, что и ответ AI: только схема StudyContent, текст экранируется при выводе
-      view = modes.classic.render(study.normalize(p.content), { layout: "library", book: b?.title || "" });
+      // данные с сервера проходят ту же проверку, что и ответ AI: только схема StudyContent, текст экранируется при выводе
+      view = modes.classic.render(study.normalize(content), { layout: "library", book: b?.title || "" });
     } catch {
       return libraryBook();
     }
     return (
-      app("note-view lib-note nt-" + esc(p.content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
+      app("note-view lib-note nt-" + esc(content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
       '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>" +
       '<div class="cn-doc">' + view.head + view.body + "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
+  }
+
+  // загрузка текста параграфа: один запрос на открытие; ответ применяется, только если параграф всё ещё открыт
+  let libLoad = { key: "", state: "idle", error: "" };
+  const libKey = () => [S.lib.subjectId, S.lib.bookId, S.lib.paragraphId].join("/");
+  function loadParagraph() {
+    const key = libKey();
+    const job = (libLoad = { key, state: "loading", error: "" });
+    library.load(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId).then(
+      () => {
+        if (libLoad !== job) return;
+        libLoad = { key, state: "done", error: "" };
+        if (S.screen === "library-paragraph" && libKey() === key) render();
+      },
+      (e) => {
+        if (libLoad !== job) return;
+        const code = e?.message || "";
+        // сервер сказал «нет доступа» — это его состояние доступа: экран «Доступ закончился» / предложение Premium
+        if (code === "ACCESS_REQUIRED" && e.access) setAccess(fromV2(e.access), true, e.access);
+        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : "network" };
+        if (S.screen === "library-paragraph" && libKey() === key) render();
+      },
+    );
+  }
+  function libraryLoading(p) {
+    if (libLoad.key !== libKey() || libLoad.state === "done" || libLoad.state === "idle") loadParagraph();
+    const bar =
+      '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
+      '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>";
+    const e = libLoad.state === "error" ? libLoad.error : "";
+    let body;
+    if (!e) {
+      body = '<div class="lib-state" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div><p>Загружаем конспект…</p></div>';
+    } else if (e === "access") {
+      body =
+        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и в Premium.") +
+        '<div class="error-actions"><button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button></div></div>";
+    } else if (e === "missing") {
+      body = '<div class="lib-state">' + emptyState("Конспект пока недоступен", "Мы уже готовим его. Загляни позже.") + "</div>";
+    } else {
+      body =
+        '<div class="lib-state">' + emptyState("Не удалось загрузить конспект", "Проверь интернет и попробуй ещё раз. Готовые конспекты загружаются с сервера.") +
+        '<div class="error-actions"><button class="primary wide" data-lib-retry>Попробовать снова</button></div></div>';
+    }
+    return app("note-view lib-note " + subjClass(S.lib.subjectId)) + bar + body + "</div>";
   }
 
   function bookmarks() {
@@ -1525,7 +1592,7 @@
     firstPaint = false;
     // аналитика: начало и конец сессии просмотра параграфа, вход в библиотеку (js/analytics.js)
     // просмотр — только если готовый конспект действительно на экране (не скрыт и не заменён экраном завершения)
-    const shown = !ended && S.screen === "library-paragraph" && library.paragraph(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId)?.content;
+    const shown = !ended && S.screen === "library-paragraph" && library.text(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
     window.K.analytics?.screen(ended ? "access-ended" : S.screen, shown ? S.lib.paragraphId : null);
     renderTabbar();
     S.pages.forEach((p) => seenPages.add(p));
@@ -1820,6 +1887,10 @@
     const next = { state: info ? "ok" : "none", info: info || null, v2 };
     if (JSON.stringify(next) === JSON.stringify(S.access)) return;
     S.access = next;
+    // доступ к библиотеке закончился — полученные тексты забываются (повторно их выдаст только сервер)
+    if (v2 && !["owner", "paid", "trial"].includes(v2.status)) library.forget();
+    // цена Premium для кнопок («Premium за 299 ₽») — один раз, когда доступ известен
+    if (v2 && v2.status !== "owner" && S.plans.state === "loading" && !plansAsked) (plansAsked = true), loadPlans();
     // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
     // главная, библиотека и профиль зависят от доступа («Доступ закончился», «Мой доступ»)
     if (!quiet && !firstPaint && (S.screen === "home" || S.screen === "profile" || S.screen.startsWith("library")) && !S.sheet && !document.activeElement?.matches?.("input")) render();
@@ -1860,6 +1931,8 @@
   function onUserChange(uid) {
     const changed = store.bind(uid);
     if (!changed) return;
+    library.forget(); // тексты библиотеки прежнего пользователя не остаются в памяти
+    libLoad = { key: "", state: "idle", error: "" };
     accessGen++;
     accessPromise = null;
     S.access = { state: "unknown", info: null, v2: null };
@@ -2230,6 +2303,7 @@
     if (el("[data-gallery]")) return openPicker(gallery);
     if (el("[data-process]")) return startGeneration();
     if (el("[data-retry]")) return S.gen.mode === "note" && S.gen.noteId ? resumeGeneration(S.gen.noteId) : startGeneration();
+    if (el("[data-lib-retry]")) return (libLoad = { key: "", state: "idle", error: "" }), render();
 
     // нижняя панель
     if ((x = el("[data-tab]"))) return openTab(x.dataset.tab);
@@ -2249,7 +2323,7 @@
     }
     if ((x = el("[data-lib-paragraph]"))) {
       const p = library.paragraph(S.lib.subjectId, S.lib.bookId, x.dataset.libParagraph);
-      if (!p || !p.content) return; // конспект ещё не готов: строка помечена «Скоро»
+      if (!library.ready(p)) return; // конспект ещё не готов: строка помечена «Скоро»
       S.lib = { ...S.lib, paragraphId: p.id };
       return go("library-paragraph");
     }

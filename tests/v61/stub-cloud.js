@@ -1,4 +1,4 @@
-// Заглушка js/cloud.js для тестов v61: никакой сети, сценарий — в window.__T (задаёт addInitScript).
+// Заглушка js/cloud.js для тестов v61/v62: никакой сети, сценарий — в window.__T (задаёт addInitScript).
 (() => {
   const K = (window.K = window.K || {});
   const T = (window.__T = window.__T || {});
@@ -43,6 +43,28 @@
       call("getPlans");
       if (T.plansError) return Promise.reject(new Error("PLANS_FAILED"));
       return Promise.resolve(JSON.parse(JSON.stringify(T.plans || [])));
+    },
+    // v62: текст готового конспекта — как public.get_library_paragraph: решает «сервер» по T.v2 (owner/paid/trial),
+    // текст тестовый (не настоящий конспект). T.libError: "network" | "missing"; T.libHang — ответа нет; T.libDelay — мс.
+    async libraryParagraph(s, b, p) {
+      call("libraryParagraph:" + s + "/" + b + "/" + p);
+      if (T.libHang) return new Promise(() => {});
+      if (T.libDelay) await new Promise((r) => setTimeout(r, T.libDelay));
+      if (T.libError === "network" || T.offline) throw new Error("CONNECTION_LOST");
+      if (T.libError === "missing") throw new Error("NOT_FOUND");
+      const v2 = T.v2 && typeof T.v2 === "object" ? T.v2 : null;
+      if (v2 && !["owner", "paid", "trial"].includes(v2.status)) {
+        const e = new Error("ACCESS_REQUIRED");
+        e.access = JSON.parse(JSON.stringify(v2));
+        throw e;
+      }
+      return {
+        schemaVersion: 1,
+        meta: { title: "Тестовый конспект " + p, subject: s, subjectLabel: "", topic: "Тест", tagline: [], summary: "ТЕСТОВЫЙ ТЕКСТ " + p, accent: null, pages: [] },
+        sections: [{ id: "s1", heading: "Тестовый раздел", blocks: [{ id: "b1", type: "PARAGRAPH", text: "ТЕСТОВЫЙ ТЕКСТ " + s + "/" + b + "/" + p }] }],
+        glossary: { terms: [], dates: [], people: [], formulas: [] },
+        remember: [], conclusion: "", selfCheck: [], warnings: [],
+      };
     },
     track: async (ev) => (T.tracked.push(...ev), { ok: ev.length, skipped: 0 }),
     // v61.3: функции панели — в тестах панели идут в локальную базу через тестовый сервер (owner-ui.test.js),

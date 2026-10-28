@@ -81,7 +81,7 @@
     INVALID_ID: "Неверный ID. Пример: KN-ABC234.",
     USER_NOT_FOUND: "Ученик с таким ID не найден.",
     ALREADY_ACTIVE: "У ученика уже есть действующая подписка — используй «Продлить».",
-    NO_PAID_YET: "Оплаченного доступа ещё не было — используй «Выдать подписку».",
+    NO_PAID_YET: "Оплаченного доступа ещё не было — используй «Выдать Premium».",
     NOTHING_TO_REVOKE: "Нет действующих подписок — отзывать нечего.",
     STATE_CHANGED: "Пока был открыт экран подтверждения, подписка ученика изменилась. Проверь данные заново.",
     DAILY_LIMIT: "За сутки создано уже 10 приглашений — это предел. Попробуй завтра.",
@@ -91,6 +91,9 @@
     ALREADY_EXPIRED: "Срок кода уже закончился — он и так не работает.",
     IN_PROGRESS: "По этому коду прямо сейчас идёт регистрация. Попробуй через 15 минут.",
     REQUEST_REUSED: "Повтори действие ещё раз.",
+    CUSTOM_TERMS_NOT_CONFIRMED: "Условия отличаются от Premium (30 дней, 10 генераций) — подтверди нестандартные условия.",
+    BUDGET_LOW: "Бюджета ИИ не хватает на этот срок — сначала увеличь бюджет на экране «ИИ».",
+    BUDGET_TOO_LOW: "Бюджет не может быть меньше уже израсходованного и резерва оплаченных генераций.",
     SERVER_ERROR: "Ошибка сервера. Попробуй ещё раз.",
     NETWORK: "Нет подключения к интернету.",
     CONNECTION_LOST: "Не удалось связаться с сервером. Попробуй ещё раз.",
@@ -100,6 +103,10 @@
     if (!r) return ERR.SERVER_ERROR;
     if (r.error === "LOCKED") return "Слишком много неверных попыток. Попробуй после " + (r.locked_until ? dateTime(r.locked_until) : "паузы") + ".";
     if (r.error === "INVALID_INPUT") return r.message || "Проверь введённые данные.";
+    if (r.error === "BUDGET_LOW" && r.need !== undefined)
+      return "Бюджета ИИ не хватает: на этот срок нужно " + r.need + " " + plural(r.need, "запуск", "запуска", "запусков") + ", свободно " + Math.max(0, r.free) +
+        ". Сначала увеличь бюджет на экране «ИИ».";
+    if (r.error === "BUDGET_TOO_LOW" && r.min !== undefined) return "Бюджет не может быть меньше " + r.min + ": это израсходованные запуски и резерв оплаченных генераций.";
     return ERR[r.error] || ERR.SERVER_ERROR;
   };
   const STATUS = {
@@ -111,6 +118,7 @@
     let [label, cls] = STATUS[a.status] || ["—", "none"];
     if (a.kind === "legacy") (label = a.status === "expired" ? "F&F · завершено" : "F&F"), (cls = "legacy");
     if (a.revoked && a.status === "expired") label = "Отозван";
+    if (a.status === "paid" && a.plan_title) label = a.plan_title;
     return '<span class="ow-badge ow-' + cls + '">' + esc(label) + "</span>";
   }
   const aiLine = (a) => (a.ai_quota === null || a.ai_quota === undefined ? (a.status === "owner" ? "ИИ без лимита" : "") : "ИИ " + (a.ai_remaining ?? 0) + " из " + a.ai_quota);
@@ -284,7 +292,7 @@
       const pct = ai.budget ? Math.min(100, Math.round((ai.used / ai.budget) * 100)) : 100;
       return shell("Главная",
         '<section class="ow-hello"><p>Привет, <b class="ow-mono">' + esc(d.owner_kn) + "</b></p><h1>Konspekt by NK</h1></section>" +
-        '<div class="ow-quick"><button class="ow-btn ow-primary" data-ow-go="grant">' + icon("plus") + "Выдать подписку</button>" +
+        '<div class="ow-quick"><button class="ow-btn ow-primary" data-ow-go="grant">' + icon("plus") + "Выдать Premium</button>" +
         '<button class="ow-btn ow-secondary" data-ow-go="invite-new">' + icon("ticket") + "Приглашение</button></div>" +
         '<section class="ow-card"><h2>Ученики</h2><div class="ow-big" data-ow-go="students"><b>' + esc(s.total) + "</b><span>всего зарегистрировано</span></div>" +
         '<div class="ow-stats">' + stat(s.paid, "с подпиской", "subs", "blue") + stat(s.trial, "на пробном", "students:trial", "mint") +
@@ -293,7 +301,8 @@
         stat(sub.expiring_7d, "истекают за 7 дней", "subs:expiring", sub.expiring_7d ? "gold" : "") + stat(sub.extensions_30d, "продлений за 30 дней") + "</div></section>" +
         '<section class="ow-card" data-ow-go="ai"><h2>ИИ</h2>' + aiState(ai) +
         '<div class="ow-meter" role="img" aria-label="Использовано ' + esc(ai.used) + " из " + esc(ai.budget) + '"><i style="width:' + pct + '%"></i></div>' +
-        '<div class="ow-stats">' + stat(ai.budget, "общий бюджет") + stat(ai.used, "использовано") + stat(ai.remaining, "осталось", null, ai.remaining > 5 ? "mint" : "wine") + "</div></section>" +
+        '<div class="ow-stats">' + stat(ai.budget, "общий бюджет") + stat(ai.used, "использовано") + stat(ai.remaining, "осталось", null, ai.remaining > 5 ? "mint" : "wine") + "</div>" +
+        (ai.reserve ? reserveLine(ai.reserve) : "") + "</section>" +
         '<section class="ow-card"><h2>Приглашения</h2><div class="ow-stats four">' + stat(inv.active, "активные", "invites:active", "mint") + stat(inv.used, "использованы", "invites:used") +
         stat(inv.expired, "истекли", "invites:expired") + stat(inv.revoked, "отозваны", "invites:revoked") + "</div></section>" +
         '<p class="ow-updated">Обновлено ' + esc(time(d.server_now)) + ' · <button class="ow-link" data-ow-retry>обновить</button></p>');
@@ -329,7 +338,7 @@
         "</dl></section>" +
         (periods.length ? '<section class="ow-card"><h2>Оплаченные сроки</h2>' + periodList(periods) + "</section>" : "") +
         '<div class="ow-actions">' +
-        (periods.length ? "" : '<button class="ow-btn ow-primary" data-ow-act="grant">Выдать подписку</button>') +
+        (periods.length ? "" : '<button class="ow-btn ow-primary" data-ow-act="grant">Выдать Premium</button>') +
         (hasPaid ? '<button class="ow-btn ' + (periods.length ? "ow-primary" : "ow-secondary") + '" data-ow-act="extend">Продлить</button>' : "") +
         (periods.length ? '<button class="ow-btn ow-danger" data-ow-act="revoke">Отозвать доступ</button>' : "") + "</div>" +
         '<section class="ow-card"><h2>История</h2>' + (d.history.length ? '<ul class="ow-events">' + d.history.map((h) => eventItem({ ...h, type: h.action, kn_id: null, by: actorKind(h.actor) })).join("") + "</ul>" : empty("Пока пусто", "")) + "</section>");
@@ -344,16 +353,20 @@
       return shell(title,
         '<section class="ow-card ow-summary"><dl class="ow-dl">' +
         "<dt>Ученик</dt><dd class=\"ow-mono\">" + esc(p.kn_id) + "</dd>" +
-        "<dt>Операция</dt><dd>" + (r.action === "grant" ? "Выдача подписки" : "Продление") + "</dd>" +
+        "<dt>Операция</dt><dd>" + (r.action === "grant" ? "Выдача Premium" : "Продление Premium") + "</dd>" +
+        "<dt>Условия</dt><dd>" + (p.custom ? "<b>Нестандартные</b>" : "Premium") + "</dd>" +
         "<dt>Срок</dt><dd>" + esc(days(p.days)) + "</dd>" +
         "<dt>Генерации ИИ</dt><dd>" + esc(gens(p.ai_quota)) + " на этот срок</dd>" +
         "<dt>Начало</dt><dd>" + esc(p.starts_after_current ? date(p.starts_at) + " (после текущего срока)" : "сразу после подтверждения") + "</dd>" +
         "<dt>Окончание</dt><dd>" + esc(date(p.ends_at)) + "</dd>" +
         (r.note ? "<dt>Комментарий</dt><dd>" + esc(r.note) + "</dd>" : "") + "</dl>" +
         (r.action === "extend" ? '<p class="ow-note">Оплаченные дни текущего срока сохраняются. Неиспользованные генерации текущего срока на новый не переносятся.</p>' : "") +
+        (p.custom ? '<p class="ow-warn">' + icon("warn") + "<span>Условия отличаются от Premium (30 дней, 10 генераций). Проверь, что это не опечатка.</span></p>" : "") +
+        (p.budget_check && !p.budget_check.ok ? '<p class="ow-error" role="alert">' + esc(errText({ error: "BUDGET_LOW", need: p.budget_check.need, free: p.budget_check.free })) + "</p>" : "") +
         "</section>" + (r.error ? '<p class="ow-error" role="alert">' + esc(r.error) + "</p>" : "") +
         '<div class="ow-actions two"><button class="ow-btn ow-secondary" data-ow-back>Отмена</button>' +
-        '<button class="ow-btn ow-primary" data-ow-act="commit"' + (st.busy ? " disabled" : "") + ">" + (st.busy ? "Выполняем…" : r.action === "grant" ? "Подтвердить выдачу" : "Подтвердить продление") + "</button></div>",
+        '<button class="ow-btn ow-primary" data-ow-act="commit"' + (st.busy || (p.budget_check && !p.budget_check.ok) ? " disabled" : "") + ">" +
+        (st.busy ? "Выполняем…" : r.action === "grant" ? "Подтвердить выдачу" : "Подтвердить продление") + "</button></div>",
         { nav: false });
     },
     revoke(r) {
@@ -399,7 +412,7 @@
       r.filter = r.filter || "paid";
       fetchStudents(r);
       return shell("Подписки",
-        '<div class="ow-quick"><button class="ow-btn ow-primary" data-ow-go="grant">' + icon("plus") + "Выдать подписку по ID</button></div>" +
+        '<div class="ow-quick"><button class="ow-btn ow-primary" data-ow-go="grant">' + icon("plus") + "Выдать Premium по ID</button></div>" +
         '<div class="ow-chips">' + [["paid", "Действующие"], ["expiring", "Истекают за 7 дней"], ["expired", "Истёкшие"]]
           .map(([id, l]) => '<button class="ow-chip' + (r.filter === id ? " active" : "") + '" data-ow-filter="' + id + '">' + l + "</button>").join("") + "</div>" +
         '<div data-ow-list>' + studentList(r) + "</div>");
@@ -473,8 +486,8 @@
             : "массовый сбой: " + esc(b.window_errors) + " " + plural(b.window_errors, "ошибка", "ошибки", "ошибок") + " у " + esc(b.window_users) + " " +
               plural(b.window_users, "ученика", "учеников", "учеников") + " за " + esc(b.window_minutes) + " минут") + "</dd>" +
           "<dt>Возобновится</dt><dd>" + (b.until_at_most ? "не позже " + esc(dateTime(b.until_at_most)) + ", если новых сбоев не будет" : "автоматически") + "</dd></dl>" : "") +
-        (d.state === "budget_exhausted" ? '<p class="ow-note">Бюджет исчерпан: новые генерации не запускаются ни у кого. Увеличить бюджет можно только в Supabase (решение владельца).</p>' : "") +
-        "</section>" +
+        (d.state === "budget_exhausted" ? '<p class="ow-note">Бюджет исчерпан: новые генерации не запускаются ни у кого. Увеличь бюджет кнопкой ниже.</p>' : "") +
+        "</section>" + (d.reserve ? reserveCard(d.reserve) : "") +
         '<section class="ow-card"><h2>За сутки</h2><div class="ow-stats four">' + stat(d.starts_24h, "запусков") + stat(d.ok_24h, "успешно", null, "mint") +
         stat(d.tech_errors_24h, "тех. ошибок", null, d.tech_errors_24h ? "wine" : "") + stat(d.user_errors_24h, "нечитаемые фото") + "</div></section>" +
         '<section class="ow-card"><h2>7 дней</h2><div class="ow-bars">' + d.days.map((x) =>
@@ -486,7 +499,35 @@
         "<li>Не больше " + esc(d.limits.max_tech_errors_per_day) + " технических ошибок у ученика за сутки</li>" +
         "<li>Не больше " + esc(d.limits.max_user_errors_per_day) + " попыток с нечитаемыми фото за сутки</li>" +
         "<li>Автостоп: " + esc(b.window_limit) + " ошибки у 2+ учеников за " + esc(b.window_minutes) + " мин или " + esc(b.day_limit) + " за сутки</li></ul>" +
-        '<p class="ow-note">Панель только показывает бюджет и ничего в нём не меняет.</p></section>');
+        '<p class="ow-note">Бюджет меняешь только ты — на экране «Изменить бюджет», с подтверждением. Автоматически он не растёт.</p></section>');
+    },
+
+    // изменение общего бюджета ИИ: ввод → подтверждение → результат (сервер проверяет минимум и что бюджет не изменился)
+    budget(r) {
+      need(r, () => call("owner_ai"));
+      if (r.error && !r.data) return shell("Изменить бюджет", errorBox(r.error), { nav: false });
+      if (!r.data) return shell("Изменить бюджет", loading(), { nav: false });
+      const d = r.data, b = d.reserve || {};
+      if (r.step === "confirm")
+        return shell("Подтверди бюджет",
+          '<section class="ow-card ow-summary"><dl class="ow-dl"><dt>Сейчас</dt><dd>' + esc(d.budget) + " " + plural(d.budget, "запуск", "запуска", "запусков") +
+          "</dd><dt>Станет</dt><dd><b>" + esc(r.value) + "</b></dd><dt>Израсходовано</dt><dd>" + esc(d.used) + "</dd><dt>Резерв Premium</dt><dd>" + esc(b.premium_reserve) +
+          "</dd></dl>" + (r.value > d.budget ? '<p class="ow-note">Больше бюджет — больше возможных запросов к GigaChat. Проверь остаток токенов в кабинете GigaChat.</p>' : "") +
+          "</section>" + (r.err || r.error ? '<p class="ow-error" role="alert">' + esc(r.err || r.error) + "</p>" : "") +
+          '<div class="ow-actions two"><button class="ow-btn ow-secondary" data-ow-act="budget-edit">Назад</button>' +
+          '<button class="ow-btn ow-primary" data-ow-act="budget-commit"' + (st.busy ? " disabled" : "") + ">" + (st.busy ? "Сохраняем…" : "Подтвердить") + "</button></div>",
+          { nav: false });
+      return shell("Изменить бюджет",
+        '<form class="ow-form" data-ow-form="budget"><p class="ow-note">Бюджет — сколько всего запусков ИИ можно сделать (у всех вместе, считая неудачные). ' +
+        "Сейчас " + esc(d.budget) + ", израсходовано " + esc(d.used) + ". Меньше " + esc(b.min_budget) + " поставить нельзя: это израсходованное и резерв оплаченных генераций.</p>" +
+        '<label class="ow-label" for="owBudget">Новый бюджет</label>' +
+        '<input id="owBudget" class="ow-field" type="number" inputmode="numeric" min="' + esc(b.min_budget) + '" max="100000" value="' + esc(r.value ?? d.budget) + '" required>' +
+        '<p class="ow-note">Один Premium — это ' + esc(b.per_premium) + " " + plural(b.per_premium, "запуск", "запуска", "запусков") + " резерва (10 генераций × " +
+        esc(String(b.factor).replace(".", ",")) + " с запасом на неудачи).</p>" +
+        (r.err ? '<p class="ow-error" role="alert">' + esc(r.err) + "</p>" : '<p class="ow-error" role="alert"></p>') +
+        '<div class="ow-actions two"><button class="ow-btn ow-secondary" type="button" data-ow-back>Отмена</button>' +
+        '<button class="ow-btn ow-primary" type="submit">Продолжить</button></div></form>',
+        { nav: false });
     },
 
     history(r) {
@@ -535,8 +576,33 @@
     const [l, c, t] = map[ai.state] || ["—", "none", ""];
     return '<div class="ow-ai-state"><span class="ow-badge ow-' + c + '">' + l + "</span><p>" + esc(t) + "</p></div>";
   }
+  // резерв бюджета под оплаченные генерации (private.budget_state)
+  const RESERVE = {
+    ok: ["Хватает", "mint"], low: ["Бюджет заканчивается", "gold"], reserved_only: ["Только для Premium", "wine"], exhausted: ["Бюджет исчерпан", "wine"],
+  };
+  function reserveLine(b) {
+    const [l, c] = RESERVE[b.state] || ["—", "none"];
+    return '<p class="ow-note"><span class="ow-badge ow-' + c + '">' + esc(l) + "</span> резерв Premium " + esc(b.premium_reserve) + ", свободно " + esc(Math.max(0, b.free)) + "</p>";
+  }
+  function reserveCard(b) {
+    const [l, c] = RESERVE[b.state] || ["—", "none"];
+    const warn = {
+      low: "Свободный бюджет меньше " + b.warn_percent + "% — скоро новые подписки и пробные генерации не поместятся. Увеличь бюджет.",
+      reserved_only: "Свободного бюджета нет: генерации идут только у учеников с Premium (их резерв защищён). Пробный период и твои запуски сверх резерва — на паузе.",
+      exhausted: "Бюджет исчерпан полностью.",
+    }[b.state];
+    return '<section class="ow-card"><h2>Бюджет и резерв Premium</h2><div class="ow-ai-state"><span class="ow-badge ow-' + c + '">' + esc(l) + "</span>" +
+      (warn ? "<p>" + esc(warn) + "</p>" : "<p>Оплаченные генерации учеников защищены резервом.</p>") + "</div>" +
+      '<div class="ow-stats four">' + stat(b.remaining, "осталось") + stat(b.premium_reserve, "резерв Premium", null, "blue") +
+      stat(b.owner_reserve_left, "твой резерв") + stat(Math.max(0, b.free), "свободно", null, b.free > 0 ? "mint" : "wine") + "</div>" +
+      '<dl class="ow-dl"><dt>Обязательства</dt><dd>' + esc(b.obligations) + " " + plural(b.obligations, "генерация", "генерации", "генераций") + " у учеников с Premium</dd>" +
+      "<dt>Запас</dt><dd>× " + esc(String(b.factor).replace(".", ",")) + " на неудачи и повторы (оценка, не гарантия)</dd>" +
+      "<dt>Можно продать</dt><dd>ещё " + esc(b.can_sell) + " " + plural(b.can_sell, "Premium", "Premium", "Premium") + " без увеличения бюджета</dd></dl>" +
+      '<button class="ow-btn ow-secondary ow-wide" data-ow-go="budget">Изменить бюджет</button></section>';
+  }
   function kindText(a) {
     if (a.kind === "legacy") return "Участник F&F (тестирование v59)";
+    if (a.status === "paid" && a.plan_title) return a.plan_title;
     return { owner: "Владелец", paid: "Оплаченная подписка", trial: "Пробный период", expired: "Доступ закончился", none: "Без доступа" }[a.status] || "—";
   }
   const periodList = (ps) => '<ul class="ow-periods">' + ps.map((p) => "<li><b>" + esc(date(p.starts_at)) + " — " + esc(date(p.ends_at)) + "</b><span>ИИ: " + esc(p.ai_used ?? 0) + " из " + esc(p.ai_quota) + "</span></li>").join("") + "</ul>";
@@ -569,6 +635,7 @@
     panel_refused: ["Отказ операции", "warn"], setup_code_issued: ["Код установки пароля", "lock"], password_set: ["Пароль панели установлен", "lock"],
     password_changed: ["Пароль панели изменён", "lock"], password_reset: ["Пароль панели сброшен", "lock"], unlock_failed: ["Неверный пароль панели", "warn"],
     locked: ["Пауза после неверных паролей", "warn"], sessions_revoked: ["Закрыты сессии панели", "lock"],
+    budget: ["Изменён бюджет ИИ", "card"],
   };
   function eventText(e) {
     const x = e.details || {};
@@ -583,7 +650,9 @@
       case "invite_revoke":
         return x.label || "без подписи";
       case "panel_refused":
-        return ({ grant: "выдача", extend: "продление", revoke: "отзыв", invite_create: "приглашение", invite_revoke: "отзыв кода" }[x.op] || x.op || "") + ": " + (ERR[x.error] || x.error || "");
+        return ({ grant: "выдача", extend: "продление", revoke: "отзыв", invite_create: "приглашение", invite_revoke: "отзыв кода", budget: "бюджет" }[x.op] || x.op || "") + ": " + (ERR[x.error] || x.error || "");
+      case "budget":
+        return (x.from ?? "?") + " → " + (x.to ?? "?") + " запусков";
       case "locked":
         return x.until ? "до " + dateTime(x.until) : "";
       case "unlock_failed":
@@ -600,22 +669,32 @@
       (e.by === "panel" ? " · из панели" : e.by === "sql_editor" ? " · SQL Editor" : e.by === "system" ? " · автоматически" : "") + "</span>" +
       (eventText(e) ? "<p>" + esc(eventText(e)) + "</p>" : "") + "</div></li>";
   }
+  // Premium (30 дней, 10 генераций) — по умолчанию; другие условия — только после явного выбора «Нестандартные условия»
+  const PREMIUM = { days: 30, quota: 10 };
   function subForm(r, action) {
-    r.days = r.days || 30;
-    r.quota = r.quota ?? 20;
+    r.custom = !!r.custom;
+    if (!r.custom) (r.days = PREMIUM.days), (r.quota = PREMIUM.quota);
+    r.days = r.days || PREMIUM.days;
+    r.quota = r.quota ?? PREMIUM.quota;
     const customDays = ![7, 30, 90].includes(r.days);
-    return shell(action === "grant" ? "Выдать подписку" : "Продлить подписку",
+    return shell(action === "grant" ? "Выдать Premium" : "Продлить Premium",
       '<form class="ow-form" data-ow-form="sub">' +
       '<label class="ow-label" for="owKn">ID ученика</label>' +
       '<input id="owKn" class="ow-field ow-mono" value="' + esc(r.kn || "") + '" placeholder="KN-ABC234" maxlength="12" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" required' + (r.lockKn ? " readonly" : "") + ">" +
-      '<span class="ow-label">Срок</span><div class="ow-chips">' + [7, 30, 90].map((n) =>
-        '<button type="button" class="ow-chip' + (r.days === n ? " active" : "") + '" data-ow-days="' + n + '">' + days(n) + "</button>").join("") +
-      '<button type="button" class="ow-chip' + (customDays ? " active" : "") + '" data-ow-days="custom">Свой</button></div>' +
-      (customDays || r.custom ? '<input id="owDays" class="ow-field" type="number" inputmode="numeric" min="1" max="400" value="' + esc(r.days) + '" aria-label="Число дней (1–400)">' : "") +
-      '<label class="ow-label" for="owQuota">Генерации ИИ на этот срок</label>' +
-      '<input id="owQuota" class="ow-field" type="number" inputmode="numeric" min="0" max="1000" value="' + esc(r.quota) + '" required>' +
+      '<span class="ow-label">Условия</span><div class="ow-chips">' +
+      '<button type="button" class="ow-chip' + (r.custom ? "" : " active") + '" data-ow-terms="premium">Premium · 30 дней · 10 генераций</button>' +
+      '<button type="button" class="ow-chip' + (r.custom ? " active" : "") + '" data-ow-terms="custom">Нестандартные</button></div>' +
+      (r.custom
+        ? '<p class="ow-warn">' + icon("warn") + "<span>Нестандартные условия — только по особой договорённости. Обычная оплата 299 ₽ — это Premium: 30 дней и 10 генераций.</span></p>" +
+          '<span class="ow-label">Срок</span><div class="ow-chips">' + [7, 30, 90].map((n) =>
+            '<button type="button" class="ow-chip' + (r.days === n && !r.customDays ? " active" : "") + '" data-ow-days="' + n + '">' + days(n) + "</button>").join("") +
+          '<button type="button" class="ow-chip' + (customDays || r.customDays ? " active" : "") + '" data-ow-days="custom">Свой</button></div>' +
+          (customDays || r.customDays ? '<input id="owDays" class="ow-field" type="number" inputmode="numeric" min="1" max="400" value="' + esc(r.days) + '" aria-label="Число дней (1–400)">' : "") +
+          '<label class="ow-label" for="owQuota">Генерации ИИ на этот срок</label>' +
+          '<input id="owQuota" class="ow-field" type="number" inputmode="numeric" min="0" max="1000" value="' + esc(r.quota) + '" required>'
+        : '<p class="ow-note">Premium: 299 ₽, 30 календарных дней, 10 успешных генераций ИИ, история и физика целиком.</p>') +
       '<label class="ow-label" for="owNote">Комментарий (видишь только ты)</label>' +
-      '<input id="owNote" class="ow-field" maxlength="200" placeholder="Например: оплата 26.10, 500 ₽" value="' + esc(r.note || "") + '">' +
+      '<input id="owNote" class="ow-field" maxlength="200" placeholder="Например: оплата 28.10, 299 ₽" value="' + esc(r.note || "") + '">' +
       (r.error ? '<p class="ow-error" role="alert">' + esc(r.error) + "</p>" : '<p class="ow-error" role="alert"></p>') +
       '<div class="ow-actions two"><button class="ow-btn ow-secondary" type="button" data-ow-back>Отмена</button>' +
       '<button class="ow-btn ow-primary" type="submit"' + (st.busy ? " disabled" : "") + ">" + (st.busy ? "Проверяем…" : "Продолжить") + "</button></div></form>" +
@@ -701,11 +780,13 @@
     }
     if (kind === "sub") {
       r.kn = val("owKn").trim();
-      if (st.root.querySelector("#owDays")) r.days = parseInt(val("owDays"), 10);
-      r.quota = parseInt(val("owQuota"), 10);
+      if (r.custom) {
+        if (st.root.querySelector("#owDays")) r.days = parseInt(val("owDays"), 10);
+        r.quota = parseInt(val("owQuota"), 10);
+      } else (r.days = PREMIUM.days), (r.quota = PREMIUM.quota);
       r.note = val("owNote").trim();
       if (!Number.isInteger(r.days) || r.days < 1 || r.days > 400) return (r.error = "Срок: от 1 до 400 дней."), render();
-      if (!Number.isInteger(r.quota) || r.quota < 0) return (r.error = "Генерации: целое число от 0."), render();
+      if (!Number.isInteger(r.quota) || r.quota < 0 || r.quota > 1000) return (r.error = "Генерации: целое число от 0 до 1000."), render();
       r.error = null;
       return busy(async () => {
         const res = await call("owner_preview", { p_kn_id: r.kn, p_action: r.name, p_days: r.days, p_ai_quota: r.quota });
@@ -725,6 +806,18 @@
         st.stack.pop();
         showResult({ name: "result", res, okTitle: "Доступ отозван", kn: p.kn_id });
       });
+    }
+    if (kind === "budget") {
+      const v = parseInt(val("owBudget"), 10);
+      const b = r.data?.reserve || {};
+      if (!Number.isInteger(v) || v < 0 || v > 100000) return (r.err = "Бюджет: целое число от 0 до 100 000."), render();
+      if (b.min_budget !== undefined && v < b.min_budget) return (r.err = errText({ error: "BUDGET_TOO_LOW", min: b.min_budget })), render();
+      if (v === r.data.budget) return (r.err = "Это и есть текущий бюджет."), render();
+      r.value = v;
+      r.err = null;
+      r.step = "confirm";
+      r.requestId = uuid();
+      return render();
     }
     if (kind === "invite") {
       r.label = val("owInvLabel").trim();
@@ -769,10 +862,21 @@
       r.loading = false;
       return render();
     }
+    if ((x = el("[data-ow-terms]"))) {
+      const r = current();
+      (r.kn = val("owKn") || r.kn), (r.note = val("owNote"));
+      r.custom = x.dataset.owTerms === "custom";
+      if (!r.custom) (r.days = PREMIUM.days), (r.quota = PREMIUM.quota), (r.customDays = false);
+      return render();
+    }
     if ((x = el("[data-ow-days]"))) {
       const r = current();
-      if (x.dataset.owDays === "custom") r.custom = true;
-      else (r.days = Number(x.dataset.owDays)), (r.custom = false);
+      // форма подписки: «Свой» — поле с числом дней; приглашение: те же кнопки срока кода
+      if (r.name === "invite-new") {
+        if (x.dataset.owDays === "custom") r.custom = true;
+        else (r.days = Number(x.dataset.owDays)), (r.custom = false);
+      } else if (x.dataset.owDays === "custom") r.customDays = true;
+      else (r.days = Number(x.dataset.owDays)), (r.customDays = false);
       if (r.name !== "invite-new") (r.kn = val("owKn") || r.kn), (r.quota = parseInt(val("owQuota"), 10)), (r.note = val("owNote"));
       else r.label = val("owInvLabel");
       return render();
@@ -808,17 +912,35 @@
       case "to-student":
         st.stack = [{ name: "students" }];
         return push({ name: "student", kn: x.dataset.kn });
+      case "budget-edit":
+        r.step = null;
+        r.err = null;
+        return render();
+      case "budget-commit":
+        r.error = null;
+        return busy(async () => {
+          const res = await call("owner_set_budget", { p_request_id: r.requestId, p_new_budget: r.value, p_expect_budget: r.data.budget });
+          if (res.error) {
+            r.err = errText(res);
+            if (res.error === "STATE_CHANGED") (r.data = null), (r.loading = false), (r.step = null);
+            return;
+          }
+          st.flash = { kind: "ok", text: "Бюджет ИИ: " + res.budget + " " + plural(res.budget, "запуск", "запуска", "запусков") + "." };
+          st.stack.pop();
+          const top = current();
+          if (top) (top.data = res.ai || null), (top.loading = false);
+        });
       case "commit":
         return busy(async () => {
           const p = r.preview;
           const fn = r.action === "grant" ? "owner_grant" : "owner_extend";
-          const args = { p_request_id: r.requestId, p_kn_id: p.kn_id, p_days: p.days, p_ai_quota: p.ai_quota, p_note: r.note || null };
+          const args = { p_request_id: r.requestId, p_kn_id: p.kn_id, p_days: p.days, p_ai_quota: p.ai_quota, p_note: r.note || null, p_custom: !!p.custom };
           if (r.action === "extend") args.p_expect_starts_at = p.starts_after_current ? p.starts_at : null;
           const res = await call(fn, args);
-          if (res.error === "STATE_CHANGED") return (r.error = errText(res));
+          if (res.error === "STATE_CHANGED" || res.error === "BUDGET_LOW") return (r.error = errText(res));
           st.stack.pop();
           st.stack.pop();
-          showResult({ name: "result", res, okTitle: r.action === "grant" ? "Подписка выдана" : "Подписка продлена", kn: p.kn_id });
+          showResult({ name: "result", res, okTitle: r.action === "grant" ? "Premium выдан" : "Premium продлён", kn: p.kn_id });
         });
       case "more":
         if (r.name === "students" || r.name === "subs") return fetchStudents(r, true);

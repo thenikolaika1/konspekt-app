@@ -30,6 +30,8 @@ function check(name, ok, extra) {
 psql("postgres", "drop database if exists " + DB + "; create database " + DB + " template base61;");
 psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261024150000_paid_access.sql"), "utf8"));
 psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261026120000_owner_panel.sql"), "utf8"));
+// v62: клиент панели вызывает функции v62 (Premium по умолчанию, p_custom, бюджет)
+psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261028120000_v62_paid_library.sql"), "utf8"));
 psql(DB, `
 create function public.t_reg(p_code text, p_kn text) returns uuid language plpgsql as $$
 declare r jsonb; v uuid;
@@ -60,7 +62,7 @@ begin
   reset role;
   return r;
 end $$;
-update private.ai_limits set max_total_starts = 40, total_starts = 7 where id;
+update private.ai_limits set max_total_starts = 100, total_starts = 7 where id;
 select public.t_reg('UIOWNER00001', 'KN-WAAAAA');
 select private.admin_set_owner('KN-WAAAAA');
 select public.t_reg('UISTUD' || lpad(i::text, 6, '0'), 'KN-S' || translate(lpad(i::text, 5, '0'), '0123456789', 'ABCDEFGHJK')) from generate_series(1, 24) i;
@@ -235,8 +237,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
 
     // 6. главная — реальные числа сервера
     t = await owText(page);
-    check("U6. главная: 26 учеников (24 + F&F + владелец), бюджет 40 / использовано 7 / осталось 33, ИИ «Работает»",
-      /26\s*всего зарегистрировано/.test(t) && t.includes("33") && t.includes("Работает") && t.includes("40"), t.slice(0, 500));
+    check("U6. главная: 26 учеников (24 + F&F + владелец), бюджет 100 / использовано 7 / осталось 93, ИИ «Работает»",
+      /26\s*всего зарегистрировано/.test(t) && t.includes("93") && t.includes("Работает") && t.includes("100"), t.slice(0, 500));
     await page.screenshot({ path: path.join(SHOTS, "owner-home-390.png"), fullPage: false });
     check("U36. главная 390 px: без горизонтальной прокрутки", await noHScroll(page));
 
@@ -265,18 +267,20 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     // 8. выдача подписки из карточки ученика: форма → подтверждение с датами сервера → результат
     await owClick(page, '[data-ow-student="KN-SAAAAB"]', 1500);
     t = await owText(page);
-    check("U8. карточка ученика: ID, статус «Пробный», регистрация, история; кнопка «Выдать подписку»", t.includes("KN-SAAAAB") && t.includes("Пробный") && t.includes("Регистрация") && t.includes("Выдать подписку"), t.slice(0, 300));
+    check("U8. карточка ученика: ID, статус «Пробный», регистрация, история; кнопка «Выдать Premium»", t.includes("KN-SAAAAB") && t.includes("Пробный") && t.includes("Регистрация") && t.includes("Выдать Premium"), t.slice(0, 300));
     await page.screenshot({ path: path.join(SHOTS, "owner-student.png") });
     await owClick(page, '[data-ow-act="grant"]', 600);
     check("U8. форма: ID ученика подставлен и не редактируется", (await page.$eval("#owner-root #owKn", (n) => n.value + "|" + n.readOnly)) === "KN-SAAAAB|true");
-    await owClick(page, '[data-ow-days="30"]', 300);
-    await page.fill("#owner-root #owQuota", "20");
+    t = await owText(page);
+    check("U8. форма v62: по умолчанию Premium · 30 дней · 10 генераций, полей срока и лимита нет", t.includes("Premium · 30 дней · 10 генераций")
+      && (await page.$eval('#owner-root [data-ow-terms="premium"]', (n) => n.classList.contains("active"))) && !(await page.$("#owner-root #owQuota")), t.slice(0, 300));
     await page.fill("#owner-root #owNote", "оплата 26.10");
     await owClick(page, 'button[type="submit"]', 1800);
     t = await owText(page);
     const end30 = new Date(Date.now() + 30 * 864e5).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", year: "numeric" });
-    check("U8. подтверждение: ID, «Выдача подписки», 30 дней, 20 генераций, начало сразу, окончание — дата сервера",
-      t.includes("KN-SAAAAB") && t.includes("Выдача подписки") && t.includes("30 дней") && t.includes("20 генераций") && t.includes("сразу после подтверждения") && t.includes(end30), t.slice(0, 400));
+    check("U8. подтверждение: ID, «Выдача Premium», условия Premium, 30 дней, 10 генераций, начало сразу, окончание — дата сервера",
+      t.includes("KN-SAAAAB") && t.includes("Выдача Premium") && t.includes("Условия") && !t.includes("Нестандартные") && t.includes("30 дней") && t.includes("10 генераций")
+      && t.includes("сразу после подтверждения") && t.includes(end30), t.slice(0, 400));
     check("U8. до подтверждения выдачи нет", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "0");
     await page.screenshot({ path: path.join(SHOTS, "owner-confirm.png") });
     // двойное нажатие «Подтвердить»
@@ -285,23 +289,22 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
       b.click();
       b.click();
     });
-    await until(page, async () => (await owText(page)).includes("Подписка выдана"));
+    await until(page, async () => (await owText(page)).includes("Premium выдан"));
     t = await owText(page);
-    check("U8. результат после ответа сервера: «Подписка выдана», срок, лимит, статус с сервера", t.includes("Подписка выдана") && t.includes("20 генераций") && t.includes("Подписка") && t.includes("ИИ 20 из 20"), t.slice(0, 400));
+    check("U8. результат после ответа сервера: «Premium выдан», срок, лимит, статус с сервера", t.includes("Premium выдан") && t.includes("10 генераций") && t.includes("Premium") && t.includes("ИИ 10 из 10"), t.slice(0, 400));
+    check("U8. в базе: тариф premium, 30 дней, 10 генераций", sqlv("select g.plan || '/' || (g.ends_at - g.starts_at) || '/' || g.ai_quota from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "premium/30 days/10");
     check("U19. двойное нажатие — одна выдача в базе", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "1");
     check("U8. журнал: выдача от имени панели", sqlv("select count(*) from private.access_log where action = 'grant' and actor = 'panel:KN-WAAAAA'") === "1");
 
     // 9. продление: встык к текущему сроку
     await owClick(page, '[data-ow-act="to-student"]', 1500);
     await owClick(page, '[data-ow-act="extend"]', 600);
-    await owClick(page, '[data-ow-days="30"]', 300);
-    await page.fill("#owner-root #owQuota", "10");
     await owClick(page, 'button[type="submit"]', 1800);
     t = await owText(page);
     check("U9. подтверждение продления: начало «после текущего срока» = окончание текущего, правила v61.2 объяснены",
-      t.includes("Продление") && t.includes(end30 + " (после текущего срока)") && t.includes("Оплаченные дни текущего срока сохраняются"), t.slice(0, 400));
+      t.includes("Продление Premium") && t.includes(end30 + " (после текущего срока)") && t.includes("Оплаченные дни текущего срока сохраняются") && t.includes("на новый не переносятся"), t.slice(0, 400));
     await owClick(page, '[data-ow-act="commit"]', 2000);
-    check("U9. «Подписка продлена»", (await owText(page)).includes("Подписка продлена"));
+    check("U9. «Premium продлён»", (await owText(page)).includes("Premium продлён"));
     check("U9. в базе 2 срока, второй начинается в конце первого", sqlv(`select count(*) || ':' || (max(starts_at) = min(ends_at))::text from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'`) === "2:true");
 
     // 10. отзыв: все сроки видны, подтверждение частью ID
@@ -345,7 +348,7 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     // 12. ИИ и бюджет: реальные значения, автостоп
     await owClick(page, '[data-ow-tab="ai"]', 1500);
     t = await owText(page);
-    check("U34. ИИ: осталось 33, бюджет 40, «Работает», 7 дней", t.includes("33") && t.includes("40") && t.includes("Работает") && t.includes("7 дней"), t.slice(0, 300));
+    check("U34. ИИ: осталось 93, бюджет 100, «Работает», 7 дней", t.includes("93") && t.includes("100") && t.includes("Работает") && t.includes("7 дней"), t.slice(0, 300));
     sqlv(`insert into private.generation_starts (user_id, op_key, started_at, outcome, error_code, finished_at)
       select u.id, 'x' || g, now() - interval '5 minutes', 'failed', 'AI_TIMEOUT', now() from auth.users u, generate_series(1, 2) g
        where u.email in (private.kn_email('KN-SAAAAC'), private.kn_email('KN-SAAAAD'))`);
@@ -353,7 +356,68 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     t = await owText(page);
     check("U34. ИИ: массовый сбой → «Автостоп», причина и «не позже …»", t.includes("Автостоп") && t.includes("массовый сбой") && t.includes("не позже"), t.slice(0, 500));
     await page.screenshot({ path: path.join(SHOTS, "owner-ai.png") });
-    check("U34. панель не изменила бюджет", sqlv("select max_total_starts || '/' || total_starts from private.ai_limits") === "40/7");
+    check("U34. панель не изменила бюджет", sqlv("select max_total_starts || '/' || total_starts from private.ai_limits") === "100/7");
+
+    // v62: резерв Premium, нестандартные условия, недостаток бюджета, изменение бюджета
+    t = await owText(page);
+    check("U50. ИИ: карточка «Бюджет и резерв Premium» — осталось, резерв, твой резерв, свободно, «Можно продать», запас — оценка",
+      t.includes("Бюджет и резерв Premium") && t.includes("резерв Premium") && t.includes("твой резерв") && t.includes("свободно") && t.includes("Можно продать")
+      && t.includes("оценка, не гарантия") && t.includes("Изменить бюджет"), t.slice(0, 900));
+    await owClick(page, '[data-ow-tab="home"]', 1500);
+    await owClick(page, '[data-ow-go="grant"]', 600);
+    await page.fill("#owner-root #owKn", "KN-SAAAAE");
+    await owClick(page, '[data-ow-terms="custom"]', 300);
+    t = await owText(page);
+    check("U51. «Нестандартные»: предупреждение «только по особой договорённости», поля срока и генераций", t.includes("только по особой договорённости")
+      && !!(await page.$("#owner-root #owQuota")) && !!(await page.$('#owner-root [data-ow-days="7"]')), t.slice(0, 400));
+    check("U51. ID не стёрся при переключении условий", (await page.$eval("#owner-root #owKn", (n) => n.value)) === "KN-SAAAAE");
+    await owClick(page, '[data-ow-days="7"]', 300);
+    await page.fill("#owner-root #owQuota", "1001");
+    await owClick(page, 'button[type="submit"]', 800);
+    check("U51. 1001 генерация — форма не отправляется (поле max 1000), подтверждения нет", !!(await page.$("#owner-root #owQuota:invalid")) && !(await owText(page)).includes("Подтверди выдачу"));
+    await page.fill("#owner-root #owQuota", "3");
+    await owClick(page, 'button[type="submit"]', 1800);
+    t = await owText(page);
+    check("U51. подтверждение: «Нестандартные», 7 дней, 3 генерации, предупреждение «Проверь, что это не опечатка»",
+      t.includes("Нестандартные") && t.includes("7 дней") && t.includes("3 генерации") && t.includes("не опечатка"), t.slice(0, 500));
+    await page.screenshot({ path: path.join(SHOTS, "owner-custom-confirm.png") });
+    await owClick(page, '[data-ow-act="commit"]', 2000);
+    check("U51. выдано по подтверждённым нестандартным условиям: в базе без тарифа (plan null), 7 дней, 3",
+      sqlv("select coalesce(g.plan, 'null') || '/' || (g.ends_at - g.starts_at) || '/' || g.ai_quota from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAE') and g.kind = 'paid'") === "null/7 days/3");
+    // мало бюджета: свободно 5 < 15 — предпросмотр предупреждает, «Подтвердить» неактивна
+    sqlv("update private.ai_limits set max_total_starts = total_starts + (private.budget_state() ->> 'premium_reserve')::int + (private.budget_state() ->> 'owner_reserve_left')::int + 5 where id");
+    await owClick(page, '[data-ow-tab="home"]', 1500);
+    await owClick(page, '[data-ow-go="grant"]', 600);
+    await page.fill("#owner-root #owKn", "KN-SAAAAF");
+    await owClick(page, 'button[type="submit"]', 1800);
+    t = await owText(page);
+    check("U52. бюджета не хватает: на подтверждении — понятная ошибка, кнопка «Подтвердить выдачу» неактивна",
+      t.includes("Бюджета ИИ не хватает") && (await page.$eval('#owner-root [data-ow-act="commit"]', (n) => n.disabled)), t.slice(0, 500));
+    check("U52. выдачи нет", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAF') and g.kind = 'paid'") === "0");
+    await owClick(page, "[data-ow-back]", 600);
+    await owClick(page, "[data-ow-back]", 600);
+    // изменение бюджета: ниже минимума — отказ формы; иначе — подтверждение и запись
+    await owClick(page, '[data-ow-tab="ai"]', 1500);
+    t = await owText(page);
+    check("U53. ИИ: предупреждение «Свободного бюджета…» / «меньше 20%»", /Свободный бюджет меньше|Свободного бюджета нет/.test(t), t.slice(0, 600));
+    await owClick(page, '[data-ow-go="budget"]', 1500);
+    const minB = Number(sqlv("select private.budget_state() ->> 'min_budget'"));
+    await page.fill("#owner-root #owBudget", String(minB - 1));
+    await owClick(page, 'button[type="submit"]', 600);
+    check("U53. бюджет ниже минимума — форма не отправляется (min = израсходовано + резерв), в подсказке минимум", !!(await page.$("#owner-root #owBudget:invalid"))
+      && (await owText(page)).includes("Меньше " + minB + " поставить нельзя") && !(await owText(page)).includes("Подтверди бюджет"));
+    await page.fill("#owner-root #owBudget", "130");
+    await owClick(page, 'button[type="submit"]', 600);
+    t = await owText(page);
+    check("U53. подтверждение: «Сейчас», «Станет 130», резерв Premium; совет проверить токены GigaChat", t.includes("Подтверди бюджет") && t.includes("130")
+      && t.includes("Резерв Premium") && t.includes("кабинете GigaChat"), t.slice(0, 500));
+    check("U53. до подтверждения бюджет не изменён", sqlv("select max_total_starts from private.ai_limits") !== "130");
+    await page.screenshot({ path: path.join(SHOTS, "owner-budget-confirm.png") });
+    await owClick(page, '[data-ow-act="budget-commit"]', 2000);
+    t = await owText(page);
+    check("U53. после подтверждения: «Бюджет ИИ: 130 запусков», в базе 130, в журнале запись budget", t.includes("Бюджет ИИ: 130")
+      && sqlv("select max_total_starts from private.ai_limits") === "130" && sqlv("select count(*) from private.access_log where action = 'budget'") === "1", t.slice(0, 300));
+    sqlv("update private.ai_limits set max_total_starts = 100 where id");
 
     // 13. история
     await owClick(page, '[data-ow-tab="history"]', 1500);
@@ -454,8 +518,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
         for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(k + " " + new URL(r.url).pathname);
         return out;
       });
-      check("U42. ученик: сервис-воркер работает (кэш konspekt-v61), файлов панели в кэше нет",
-        keys.some((k) => k.startsWith("konspekt-v61 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
+      check("U42. ученик: сервис-воркер работает (кэш konspekt-v62), файлов панели в кэше нет",
+        keys.some((k) => k.startsWith("konspekt-v62 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
       await s1.ctx.close();
       const s2 = await open(OWNER, undefined, { sw: true });
       await s2.page.reload();

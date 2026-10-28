@@ -38,16 +38,21 @@ const server = http.createServer((req, res) => {
 function loadCatalog(dir) {
   const ctx = vm.createContext({ console: { warn() {}, log() {} } });
   ctx.window = ctx;
-  for (const f of ["js/config.js", "js/study-content.js", "js/library.js", "js/library-catalog.js"]) vm.runInContext(fs.readFileSync(path.join(dir, f), "utf8"), ctx, { filename: f });
+  const cat = fs.existsSync(path.join(dir, "js/library-index.js")) ? "js/library-index.js" : "js/library-catalog.js";  // v62: каталог без текстов
+  for (const f of ["js/config.js", "js/study-content.js", "js/library.js", cat]) vm.runInContext(fs.readFileSync(path.join(dir, f), "utf8"), ctx, { filename: f });
   return ctx.K;
 }
 function staticTests() {
   const K = loadCatalog(V61);
   check("данные: библиотека показывает историю и физику (биология скрыта, как в v60)", K.library.subjects().map((s) => s.id).join() === "history,physics");
   const all = K.library.catalog();
-  const n = (id) => all.subjects.find((s) => s.id === id).books.reduce((a, b) => a + b.paragraphs.filter((p) => p.content).length, 0);
-  check("данные: 26 / 51 / 30 в каталоге", n("history") === 26 && n("physics") === 51 && n("biology") === 30);
-  check("данные: library-catalog.js не изменён относительно v59", fs.readFileSync(path.join(V61, "js/library-catalog.js"), "utf8") === fs.readFileSync(path.join(V59, "js/library-catalog.js"), "utf8"));
+  const n = (id, f) => all.subjects.find((s) => s.id === id).books.reduce((a, b) => a + b.paragraphs.filter(f).length, 0);
+  check("данные (v62): готовы 26 / 51, биология без текстов (скрыта)", n("history", (p) => p.ready) === 26 && n("physics", (p) => p.ready) === 51 && n("biology", (p) => p.ready) === 0);
+  check("данные (v62): в публичном каталоге нет ни одного текста (content) и служебных пометок (source)", all.subjects.every((s) => s.books.every((b) => b.paragraphs.every((p) => !("content" in p) && !("source" in p)))));
+  // структура каталога (классы, предметы, учебники, номера и названия параграфов) — та же, что в v59
+  const shape = (c) => JSON.stringify(c.subjects.map((s) => [s.id, s.title, s.books.map((b) => [b.id, b.title, b.grade, b.paragraphs.map((p) => [p.id, p.number, p.title, p.chapter || ""])])]));
+  check("данные (v62): структура каталога = v59 (те же учебники и параграфы)", shape(all) === shape(loadCatalog(V59).library.catalog()));
+  check("данные (v62): js/library-catalog.js с текстами удалён из сайта", !fs.existsSync(path.join(V61, "js/library-catalog.js")));
   const sql = (dir) => execFileSync("node", ["tools/catalog-to-sql.mjs"], { cwd: dir }).toString();
   check("данные: справочник аналитики = v59 (107)", sql(V61) === sql(V59));
   const app = fs.readFileSync(path.join(V61, "app.js"), "utf8");
@@ -154,7 +159,7 @@ async function scenarios() {
     await tab(page, "me");
     const pf = await text(page);
     check("1. «Мой доступ»: пробный период до 9 ноября 2026 г., осталось 7 дней, ИИ 1 из 1", /Пробный период до 9 ноября 2026/.test(pf) && pf.includes("Осталось 7 дней") && pf.includes("ИИ по фото: осталось 1 из 1"), pf.slice(0, 600));
-    check("1. «Мой доступ»: кнопка «Тарифы и продление»", pf.includes("Тарифы и продление"));
+    check("1. «Мой доступ»: кнопка «Premium и продление» (v62)", pf.includes("Premium и продление"));
     await toBook(page, "history");
     await click(page, "[data-lib-paragraph]:not(.soon)", 900);
     check("1. trial: полный текст готового конспекта открывается", !!(await page.$(".cn-doc")));
@@ -171,8 +176,8 @@ async function scenarios() {
     const { ctx, page, errors } = await open(P(ACC.trialExpired, { notes: [NOTE] }));
     const t = await text(page);
     check("5. expired trial: «Пробный период закончился»", t.includes("Пробный период закончился"), t.slice(0, 300));
-    check("5. экран: «Посмотреть тарифы», «Мои конспекты», аккаунт и личные конспекты сохранены", t.includes("Посмотреть тарифы") && /Мои конспекты · \d/.test(t) && t.includes("Твой аккаунт и личные конспекты сохранены"));
-    check("5. контакт не задан → текст «Напиши Николаю лично.», без кнопки-ссылки", t.includes("Напиши Николаю лично.") && !(await page.$(".ended a")));
+    check("5. экран: кнопка Premium, «Мои конспекты», аккаунт и личные конспекты сохранены", /Premium/.test(t) && /Мои конспекты · \d/.test(t) && t.includes("Твой аккаунт и личные конспекты сохранены"));
+    check("5. контакт не задан → понятный текст «Пока напиши Николаю лично», без кнопки-ссылки", t.includes("Пока напиши Николаю лично") && !(await page.$(".ended a")));
     check("5. нет цен и придуманных тарифов", !/₽|руб\./i.test(t));
     await page.screenshot({ path: path.join(SHOTS, "trial-ended-iphone.png") });
     check("5. без горизонтальной прокрутки (390)", await noHScroll(page));
@@ -200,7 +205,7 @@ async function scenarios() {
     check("5. «Фото» после окончания → экран тарифов, не камера", !(await page.$(".scr-camera")) && !!(await page.$(".scr-tariffs")));
     await tab(page, "me");
     const pf = await text(page);
-    check("5. «Мой доступ»: «Доступ закончился 1 ноября 2026 г.» и «Продлить доступ»", /Доступ закончился 1 ноября 2026/.test(pf) && pf.includes("Продлить доступ"), pf.slice(0, 500));
+    check("5. «Мой доступ»: «Доступ закончился 1 ноября 2026 г.» и «Продлить Premium»", /Доступ закончился 1 ноября 2026/.test(pf) && pf.includes("Продлить Premium"), pf.slice(0, 500));
     const T = await T_(page);
     check("5. не было запросов генерации", !T.calls.some((c) => /startAnalysis|uploadPages|createProcessingNote|deleteNote/.test(c)), T.calls);
     check("5. нет ошибок JS", noErr(errors), errors);
@@ -217,7 +222,7 @@ async function scenarios() {
     const a = await open(P(ACC.trialExpired));
     await click(a.page, '[data-go="tariffs"]', 900);
     const t = await text(a.page);
-    check("тарифы: пусто → «Тарифы пока не опубликованы», условия лично; без цен", t.includes("Тарифы пока не опубликованы") && t.includes("уточняются лично") && !/₽/.test(t), t.slice(0, 400));
+    check("тарифы: пусто → «Premium пока не опубликован», условия лично; без цен", t.includes("Premium пока не опубликован") && t.includes("уточняются лично") && !/₽/.test(t), t.slice(0, 400));
     check("тарифы: «Как подключить» — оплата вне приложения, без реквизитов", t.includes("вне приложения") && !/карт[аы]\s*\d|\d{16}/.test(t));
     await a.page.screenshot({ path: path.join(SHOTS, "tariffs-empty-iphone.png") });
     check("тарифы: без горизонтальной прокрутки", await noHScroll(a.page));
@@ -233,7 +238,7 @@ async function scenarios() {
     await tab(c.page, "me");
     await click(c.page, '[data-go="tariffs"]', 900);
     const tc = await text(c.page);
-    check("тарифы: карточки из get_plans — название, срок, генерации", tc.includes("Тестовый тариф А") && tc.includes("Срок: 30 дней") && tc.includes("ИИ по фото: 10 генераций на срок") && tc.includes("Срок: 90 дней"), tc.slice(0, 500));
+    check("тарифы: карточки из get_plans — название, срок, генерации", tc.includes("Тестовый тариф А") && tc.includes("Срок: 30 дней") && tc.includes("ИИ по фото: 10 конспектов за срок (считаются только удачные)") && tc.includes("Срок: 90 дней"), tc.slice(0, 500));
     check("тарифы: цена показывается, только если задана владельцем", tc.includes("цена теста") && (tc.match(/цена теста/g) || []).length === 1);
     check("тарифы: контакт из настроек → кнопка-ссылка", !!(await c.page.$('.plan-how a[href="https://example.invalid/contact"]')));
     check("тарифы: ссылка оформлена как кнопка (по центру, без подчёркивания)", await c.page.$eval(".plan-how a.primary", (a) => getComputedStyle(a).textDecorationLine === "none" && getComputedStyle(a).display === "flex"));
@@ -286,7 +291,7 @@ async function scenarios() {
     await ctx.close();
   }
   // 11/13. оплаченный срок закончился; доступ отозван
-  for (const [k, title, card] of [["paidExpired", "Оплаченный доступ закончился", /Доступ закончился 1 ноября 2026/], ["revoked", "Оплаченный доступ закончился", /Доступ закрыт/],
+  for (const [k, title, card] of [["paidExpired", "Premium закончился", /Доступ закончился 1 ноября 2026/], ["revoked", "Premium закончился", /Доступ закрыт/],
                                    ["ownerRevoked", "Доступ закончился", /Доступ закрыт/]]) {
     const { ctx, page } = await open(P(ACC[k]));
     const h1 = await page.$eval("#app > .app h1", (n) => n.textContent).catch(() => "");
@@ -303,7 +308,7 @@ async function scenarios() {
     check("14. владелец: обычная главная без остатка/«закончились»", t.includes("Новый конспект") && !/Остал|закончил/.test(t), t.slice(0, 300));
     await tab(page, "me");
     const pf = await text(page);
-    check("14. «Мой доступ»: «Владелец · бессрочный доступ», «без личного лимита», без кнопки продления", pf.includes("Владелец · бессрочный доступ") && pf.includes("без личного лимита") && !pf.includes("Тарифы и продление"), pf.slice(0, 500));
+    check("14. «Мой доступ»: «Владелец · бессрочный доступ», «без личного лимита», без кнопки продления", pf.includes("Владелец · бессрочный доступ") && pf.includes("без личного лимита") && !pf.includes("Premium и продление") && !pf.includes("Продлить Premium"), pf.slice(0, 500));
     await tab(page, "photo");
     check("14. владелец: камера открывается", !!(await page.$(".scr-camera")));
     await toBook(page, "physics");
@@ -461,8 +466,8 @@ async function pwaTest() {
   await page.waitForTimeout(800);
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=61", /v=61/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался konspekt-v61", keys.length === 1 && keys[0] === "konspekt-v61", keys);
+  check("PWA: после обновления — app.js?v=62", /v=62/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался konspekt-v62", keys.length === 1 && keys[0] === "konspekt-v62", keys);
   check("PWA: после обновления — статус с сервера (экран «Пробный период закончился»)", (await text(page)).includes("Пробный период закончился"));
   check("PWA: личный конспект сохранён", await page.evaluate(() => Object.values(localStorage).some((v) => v.includes("Мой конспект по биологии"))));
   await ctx.close();
