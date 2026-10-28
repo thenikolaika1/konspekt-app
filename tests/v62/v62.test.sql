@@ -444,6 +444,105 @@ select t.ok('B14. автоматически бюджет нигде не мен
                  and p.proname not in ('owner_set_budget')));
 
 -- ======================================================================
+-- T. Переходы состояний и границы срока
+-- ======================================================================
+select t.lim(1000, 0);
+create function t.st(p_uid uuid) returns text language sql as
+  $$ select (private.access_state(p_uid) ->> 'status') || '/' || coalesce(private.access_state(p_uid) ->> 'ai_remaining', '-') $$;
+create function t.libok(p_uid uuid) returns boolean language plpgsql as $$
+begin perform t.as_user(p_uid); return t.lib('history', 'h5', 'p1') ? 'content'; end $$;
+-- trial → expired → premium → expired → premium
+select t.register('TRANSCODE001', 'KN-HAAAAA') as uh \gset
+create table t.path (step int, st text, lib boolean, gen text);
+insert into t.path select 1, t.st(:'uh'), t.libok(:'uh'), null;
+insert into t.path select 2, t.st(:'uh'), null, t.gen(:'uh', true);
+select t.age(:'uh', interval '8 days');
+insert into t.path select 3, t.st(:'uh'), t.libok(:'uh'), t.gen(:'uh', true);
+select private.admin_grant('KN-HAAAAA', 'premium') ->> 'result' as x \gset
+insert into t.path select 4, t.st(:'uh'), t.libok(:'uh'), t.gen(:'uh', true);
+select t.age(:'uh', interval '31 days');
+insert into t.path select 5, t.st(:'uh'), t.libok(:'uh'), t.gen(:'uh', true);
+select private.admin_grant('KN-HAAAAA', 'premium') ->> 'result' as x \gset
+insert into t.path select 6, t.st(:'uh'), t.libok(:'uh'), null;
+select t.ok('T1. trial → expired → Premium → expired → Premium: статус, библиотека и генерации на каждом шаге',
+  (select string_agg(step || ':' || st || ':' || coalesce(lib::text, '-') || ':' || coalesce(gen, '-'), ' ' order by step) from t.path)
+  = '1:trial/1:true:- 2:trial/1:-:started 3:expired/0:false:access_expired 4:paid/10:true:started 5:expired/0:false:access_expired 6:paid/10:true:-',
+  (select string_agg(step || ':' || st || ':' || coalesce(lib::text, '-') || ':' || coalesce(gen, '-'), ' ' order by step) from t.path));
+select t.ok('T1. новый Premium после перерыва — снова 10 генераций, использованное в прошлом сроке не вычитается',
+  (private.access_state(:'uh') ->> 'ai_used')::int = 0 and (private.access_state(:'uh') ->> 'ai_quota')::int = 10);
+select t.ok('T1. пробный период второй раз не выдаётся (trial_already_used)', private.admin_grant_trial('KN-HAAAAA') ->> 'result' = 'trial_already_used'
+  or (select count(*) from private.access_grants where user_id = :'uh' and kind = 'trial') = 1,
+  private.admin_grant_trial('KN-HAAAAA')::text);
+
+-- premium → досрочное продление → следующий срок
+select t.register('RENEWCODE001', 'KN-RBAAAA') as ur2 \gset
+select private.admin_grant('KN-RBAAAA', 'premium') ->> 'result' as x \gset
+select t.age(:'ur2', interval '20 days');
+select t.gen(:'ur2', true) || t.gen(:'ur2', true) || t.gen(:'ur2', true) as g3 \gset
+select private.premium_obligations() as ob0 \gset
+select private.admin_extend('KN-RBAAAA', 'premium') as ex \gset
+select private.access_state(:'ur2') as sx \gset
+select t.ok('T2. досрочное продление за 10 дней до конца: новый срок встык (с конца текущего), доступ до +40 дней',
+  :'ex'::jsonb ->> 'result' = 'extended'
+  and abs(extract(epoch from (:'ex'::jsonb ->> 'starts_at')::timestamptz - (select min(ends_at) from private.access_grants where user_id = :'ur2' and kind = 'paid'))) < 1
+  and (:'sx'::jsonb ->> 'paid_until')::timestamptz between now() + interval '39 days 23 hours' and now() + interval '40 days 1 hour', :'ex');
+select t.ok('T2. после продления в текущем сроке по-прежнему 7 из 10; обязательства выросли ровно на 10',
+  (:'sx'::jsonb ->> 'ai_remaining')::int = 7 and (:'sx'::jsonb ->> 'ai_quota')::int = 10 and private.premium_obligations() = :ob0 + 10,
+  :'sx');
+select t.age(:'ur2', interval '10 days 1 minute');
+select t.ok('T2. первый срок закончился: действует второй — 10 из 10 (7 неиспользованных сгорели), библиотека открыта, перерыва нет',
+  t.st(:'ur2') = 'paid/10' and t.libok(:'ur2'), t.st(:'ur2'));
+select t.ok('T2. в обязательствах только второй срок (10), сгоревшие 7 не считаются',
+  (select coalesce(sum(greatest(g.ai_quota - u.used - u.reserved, 0)), 0) from private.access_grants g cross join lateral private.grant_usage(g.id) u
+    where g.user_id = :'ur2' and g.kind = 'paid' and g.ends_at > now()) = 10);
+
+-- окончание срока во время генерации
+select t.register('EDGECODE0001', 'KN-EBAAAA') as ue2 \gset
+select private.admin_grant('KN-EBAAAA', 'premium') ->> 'result' as x \gset
+select t.note(:'ue2') as ne1 \gset
+select t.start(:'ue2', :'ne1') ->> 'result' as se1 \gset
+select t.age(:'ue2', interval '30 days 1 minute');   -- срок закончился, пока шла генерация
+select t.finish(:'ne1', true);
+select t.ok('T3. срок кончился во время генерации: конспект сохранён и списан в счёт того срока (1 из 10), новых запусков нет',
+  :'se1' = 'started' and (select status from public.notes where id = :'ne1') = 'ready'
+  and (select u.used from private.access_grants g cross join lateral private.grant_usage(g.id) u where g.user_id = :'ue2' and g.kind = 'paid') = 1
+  and t.st(:'ue2') = 'expired/0' and t.gen(:'ue2', true) = 'access_expired', t.st(:'ue2'));
+select private.admin_grant('KN-EBAAAA', 'premium') ->> 'result' as x \gset
+select t.note(:'ue2') as ne2 \gset
+select t.start(:'ue2', :'ne2') ->> 'result' as se2 \gset
+select t.age(:'ue2', interval '30 days 1 minute');
+select t.finish(:'ne2', false);
+select t.ok('T3. срок кончился во время генерации, генерация не удалась: резерв возвращён, ничего не списано',
+  :'se2' = 'started' and (select state from private.usage_ledger where note_id = :'ne2') = 'released'
+  and (select sum(u.used) from private.access_grants g cross join lateral private.grant_usage(g.id) u where g.user_id = :'ue2' and g.kind = 'paid') = 1);
+
+-- продление в момент окончания: предпросмотр видел «после текущего», к подтверждению срок уже кончился
+select t.register('MOMENTCODE01', 'KN-MBAAAA') as um \gset
+select private.admin_grant('KN-MBAAAA', 'premium') ->> 'result' as x \gset
+select t.as_user(:'uo', :'so');
+select t.p('select public.owner_preview($S, ''KN-MBAAAA'', ''extend'')') as pm \gset
+select t.age(:'um', interval '30 days 1 second');
+-- время «прошло» сдвигом сроков назад: та же дата из предпросмотра теперь в прошлом на 1 с
+select t.p('select public.owner_extend($S, gen_random_uuid(), ''KN-MBAAAA'', null, null, null, ' ||
+           t.q(((:'pm'::jsonb ->> 'starts_at')::timestamptz - interval '30 days 1 second')::text) || ')') as em \gset
+select t.ok('T4. продление в момент окончания: продлено с текущего момента, доступ сразу paid, без «дыры»',
+  (:'pm'::jsonb ->> 'starts_after_current')::boolean and :'em'::jsonb ->> 'result' = 'extended'
+  and (:'em'::jsonb -> 'grant' ->> 'starts_at')::timestamptz between now() - interval '5 seconds' and now() + interval '1 second'
+  and t.st(:'um') = 'paid/10', :'em');
+
+-- отзыв Premium владельцем
+select t.register('REVOKECODE01', 'KN-VBAAAA') as uv \gset
+select private.admin_grant('KN-VBAAAA', 'premium') ->> 'result' as x \gset
+select private.admin_extend('KN-VBAAAA', 'premium') ->> 'result' as x \gset
+update private.access_grants set ends_at = now() - interval '1 second', starts_at = now() - interval '8 days' where user_id = :'uv' and kind = 'trial';
+select private.premium_obligations() as obv \gset
+select t.as_user(:'uo', :'so');
+select t.p('select public.owner_revoke($S, gen_random_uuid(), ''KN-VBAAAA'', ''тест'', 2)') as rv \gset
+select t.ok('T5. отзыв: оба срока (текущий и будущий) отозваны, библиотека закрыта, обязательства −20',
+  :'rv'::jsonb ->> 'result' = 'revoked' and (:'rv'::jsonb ->> 'revoked')::int = 2 and not t.libok(:'uv')
+  and private.premium_obligations() = :obv - 20, :'rv');
+
+-- ======================================================================
 -- Итог
 -- ======================================================================
 select (case when ok then 'PASS ' else 'FAIL ' end) || name || case when not ok and info is not null then ' → ' || left(info, 600) else '' end from t.results order by n;

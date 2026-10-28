@@ -608,6 +608,21 @@ grant execute on function
   public.owner_set_budget(text, uuid, integer, integer)
   to authenticated;
 
+-- Таблицы public: Supabase по умолчанию даёт ролям API на новые таблицы TRUNCATE, REFERENCES, TRIGGER и (PostgreSQL 17)
+-- MAINTAIN. Через API (PostgREST) их не использовать, но TRUNCATE обходит RLS — убираем: приложению они не нужны.
+-- Чтение, запись по колонкам и политики RLS не меняются.
+do $$
+declare
+  v_t    record;
+  v_priv text := 'truncate, references, trigger'
+                 || case when pg_catalog.current_setting('server_version_num')::integer >= 170000 then ', maintain' else '' end;
+begin
+  for v_t in select c.oid::regclass as rel from pg_catalog.pg_class c
+              where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm') loop
+    execute pg_catalog.format('revoke %s on table %s from anon, authenticated, service_role', v_priv, v_t.rel);
+  end loop;
+end $$;
+
 -- -------------------------------------------------------------------------------------
 -- 7. Самопроверка (ошибка — откат всей миграции)
 -- -------------------------------------------------------------------------------------
@@ -635,6 +650,11 @@ begin
               where n.nspname = 'public' and p.proname in ('owner_grant', 'owner_extend', 'start_text_generation_v2')
               group by p.proname having count(*) > 1) then
     raise exception 'остались старые варианты функций панели';
+  end if;
+  if exists (select 1 from pg_catalog.pg_class c, unnest(array['anon', 'authenticated', 'service_role']) r
+              where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p')
+                and (has_table_privilege(r, c.oid, 'truncate') or has_table_privilege(r, c.oid, 'trigger'))) then
+    raise exception 'у ролей API осталось TRUNCATE/TRIGGER на таблицах public';
   end if;
 end $$;
 

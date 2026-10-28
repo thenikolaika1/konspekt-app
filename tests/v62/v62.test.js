@@ -291,6 +291,133 @@ async function scenarios() {
     check("V9. нет ошибок JS", noErr(errors), errors);
     await ctx.close();
   }
+
+  // V10. Срок закончился, пока открыт конспект: ученик вернулся в приложение → экран доступа, текст забыт
+  {
+    const { ctx, page, errors } = await open(P(ACC.trial, { notes: [NOTE] }));
+    await toBook(page, "history");
+    await click(page, "[data-lib-paragraph]:not(.soon)", 900);
+    check("V10. конспект открыт (пробный)", !!(await page.$(".cn-doc")));
+    await page.evaluate((v) => {
+      window.__T.v2 = v;
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, ACC.trialExpired);
+    await page.waitForTimeout(1200);
+    const t = await text(page);
+    check("V10. после возвращения в приложение — «Пробный период закончился», текста нет", t.includes("Пробный период закончился") && !(await page.$(".cn-doc")), t.slice(0, 200));
+    check("V10. текст забыт в памяти страницы", await page.evaluate(() => {
+      const K = window.K, b = K.library.subjects().find((x) => x.id === "history").books.find((x) => x.grade === "8");
+      return b.paragraphs.filter((p) => K.library.ready(p)).every((p) => K.library.text("history", b.id, p.id) === null);
+    }));
+    check("V10. нет ошибок JS", noErr(errors), errors);
+    await ctx.close();
+  }
+
+  // V11. Смена аккаунта на одном устройстве (вход другим ID без перезагрузки): тексты прежнего не остаются
+  {
+    const accounts = { "KN-CCCCCC": { uid: "u-2", v2: ACC.trialExpired } };
+    const { ctx, page, errors } = await open(P(ACC.premium, { accounts }));
+    await toBook(page, "physics");
+    await click(page, "[data-lib-paragraph]:not(.soon)", 900);
+    check("V11. аккаунт A (Premium): текст открыт", !!(await page.$(".cn-doc")));
+    await page.evaluate(() => (window.__T.kind = "guest"));
+    await tab(page, "me");
+    const login = await page.$('#app > .app [data-go="login"]');
+    if (login) await login.click(), await page.waitForTimeout(500);
+    await page.fill("#loginId", "KN-CCCCCC");
+    await page.fill("#loginKey", "KEYKEYKEYKEYKEYKEYKE");
+    await page.click("#app > .app [data-login]");
+    await page.waitForTimeout(1500);
+    const left = await page.evaluate(() => {
+      const K = window.K, b = K.library.subjects().find((x) => x.id === "physics").books[0];
+      return b.paragraphs.filter((p) => K.library.ready(p) && K.library.text("physics", b.id, p.id)).length;
+    });
+    check("V11. после входа аккаунтом B в памяти нет текстов аккаунта A", left === 0, left);
+    const calls0 = (await libCalls(page)).length;
+    // вкладка «Библиотека» помнит последний учебник
+    await page.click('.tabbar [data-tab="library"]');
+    await page.waitForTimeout(900);
+    await click(page, "[data-lib-paragraph]:not(.soon)", 900);
+    const tb = await text(page);
+    check("V11. аккаунт B (срок закончился): тот же параграф — экран доступа, текст A не показан и не запрошен заново",
+      !(await page.$(".cn-doc")) && tb.includes("Пробный период закончился") && (await libCalls(page)).length === calls0,
+      [tb.slice(0, 200), (await libCalls(page)).length, calls0, await page.evaluate(() => window.__T.kind + "/" + window.__T.id)]);
+    check("V11. нет ошибок JS", noErr(errors), errors);
+    await ctx.close();
+  }
+
+  // V12. Медленный интернет: ответ по старому параграфу не подменяет новый; «Назад» во время загрузки
+  {
+    const { ctx, page, errors } = await open(P(ACC.trial, { libDelay: 2500 }));
+    await toBook(page, "history");
+    const ids = await page.$$eval("#app > .app [data-lib-paragraph]:not(.soon)", (n) => n.map((x) => x.dataset.libParagraph));
+    await click(page, '[data-lib-paragraph="' + ids[0] + '"]', 300);
+    check("V12. медленная сеть: экран загрузки", (await text(page)).includes("Загружаем конспект"));
+    await click(page, "[data-back]", 400);
+    check("V12. «Назад» во время загрузки — список параграфов", (await page.$$("#app > .app [data-lib-paragraph]")).length > 0);
+    await click(page, '[data-lib-paragraph="' + ids[1] + '"]', 300);
+    await page.waitForTimeout(3500);
+    const t = await text(page);
+    check("V12. ответ по первому параграфу пришёл раньше — на экране второй параграф и его текст", t.includes("/" + ids[1]) && !new RegExp("/" + ids[0] + "(?![0-9-])").test(t),
+      t.slice(0, 200));
+    await page.reload();
+    await page.waitForTimeout(2500);
+    await skipWelcome(page);
+    check("V12. обновление страницы во время загрузки — приложение работает", !!(await page.$("#app > .app")) && noErr(errors), errors);
+    await ctx.close();
+  }
+
+  // V13. Тёмная тема устройства и компьютер: приложение остаётся светлым и читаемым, без горизонтальной прокрутки
+  for (const [name, opts] of [["iPhone, тёмная тема", { width: 390, height: 844, dark: true }], ["компьютер 1280×800", { width: 1280, height: 800, desktop: true }]]) {
+    const c = await browser.newContext({ viewport: { width: opts.width, height: opts.height }, isMobile: !opts.desktop, hasTouch: !opts.desktop, colorScheme: opts.dark ? "dark" : "light", serviceWorkers: "block", locale: "ru-RU" });
+    await c.route("**/*", (route) => {
+      const u = route.request().url();
+      if (/\/js\/cloud\.js/.test(u)) return route.fulfill({ status: 200, contentType: "text/javascript", body: STUB });
+      if (!u.startsWith("http://127.0.0.1:" + PORT)) return route.abort();
+      return route.continue();
+    });
+    const page = await c.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.clock.install({ time: FAR_FUTURE });
+    await page.addInitScript((t) => (window.__T = JSON.parse(t)), JSON.stringify(P(ACC.premiumEnding, { libError: "network" })));
+    await page.goto("http://127.0.0.1:" + PORT + "/");
+    await page.waitForTimeout(2200);
+    await skipWelcome(page);
+    const line = await page.$eval(".trial-line.ending", (n) => [getComputedStyle(n).color, getComputedStyle(n).backgroundColor]).catch(() => null);
+    check("V13. " + name + ": строка «Premium закончится…» видна и контрастна", !!line && line[0] !== line[1], line);
+    await toBook(page, "history");
+    await click(page, "[data-lib-paragraph]:not(.soon)", 900);
+    const st = await page.$eval(".lib-state", (n) => [getComputedStyle(n.querySelector("p") || n).color, getComputedStyle(document.body).backgroundColor]).catch(() => null);
+    check("V13. " + name + ": экран «Не удалось загрузить» читаем (цвет текста ≠ фону), без горизонтальной прокрутки",
+      !!st && st[0] !== st[1] && (await noHScroll(page)), st);
+    await page.screenshot({ path: path.join(SHOTS, "lib-offline-" + (opts.dark ? "dark" : "desktop") + ".png") });
+    check("V13. " + name + ": нет ошибок JS", noErr(errors), errors);
+    await c.close();
+  }
+}
+
+// ---------- производительность: что скачивает первый запуск ----------
+async function sizeTest() {
+  const measure = async (root) => {
+    ROOT = root;
+    served.length = 0;
+    const { ctx, page } = await open(P(ACC.trial));
+    await toBook(page, "history");
+    const files = [...new Set(served.filter((p) => !/cloud\.js/.test(p)))];
+    const bytes = files.reduce((a, f) => {
+      const full = path.join(root, f.endsWith("/") ? f + "index.html" : f);
+      return a + (fs.existsSync(full) && fs.statSync(full).isFile() ? fs.statSync(full).size : 0);
+    }, 0);
+    await ctx.close();
+    return { files: files.length, bytes };
+  };
+  if (!fs.existsSync(path.join(V613, "index.html"))) return;
+  const a = await measure(V613);
+  const b = await measure(V62);
+  console.log("INFO размер первого запуска до библиотеки: v61.3 " + Math.round(a.bytes / 1024) + " КБ (" + a.files + " файлов), v62 " + Math.round(b.bytes / 1024) + " КБ (" + b.files + " файлов)");
+  check("P1. первый запуск v62 скачивает меньше на ≥ 1,5 МБ (нет каталога с текстами)", a.bytes - b.bytes > 1.5 * 1024 * 1024, [a, b]);
+  ROOT = V62;
 }
 
 // ---------- PWA: v61.3 (каталог с текстами в кэше) → v62 ----------
@@ -378,6 +505,7 @@ async function pwaTest() {
   await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
   try {
     await scenarios();
+    await sizeTest();
     await pwaTest();
   } catch (e) {
     check("тест завершился без исключения", false, String(e && e.stack));
