@@ -2,8 +2,10 @@
 // v62: перенос 77 параграфов — согласованность публичного каталога (js/library-index.js) и манифеста контрольных сумм
 // (supabase/release/v62-library-manifest.tsv), и что закрытых текстов нет в публичных файлах. База не нужна.
 // Запуск: node tests/v62/library-manifest.test.mjs (из tests/v62/run.sh)
-import { readFileSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 
@@ -63,5 +65,40 @@ check("M6. index.html подключает library-index.js, а не катал�
 const gi = read(".gitignore");
 check("M7. .gitignore: library-seed*.sql, *.source.js, *.dump, konspekt-v62/", ["library-seed", ".source.js", ".dump", "konspekt-v62/"].filter((x) => !gi.includes(x)), []);
 
+
+// генератор: исходник назначен манифестом (# source-sha256); --git читает его из git байт в байт; перекодированный
+// оболочкой исходник (как PowerShell «git show … > файл» на русской Windows) отклоняется до записи файлов
+const mf = read("supabase/release/v62-library-manifest.tsv");
+const wantSrc = (mf.match(/^# source-sha256 ([0-9a-f]{64})\b/m) || [])[1];
+check("G1. в манифесте назначен исходник (# source-sha256)", /^[0-9a-f]{64}$/.test(wantSrc || ""), true);
+const hasOld = spawnSync("git", ["cat-file", "-e", "53d3203^{commit}"], { cwd: ROOT }).status === 0;
+if (!hasOld) {
+  console.log("SKIP G2–G5: в клоне нет коммита 53d3203");
+} else {
+  const src = execSync("git show 53d3203:js/library-catalog.js", { cwd: ROOT, maxBuffer: 256 * 1024 * 1024 });
+  check("G2. исходник из git 53d3203 = назначенный манифестом", createHash("sha256").update(src).digest("hex"), wantSrc);
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "konspekt-seed-"));   // вне репозитория; удаляется в конце
+  try {
+    const gen = (srcArgs, tag) => spawnSync("node", ["tools/library-split.mjs", ...srcArgs, "--index", path.join(tmp, tag + ".index.js"),
+      "--seed", path.join(tmp, tag + ".seed.sql"), "--expect", "supabase/release/v62-library-manifest.tsv"], { cwd: ROOT, encoding: "utf8" });
+    const r = gen(["--git", "53d3203:js/library-catalog.js"], "git");
+    const head = existsSync(path.join(tmp, "git.seed.sql")) ? readFileSync(path.join(tmp, "git.seed.sql"), "utf8").split("\n").slice(1, 3) : [];
+    check("G3. --git: файл собран, в шапке назначенный исходник и 77 (26/51)",
+      [r.status, (head[0] || "").includes(wantSrc), /Параграфов: 77 \(history: 26, physics: 51\)/.test(head[1] || "")], [0, true, true]);
+    check("G3. --git: публичный каталог байт в байт = js/library-index.js",
+      existsSync(path.join(tmp, "git.index.js")) && readFileSync(path.join(tmp, "git.index.js"), "utf8") === read("js/library-index.js"), true);
+    // кириллица, прочитанная в кодировке консоли (cp866) и записанная как UTF-8, — как PowerShell 7 «git show … > файл»
+    const cp866 = " АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмноп░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀рстуфхцчшщъыьэюяЁёЄєЇїЎў°∙·√№¤■ ";
+    const mangled = Buffer.from([...src].map((b) => (b < 0x80 ? String.fromCharCode(b) : cp866[b - 0x7f] || "?")).join(""), "utf8");
+    writeFileSync(path.join(tmp, "mangled.js"), mangled);
+    const m = gen([path.join(tmp, "mangled.js")], "bad");
+    check("G4. перекодированный исходник: отказ (код 3) с подсказкой про --git, файлы не записаны",
+      [m.status, /Исходник не тот/.test(m.stderr) && /--git/.test(m.stderr), existsSync(path.join(tmp, "bad.seed.sql")), existsSync(path.join(tmp, "bad.index.js"))],
+      [3, true, false, false]);
+    check("G5. генератор не тронул публичный каталог репозитория", spawnSync("git", ["diff", "--quiet", "--", "js/library-index.js"], { cwd: ROOT }).status, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
 console.log(`ИТОГО: ${pass} PASS, ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

@@ -1,5 +1,6 @@
 # v62: контрольные суммы текстов библиотеки (sha256 content::text в private.library_paragraphs). Самих текстов здесь нет.
 # subject	book	paragraph	sha256 — использует tools/library-split.mjs --expect
+# source-sha256 922447c4858330ffc08d4b26a39bbe5712b0d3e6913e170b443f62f97aa7e8b0  (git show 53d3203:js/library-catalog.js, байт в байт)
 history	history-8	history-8-chapter-1-summary	40129eaf16000e963a79c2fbaa058232e4269f907921ac8cbdcc095791dadf67
 history	history-8	history-8-chapter-2-summary	b5965f06c0b43218d139d0a3d4561348eef4052b4b96e648578c0423fa03e23e
 history	history-8	history-8-chapter-3-summary	f07e43a11e37c71d6e3741b88ac6edd67ebbb3461cd6e6a52bb75cb9b8933062

@@ -70,6 +70,20 @@ $dumpFull = (Resolve-Path $Dump).Path; $seedFull = (Resolve-Path $Seed).Path
 $dumpDir = Split-Path $dumpFull -Parent
 function Inside([string]$p, [string]$dir) { $a = [IO.Path]::GetFullPath($p).TrimEnd('\') + '\'; $b = [IO.Path]::GetFullPath($dir).TrimEnd('\') + '\'; return $a.StartsWith($b, [StringComparison]::OrdinalIgnoreCase) }
 if (Inside $seedFull $repo) { Fail 'library-seed.sql лежит внутри репозитория — перенесите его в ..\konspekt-v62' }
+# файл загрузки собран из того исходника, что назначен манифестом (SHA-256 в шапке), на 77 параграфов и со встроенными
+# контрольными суммами — иначе загрузка всё равно упадёт; проверяем до восстановления копии, а не после миграции
+$manifest = Join-Path $rel 'v62-library-manifest.tsv'
+$wantSrc = ((Get-Content $manifest -Encoding UTF8) | Where-Object { $_ -match '^# source-sha256 ([0-9a-f]{64})' } | Select-Object -First 1) -replace '^# source-sha256 ([0-9a-f]{64}).*$', '$1'
+$seedHead = @(Get-Content $seedFull -Encoding UTF8 -TotalCount 3)
+$seedSrc = if ($seedHead.Count -ge 2 -and $seedHead[1] -match 'sha256 ([0-9a-f]{64})') { $Matches[1] } else { '' }
+if ($wantSrc -notmatch '^[0-9a-f]{64}$') { Fail "в манифесте $manifest нет строки # source-sha256 (нужна ветка feature/v62 после git pull)" }
+if ($seedSrc -ne $wantSrc) {
+  Fail ("library-seed.sql собран не из того исходника: SHA-256 в шапке $(if ($seedSrc) { $seedSrc } else { '(нет)' }), нужен $wantSrc. " +
+        'Обычно так бывает, если исходник сохранён командой PowerShell «git show … > файл» (она перекодирует кириллицу). ' +
+        'Соберите файл заново (шаг 0б): node tools/library-split.mjs --git 53d3203:js/library-catalog.js --index js/library-index.js --seed ..\konspekt-v62\library-seed.sql --expect supabase/release/v62-library-manifest.tsv')
+}
+if ($seedHead.Count -lt 3 -or $seedHead[2] -notmatch 'Параграфов: 77 \(history: 26, physics: 51\)') { Fail 'в шапке library-seed.sql не «Параграфов: 77 (history: 26, physics: 51)» — соберите файл заново (шаг 0б)' }
+if (-not (Select-String -Path $seedFull -Pattern 'контрольные суммы совпали' -SimpleMatch -Quiet -Encoding UTF8)) { Fail 'в library-seed.sql нет встроенных контрольных сумм — собирайте с --expect (шаг 0б)' }
 if (-not $WorkDir) { $WorkDir = Join-Path (Split-Path $repo -Parent) ('konspekt-v62\pg17-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
 $WorkDir = [IO.Path]::GetFullPath($WorkDir)
 if (Inside $WorkDir $repo) { Fail 'папка -WorkDir внутри репозитория — укажите папку вне его' }
@@ -262,10 +276,24 @@ try {
   Say ('Восстановление ПОЛНОЕ для приложения: структура (145 объектов) и данные совпали с production' + $(if ($knownEvt.Count) { "; единственное отличие — владельцы $($knownEvt.Count) событийных триггеров Supabase (см. ОГРАНИЧЕНИЕ)" } else { '' })) 'Green'
 
   # ---------- 3. снимок → миграция → снимок ----------
-  $funcsSql = "select md5(string_agg(n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || md5(p.prosrc) || p.prosecdef || coalesce(array_to_string(p.proconfig, ','), '') || coalesce(array_to_string(p.proacl, ','), ''), '|' order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private', 'analytics')"
+  # функции построчно: имя → владелец, SECURITY DEFINER, search_path, права (NULL = права по умолчанию, через acldefault),
+  # md5 текста; третий столбец — права как записаны (для отчёта: NULL или явная запись)
+  $funcsSql = "select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' || chr(9) || 'owner='||pg_get_userbyid(p.proowner)||' secdef='||p.prosecdef::text||' config='||coalesce(array_to_string(p.proconfig,','),'-')||' acl='||array_to_string(coalesce(p.proacl, acldefault('f', p.proowner)),',')||' src='||left(md5(p.prosrc),12) || chr(9) || coalesce(array_to_string(p.proacl,','),'NULL') from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private','analytics') order by 1"
+  function FuncMap { $m = @{}; Lines (Q $funcsSql) | ForEach-Object { $k, $d, $raw = $_.Split("`t"); $m[$k] = @($d, $raw) }; return $m }
+  # сравнение «до/после»: число отличий; каждое — в отчёт (что именно отличается)
+  function FuncDiff($before, $after, [string]$what) {
+    $n = 0
+    foreach ($k in (@($before.Keys) + @($after.Keys) | Sort-Object -Unique)) {
+      if (-not $after.ContainsKey($k)) { Say "    $what — нет функции: $k [$($before[$k][0])]" 'Red'; $n++ }
+      elseif (-not $before.ContainsKey($k)) { Say "    $what — лишняя функция: $k [$($after[$k][0])]" 'Red'; $n++ }
+      elseif ($before[$k][0] -ne $after[$k][0]) { Say "    $what — отличается: $k" 'Red'; Say "      до:    $($before[$k][0])"; Say "      после: $($after[$k][0])"; $n++ }
+      elseif ($before[$k][1] -ne $after[$k][1]) { Say "    $what — права те же, запись другая (NULL/явная): $k ($($before[$k][1]) → $($after[$k][1]))" }
+    }
+    return $n
+  }
   [void](Check '2. предпроверка: панель есть, библиотеки нет, тарифов 0 (private.plans пустая, как в production)' (Q "select (to_regclass('private.owner_panel_secrets') is not null)::text || '|' || (to_regclass('private.library_paragraphs') is null)::text || '|' || (select count(*) from private.plans)") 'true|true|0')
   Say ('  бюджет ИИ в копии: ' + (Q "select max_total_starts||'/'||total_starts||'/'||max_in_flight from private.ai_limits"))
-  $funcs0 = Q $funcsSql
+  $funcs0 = FuncMap
   if ((F "$rel\v62-snapshot.sql" 'snapshot-before') -ne 0) { Fail ('снимок не снялся: ' + $script:lastErr) }
   $snap0 = $script:lastOut.Trim()
   $t0 = Get-Date
@@ -284,26 +312,36 @@ try {
 
   # ---------- 4. перенос 77 параграфов ----------
   $rc = F $seedFull 'seed'
-  [void](Check '3. загрузка текстов: контрольные суммы 77 параграфов совпали' "$rc/$([int]($script:lastErr -match 'совпали: 77'))" '0/1')
-  [void](Check '3. в таблице 77 параграфов: history 26, physics 51' (Q "select string_agg(subject_id||':'||c, ',' order by subject_id) from (select subject_id, count(*) c from private.library_paragraphs group by 1) s") 'history:26,physics:51')
-  [void](Check '3. дублей и пустых текстов нет' (Q "select count(*) - count(distinct (subject_id, book_id, paragraph_id)) + count(*) filter (where content is null or content = '{}'::jsonb) from private.library_paragraphs") '0')
-  if ((F "$rel\v62-access-check.sql" 'access') -ne 0) { Fail ('проверка доступа не выполнилась: ' + $script:lastErr) }
-  $acc = @(Lines $script:lastOut)
-  Say ('  доступ по статусам (статус → результат): ' + (($acc | ForEach-Object { $p = $_.Split('|'); $p[0] + ' → ' + $p[-1] }) -join '; '))
-  $wrong = @($acc | Where-Object { ($_ -match '^(owner|trial|paid)\|' -and $_ -notmatch '\|text$') -or ($_ -notmatch '^(owner|trial|paid)\|' -and $_ -notmatch '\|ACCESS_REQUIRED$') })
-  [void](Check '3. доступ: владелец/пробный/оплаченный → текст, остальные → ACCESS_REQUIRED' "$($wrong.Count)" '0')
+  $seedOk = Check '3. загрузка текстов: контрольные суммы 77 параграфов совпали' "$rc/$([int]($script:lastErr -match 'совпали: 77'))" '0/1'
+  if (-not $seedOk) {
+    # причина — из журнала psql (там только идентификаторы параграфов, без текстов)
+    (Lines $script:lastErr | Where-Object { $_ -match '(ERROR|ОШИБКА)' } | Select-Object -First 5) | ForEach-Object { $x = $_ -replace '^psql:.*?:(\d+): ', 'строка $1: '; Say ('    ' + $x.Substring(0, [Math]::Min(300, $x.Length))) 'Red' }
+    Say '  Загрузка не удалась — проверки текстов, доступа и повторной загрузки НЕ выполняются (их результат был бы ложным).' 'Red'
+  } else {
+    [void](Check '3. в таблице 77 параграфов: history 26, physics 51' (Q "select string_agg(subject_id||':'||c, ',' order by subject_id) from (select subject_id, count(*) c from private.library_paragraphs group by 1) s") 'history:26,physics:51')
+    [void](Check '3. дублей и пустых текстов нет' (Q "select count(*) - count(distinct (subject_id, book_id, paragraph_id)) + count(*) filter (where content is null or content = '{}'::jsonb) from private.library_paragraphs") '0')
+    if ((F "$rel\v62-access-check.sql" 'access') -ne 0) { Fail ('проверка доступа не выполнилась: ' + $script:lastErr) }
+    $acc = @(Lines $script:lastOut)
+    Say ('  доступ по статусам (статус → результат): ' + (($acc | ForEach-Object { $p = $_.Split('|'); $p[0] + ' → ' + $p[-1] }) -join '; '))
+    $wrong = @($acc | Where-Object { ($_ -match '^(owner|trial|paid)\|' -and $_ -notmatch '\|text$') -or ($_ -notmatch '^(owner|trial|paid)\|' -and $_ -notmatch '\|ACCESS_REQUIRED$') })
+    [void](Check '3. доступ: владелец/пробный/оплаченный → текст, остальные → ACCESS_REQUIRED' "$($wrong.Count)" '0')
+  }
 
   # ---------- 5. повторы ----------
-  $f1 = Q $funcsSql
+  $f1 = FuncMap
   $rc = F $mig 'migration-again'
-  [void](Check '4. повторный запуск миграции отклонён, функции не изменились' "$rc/$(Q $funcsSql)" "3/$f1")
-  $rc = F $seedFull 'seed-again'
-  [void](Check '4. повторная загрузка текстов — без дублей' "$rc/$(Q 'select count(*) from private.library_paragraphs')" '0/77')
+  $nd = FuncDiff $f1 (FuncMap) 'повтор миграции'
+  [void](Check '4. повторный запуск миграции отклонён, функции не изменились' "$rc/$nd" '3/0')
+  if ($seedOk) {
+    $rc = F $seedFull 'seed-again'
+    [void](Check '4. повторная загрузка текстов — без дублей' "$rc/$(Q 'select count(*) from private.library_paragraphs')" '0/77')
+  }
 
   # ---------- 6. откат ----------
   $rc = F "$rel\rollback-v62.sql" 'rollback'
   [void](Check '5. откат rollback-v62.sql применился' "$rc" '0')
-  [void](Check '5. после отката функции = как до миграции (v61.3)' (Q $funcsSql) $funcs0)
+  $nd = FuncDiff $funcs0 (FuncMap) 'после отката'
+  [void](Check "5. после отката функции = как до миграции (v61.3): $($funcs0.Count) функций — владелец, SECURITY DEFINER, search_path, права, текст" "$nd" '0')
   if ((F "$rel\v62-snapshot.sql" 'snapshot-rollback') -ne 0) { Fail ('снимок не снялся: ' + $script:lastErr) }
   [void](Check '5. после отката данные учеников = как до миграции' $script:lastOut.Trim() $snap0)
   [void](Check '5. после отката закрытой таблицы нет' (Q "select (to_regclass('private.library_paragraphs') is null)::text") 'true')

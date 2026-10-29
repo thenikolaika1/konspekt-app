@@ -4,7 +4,9 @@
 //   2) SQL-файл с текстами для private.library_paragraphs — ЗАКРЫТЫЙ, в репозиторий не кладётся.
 //
 // Запуск из корня репозитория:
-//   node tools/library-split.mjs <исходный library-catalog.js> --index js/library-index.js --seed <вне репозитория>/library-seed.sql
+//   node tools/library-split.mjs --git 53d3203:js/library-catalog.js --index js/library-index.js --seed <вне репозитория>/library-seed.sql
+//   (или <исходный library-catalog.js> вместо --git). --git читает исходник прямо из git байт в байт: так его не
+//   перекодирует оболочка (PowerShell «git show … > файл» портит кириллицу, и тексты перестают совпадать)
 //   [--subjects history,physics]   — чьи тексты заливаются (остальные предметы в каталоге остаются «Скоро»)
 //   [--expect <manifest.tsv>]      — контрольные суммы каждого параграфа: SQL проверит их сам и при любом расхождении
 //                                    откатит загрузку целиком. Манифест (subject<TAB>book<TAB>paragraph<TAB>sha256 текста
@@ -15,6 +17,7 @@
 // чужие строки не трогает и ничего не удаляет. Новый класс или учебник (например, 7 класс) — добавить в исходник и
 // запустить снова, затем применить SQL и опубликовать новый library-index.js.
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import vm from "node:vm";
@@ -24,13 +27,14 @@ const opt = (name, def) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : def;
 };
-const source = args[0];
+const gitSpec = opt("--git");
+const source = gitSpec ? "git:" + gitSpec : args[0];
 const indexOut = opt("--index");
 const seedOut = opt("--seed");
 const subjects = new Set(opt("--subjects", "history,physics").split(",").filter(Boolean));
 const expectFile = opt("--expect");
 if (!source || source.startsWith("--") || !indexOut || !seedOut) {
-  console.error("Использование: node tools/library-split.mjs <исходный каталог> --index js/library-index.js --seed <файл.sql> [--subjects history,physics]");
+  console.error("Использование: node tools/library-split.mjs (--git <коммит>:<путь> | <исходный каталог>) --index js/library-index.js --seed <файл.sql> [--subjects history,physics] [--expect <манифест>]");
   process.exit(2);
 }
 const repo = process.cwd();
@@ -40,11 +44,23 @@ if (path.resolve(seedOut).startsWith(repo + path.sep)) {
 }
 
 // исходник: тот же формат, что у прежнего js/library-catalog.js (window.K.library.setCatalog({...}))
+const srcBuf = gitSpec ? execFileSync("git", ["show", gitSpec], { maxBuffer: 256 * 1024 * 1024 }) : readFileSync(source);
+const sha = createHash("sha256").update(srcBuf).digest("hex");
+// манифест может назначить исходник: строка «# source-sha256 <hex>». Другой исходник (не тот коммит или перекодированный
+// оболочкой) — отказ сразу, а не ошибка контрольных сумм при загрузке в базу
+if (expectFile) {
+  const want = (readFileSync(expectFile, "utf8").match(/^# source-sha256 ([0-9a-f]{64})\b/m) || [])[1];
+  if (want && want !== sha) {
+    console.error("Исходник не тот: sha256 " + sha + ", манифест ожидает " + want + ".\n" +
+      "Если исходник сохранён командой PowerShell «git show … > файл» — она перекодирует текст. Запустите с --git 53d3203:js/library-catalog.js");
+    process.exit(3);
+  }
+}
 let raw = null;
 const ctx = vm.createContext({ console: { warn() {}, log() {} } });
 ctx.window = ctx;
 ctx.K = { library: { setCatalog: (c) => (raw = c) } };
-vm.runInContext(readFileSync(source, "utf8"), ctx, { filename: path.basename(source) });
+vm.runInContext(srcBuf.toString("utf8"), ctx, { filename: path.basename(source) });
 if (!raw || !Array.isArray(raw.subjects)) throw new Error("в исходнике нет каталога (setCatalog)");
 const catalog = JSON.parse(JSON.stringify(raw));
 
@@ -70,7 +86,6 @@ for (const s of catalog.subjects) {
 const keys = new Set(rows.map((r) => r.s + "/" + r.b + "/" + r.p));
 if (keys.size !== rows.length) throw new Error("повторяющиеся параграфы в исходнике");
 
-const sha = createHash("sha256").update(readFileSync(source)).digest("hex");
 // контрольные суммы из манифеста: ровно по одной на каждый загружаемый параграф
 let expect = null;
 if (expectFile) {
