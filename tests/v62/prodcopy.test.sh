@@ -122,6 +122,12 @@ D0=$($P -d $DB -c "$DATA"); S0=$($P -d $DB -c "$STATE"); F0=$($P -d $DB -c "$FUN
 
 # ---------- 1. резервная копия до миграции (как backup-before-v62.ps1: полная и только данные) ----------
 pg_dump $PGD -d $DB -Fc -f "$OUT/full.dump" && pg_dump $PGD -d $DB -Fc --data-only -t 'public.*' -t 'private.*' -t 'analytics.*' -t auth.users -f "$OUT/data.dump"
+# для раздела 7: структура исходной базы запросом скрипта v62-local-pg17-check.ps1 (до копирования — как production)
+PS1="$ROOT/supabase/release/v62-local-pg17-check.ps1"
+J="$OUT/ps1.json"; node "$HERE/ps1-sql.mjs" "$PS1" > "$J"
+js() { node -e 'const j=require(process.argv[1]);const v=j[process.argv[2]];console.log(Array.isArray(v)?v.join("\n"):v)' "$J" "$1"; }
+$P -d $DB -c "$(js struct)" | cut -f1,2 > "$OUT/want0.tsv"
+EXPL=$($P -d $DB -c "select count(*) from pg_class c where c.relnamespace in ('private'::regnamespace, 'analytics'::regnamespace) and c.relkind in ('r', 'v') and c.relacl is not null and c.relacl = acldefault('r', c.relowner)")
 check "1. резервные копии сделаны и читаются" "$(pg_restore -l "$OUT/full.dump" >/dev/null && pg_restore -l "$OUT/data.dump" >/dev/null && echo ok)" "ok"
 # та же проверка структуры, что в backup-before-v62.ps1 (те же выражения): функции, политики, RLS в копии = в базе
 LIVE=$($P -d $DB -c "select (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public','private','analytics') and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')) || '|' || (select count(*) from pg_policies where schemaname in ('public','private','analytics')) || '|' || (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relrowsecurity and c.relkind in ('r','p') and n.nspname in ('public','private','analytics'))")
@@ -245,15 +251,24 @@ check "6. после отката выдачи и конспекты на мес
 # ---------- 7. репетиция v62-local-pg17-check.ps1: ЕГО запросы и фильтр, его порядок шагов ----------
 # PowerShell в среде тестов нет: ps1-sql.mjs достаёт SQL из скрипта, здесь он выполняется на копии из шага 1
 # (с добавленной схемой vault — как supabase_vault в production: её объекты должны пропускаться).
-PS1="$ROOT/supabase/release/v62-local-pg17-check.ps1"
-J="$OUT/ps1.json"; node "$HERE/ps1-sql.mjs" "$PS1" > "$J"
-js() { node -e 'const j=require(process.argv[1]);const v=j[process.argv[2]];console.log(Array.isArray(v)?v.join("\n"):v)' "$J" "$1"; }
 RD=konspekt_v62_restore_t
 $P -d postgres -c "drop database if exists ${DB}v" -c "drop database if exists $RD" -c "create database ${DB}v" -c "create database $RD" >/dev/null
 pg_restore $PGD -d ${DB}v --exit-on-error "$OUT/full.dump" 2>/dev/null
 $P -d ${DB}v -v ON_ERROR_STOP=1 -c "create schema vault" -c "create table vault.secrets (id int, secret text)" \
   -c "insert into vault.secrets values (1, 'секрет')" -c "create function vault.decrypt(t text) returns text language sql as 'select t'" >/dev/null
-pg_dump $PGD -d ${DB}v -Fc -f "$OUT/vault.dump"; $P -d ${DB}v -c "$(js struct)" > "$OUT/want.tsv"
+# событийный триггер Supabase с владельцем supabase_admin: в Supabase это суперпользователь. Только в ЭТОЙ тестовой
+# среде и только на время создания копии роль supabase_admin делается суперпользователем (иначе такую копию не получить),
+# затем сразу снимается — восстановление идёт, как у владельца: supabase_admin НЕ суперпользователь.
+$P -d postgres -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname = 'supabase_admin') then create role supabase_admin nologin; end if; end \$\$" >/dev/null
+trap '$P -d postgres -c "alter role supabase_admin nosuperuser" >/dev/null 2>&1; rm -rf "$OUT"' EXIT
+$P -d postgres -c "alter role supabase_admin superuser" >/dev/null
+$P -d ${DB}v -v ON_ERROR_STOP=1 -c "create function extensions.pgrst_ddl_watch() returns event_trigger language plpgsql as 'begin null; end'" \
+  -c "create event trigger pgrst_ddl_watch on ddl_command_end execute function extensions.pgrst_ddl_watch()" \
+  -c "alter event trigger pgrst_ddl_watch owner to supabase_admin" >/dev/null
+pg_dump $PGD -d ${DB}v -Fc -f "$OUT/vault.dump"
+$P -d postgres -c "alter role supabase_admin nosuperuser" >/dev/null
+check "7. (подготовка теста) supabase_admin снова не суперпользователь — как у владельца" "$($P -d postgres -c "select rolsuper from pg_roles where rolname = 'supabase_admin'")" "f"
+{ cat "$OUT/want0.tsv"; $P -d ${DB}v -c "$(js struct)" | cut -f1,2 | grep '^event_trigger pgrst_ddl_watch'; } | sort > "$OUT/want.tsv"
 $P -d postgres -c "drop database ${DB}v" >/dev/null
 cp "$OUT/vault.dump" "$OUT/vault.dump.orig"
 check "7. пустая база: проверка пустоты = 0" "$($P -d $RD -c "$(js objs)")" "0"
@@ -262,10 +277,34 @@ grep -P "$(js skip)" "$OUT/vtoc.txt" > "$OUT/vskip.txt"; grep -vP "$(js skip)" "
 check "7. фильтр оглавления: пропущены ровно объекты vault (схема, таблица, данные, функция), больше ничего" \
   "$(wc -l < "$OUT/vskip.txt" | tr -d ' ')/$(grep -vc ' vault ' "$OUT/vskip.txt")" "4/0"
 pg_restore $PGD -d $RD -L "$OUT/vkeep.txt" "$OUT/vault.dump" 2>"$OUT/vrestore.err"; RC=$?
-check "7. восстановление без vault: pg_restore без ошибок" "$RC/$(grep -c 'error:' "$OUT/vrestore.err")" "0/0"
+LOGJ=$(node "$HERE/ps1-restore-log.mjs" "$J" "$OUT/vrestore.err")
+check "7. восстановление: как у владельца — одна ошибка ALTER EVENT TRIGGER … OWNER TO supabase_admin, код 1" \
+  "$RC/$(echo "$LOGJ" | node -e 'const j=JSON.parse(require("fs").readFileSync(0));console.log([j.blocks,j.known.join(","),j.other.length,j.unknown.length,j.ignored].join("/"))')" "1/1/pgrst_ddl_watch/0/0/1"
+check "7. триггер создан и включён, владелец — postgres (ALTER OWNER не прошёл)" \
+  "$($P -d $RD -c "select string_agg(evtname || '=' || pg_get_userbyid(evtowner) || ':' || evtenabled::text, ',' order by evtname) from pg_event_trigger")" "ensure_rls=postgres:O,pgrst_ddl_watch=postgres:O"
+# разбор журнала скриптом: русские сообщения сервера, чужая ошибка, непонятная строка, «не тот» триггер
+printf '%s\n' 'pg_restore: error: could not execute query: ОШИБКА:  нет прав для изменения владельца событийного триггера "pgrst_drop_watch"' \
+  'ПОДСКАЗКА:  Владельцем событийного триггера должен быть суперпользователь.' 'Command was: ALTER EVENT TRIGGER pgrst_drop_watch OWNER TO supabase_admin;' '' \
+  'pg_restore: warning: errors ignored on restore: 1' > "$OUT/log-ru.txt"
+printf '%s\n' 'pg_restore: error: could not execute query: ERROR:  syntax error at or near "x"' 'LINE 1: CREATE FUNCTION private.x() RETURNS void' '        ^' \
+  'Command was: CREATE FUNCTION private.x() RETURNS void' '    LANGUAGE sql AS $$x$$;' '' \
+  'pg_restore: error: could not execute query: ERROR:  permission denied to change owner of event trigger "my_trigger"' \
+  'Command was: ALTER EVENT TRIGGER my_trigger OWNER TO supabase_admin;' '' 'что-то непонятное' 'pg_restore: warning: errors ignored on restore: 2' > "$OUT/log-bad.txt"
+LR=$(node "$HERE/ps1-restore-log.mjs" "$J" "$OUT/log-ru.txt" | node -e 'const j=JSON.parse(require("fs").readFileSync(0));console.log([j.blocks,j.known.join(","),j.other.length,j.unknown.length,j.ignored].join("/"))')
+LB=$(node "$HERE/ps1-restore-log.mjs" "$J" "$OUT/log-bad.txt" | node -e 'const j=JSON.parse(require("fs").readFileSync(0));console.log([j.blocks,j.known.length,j.other.join(" ; "),j.unknown.join(" ; "),j.ignored].join("/"))')
+check "7. разбор журнала: русские строки сервера — известная ошибка распознана" "$LR" "1/pgrst_drop_watch/0/0/1"
+check "7. разбор журнала: чужая ошибка, «не тот» триггер и непонятная строка — НЕ известные (будет FAIL)" "$LB" \
+  "2/0/CREATE FUNCTION private.x() RETURNS void ; ALTER EVENT TRIGGER my_trigger OWNER TO supabase_admin;/что-то непонятное/2"
 check "7. после восстановления база не пустая, объектов vault нет" \
   "$([ "$($P -d $RD -c "$(js objs)")" -gt 0 ] && echo full)/$($P -d $RD -c "select to_regnamespace('vault') is null")" "full/t"
-check "7. структура объект в объект = копии (запрос \$structSql скрипта)" "$($P -d $RD -c "$(js struct)" | diff "$OUT/want.tsv" - | grep -c '^[<>]')" "0"
+check "7. причина 28 расхождений воспроизведена: явная запись «только владелец» ($EXPL таблиц и представлений) после копии — NULL" \
+  "$([ "$EXPL" -gt 0 ] && echo yes)/$($P -d $RD -c "select count(*) from pg_class c where c.relnamespace in ('private'::regnamespace, 'analytics'::regnamespace) and c.relkind in ('r', 'v') and c.relacl is not null")" "yes/0"
+check "7. структура объект в объект = исходной базе (запрос скрипта: владельцы, права через acldefault, RLS, политики, триггеры)" \
+  "$($P -d $RD -c "$(js struct)" | cut -f1,2 | sort | diff "$OUT/want.tsv" - | grep -c '^[<>]')" "0"
+check "7. запрос скрипта замечает настоящее отличие прав (grant select anon на private.plans)" \
+  "$($P -d $RD -c "grant usage on schema private to anon" -c "grant select on private.plans to anon" >/dev/null; $P -d $RD -c "$(js struct)" | cut -f1,2 | sort | diff "$OUT/want.tsv" - | grep -c '^>')/$($P -d $RD -c "revoke select on private.plans from anon" -c "revoke usage on schema private from anon" >/dev/null; $P -d $RD -c "$(js struct)" | cut -f1,2 | sort | diff "$OUT/want.tsv" - | grep -c '^[<>]')" "1/0"
+check "7. запрос скрипта замечает смену владельца таблицы" \
+  "$($P -d $RD -c "alter table private.plans owner to service_role" >/dev/null; $P -d $RD -c "$(js struct)" | cut -f1,2 | sort | diff "$OUT/want.tsv" - | grep -c '^>')/$($P -d $RD -c "alter table private.plans owner to postgres" >/dev/null; $P -d $RD -c "$(js struct)" | cut -f1,2 | sort | diff "$OUT/want.tsv" - | grep -c '^[<>]')" "1/0"
 # число строк: COPY-блоки копии (как в скрипте) против запроса скрипта по восстановленной базе
 pg_restore -f - --data-only -L "$OUT/vkeep.txt" "$OUT/vault.dump" | awk '/^COPY [^ ]+\.[^ ]+ /{split($2,a,".");gsub(/"/,"",a[1]);gsub(/"/,"",a[2]);cur=a[1]"."a[2];n=0;next} cur!=""{if($0=="\\.") {print cur"\t"n; cur=""} else n++}' | sort > "$OUT/vcopy.tsv"
 VALS=$(awk -F'\t' '{split($1,a,"."); printf "%s(\x27%s\x27, \x27%s\x27)", (NR>1?", ":""), a[1], a[2]}' "$OUT/vcopy.tsv")
@@ -279,7 +318,7 @@ pg_restore $PGD -d $RD -L "$OUT/vkeep.txt" "$OUT/vault.dump" 2>/dev/null
 # функции, которые миграция v62 или откат создают, заменяют, удаляют или переносят: до миграции и после отката они
 # должны совпадать с production байт в байт (текст, SECURITY DEFINER, search_path, права) — эталон v62-prod-structure.tsv
 TOUCH=$(grep -ohE '(function|on function|procedure) (public|private)\.[a-z0-9_]+' "$M/20261028120000_v62_paid_library.sql" "$ROOT/supabase/release/rollback-v62.sql" | awk '{print $NF}' | sort -u)
-touched() { grep -v '^#' | grep -F "$(echo "$TOUCH" | sed 's/$/(/')" | grep -v '^policy' | sort; }
+touched() { grep -v '^#' | cut -f1,2 | grep -F "$(echo "$TOUCH" | sed 's/$/(/')" | grep -v '^policy' | sort; }
 PRODT=$(touched < "$ROOT/supabase/release/v62-prod-structure.tsv")
 check "7. функции, которые трогают миграция и откат ($(echo "$PRODT" | wc -l | tr -d ' ') шт.), в копии до миграции = production" \
   "$($P -d $RD -c "$(js struct)" | touched | diff <(echo "$PRODT") - | grep -c '^[<>]')" "0"
@@ -304,8 +343,10 @@ check "7. откат: функции и данные как до миграци�
 check "7. после отката эти функции снова = production (откат возвращает именно версии production)" \
   "$($P -d $RD -c "$(js struct)" | touched | diff <(echo "$PRODT") - | grep -c '^[<>]')" "0"
 check "7. копия за репетицию не изменилась" "$(cmp -s "$OUT/vault.dump" "$OUT/vault.dump.orig" && echo same)" "same"
-check "7. скрипт: только 127.0.0.1:55432 и база konspekt_v62_restore_20261029, без drop/create/alter, без pg_dump/createdb/dropdb, роли только по ключу" \
-  "$(grep -c "^\$DbHost = '127.0.0.1'; \$DbPort = 55432" "$PS1")/$(grep -c "^\$DbName = 'konspekt_v62_restore_20261029'" "$PS1")/$(sed "s/Fail .*//; s/Say .*//" "$PS1" | grep -E '(\bQ |Run )' | grep -ciE "drop |create database|alter (system|role|database)|truncate|dropdb|createdb" | tr -d ' ')/$(grep -cE "Find-Tool '(dropdb|createdb|pg_dump)'" "$PS1")/$(grep -B12 'create role \$r nologin' "$PS1" | grep -c 'if (-not \$CreateMissingRoles)')" "1/1/0/0/1"
+check "7. скрипт: только 127.0.0.1:55432 и база konspekt_v62_restore_20261029, без drop/alter/truncate, без pg_dump/createdb/dropdb, роли только по ключу" \
+  "$(grep -c "^\$DbHost = '127.0.0.1'; \$DbPort = 55432" "$PS1")/$(grep -c "^\$DbName = 'konspekt_v62_restore_20261029'" "$PS1")/$(sed "s/Fail .*//; s/Say .*//" "$PS1" | grep -E '(\bQ |Run )' | grep -ciE "drop |alter (system|role|database)|truncate|dropdb|createdb" | tr -d ' ')/$(grep -cE "Find-Tool '(dropdb|createdb|pg_dump)'" "$PS1")/$(grep -B12 'create role \$r nologin' "$PS1" | grep -c 'if (-not \$CreateMissingRoles)')" "1/1/0/0/1"
+check "7. скрипт: create database — ровно одна, только с ключом -CreateEmptyDb и только если такой базы нет; суперпользователей не создаёт" \
+  "$(sed "s/Fail .*//; s/Say .*//" "$PS1" | grep -ciE '(\bQ |Run ).*create database' | tr -d ' ')/$(grep -B4 'Q "create database \$DbName"' "$PS1" | grep -c "pg_database where datname = '\$DbName'\|if (-not \$CreateEmptyDb)")/$(grep -ciE 'superuser|createrole|createdb ' "$PS1" | tr -d ' ')" "1/2/0"
 $P -d postgres -c "drop database $RD" >/dev/null
 
 echo "ИТОГО: $pass PASS, $fail FAIL"

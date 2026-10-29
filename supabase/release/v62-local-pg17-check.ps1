@@ -4,7 +4,7 @@
   Берёт резервную копию production (konspekt-full.dump из backup-before-v62.ps1), восстанавливает её в ПУСТУЮ локальную
   базу konspekt_v62_restore_20261029 (PostgreSQL 17, 127.0.0.1:55432) и проходит весь выпуск как в v62-paid-library.md:
     1. копия: файл не изменился (SHA-256 до/после и с README.txt копии);
-    2. восстановление и сверка: структура приложения = production ОБЪЕКТ В ОБЪЕКТ (v62-prod-structure.tsv, 138 объектов),
+    2. восстановление и сверка: структура приложения = production ОБЪЕКТ В ОБЪЕКТ (v62-prod-structure.tsv, 145 объектов),
        число строк каждой таблицы = числу строк в копии;
     3. снимок данных → миграция v62 → снимок: данные учеников не изменились;
     4. 77 параграфов (закрытый library-seed.sql, контрольная сумма каждого) и проверка доступа по ролям;
@@ -34,6 +34,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Seed,
   [int]$Attempt = 1,
   [switch]$CreateMissingRoles,
+  [switch]$CreateEmptyDb,
   [string]$WorkDir = '',
   [string]$PgBin = ''
 )
@@ -99,6 +100,9 @@ if ($script:fail) { Fail 'файл копии отличается от созд
 
 # ---------- подключение: только локальный сервер ----------
 foreach ($v in 'PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGOPTIONS', 'PGDATABASE', 'PGREQUIRESSL', 'PGTARGETSESSIONATTRS') { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+# сообщения сервера и программ PostgreSQL — по-английски: журнал pg_restore разбирается по точным образцам
+# (на русской Windows иначе «ОШИБКА…»); строка журнала, не подошедшая ни под один образец, — ошибка проверки
+$env:PGOPTIONS = '-c lc_messages=C'; $env:LC_MESSAGES = 'C'; $env:LANGUAGE = 'en'
 $env:PGHOST = $DbHost; $env:PGPORT = "$DbPort"; $env:PGUSER = $DbUser; $env:PGCLIENTENCODING = 'UTF8'; $env:PGSSLMODE = 'disable'; $env:PGCONNECT_TIMEOUT = '10'
 if (-not $env:PGPASSWORD) {
   $sec = Read-Host -AsSecureString 'Пароль ЛОКАЛЬНОГО postgres (ввод скрыт)'
@@ -134,9 +138,14 @@ try {
   if ($srv[3] -ne 'true') { Fail 'подключение должно быть от суперпользователя postgres (локального)' }
   if ((Q "select count(*) from pg_extension where extname = 'supabase_vault'" 'postgres') -ne '0') { Fail 'на этом сервере есть supabase_vault — похоже на Supabase, а не на локальный PostgreSQL' }
   Say ("Сервер: 127.0.0.1:$DbPort, PostgreSQL " + (Q 'show server_version' 'postgres'))
-  if ((Q "select count(*) from pg_database where datname = '$DbName'" 'postgres') -ne '1') { Fail "нет базы $DbName. Создайте пустую: createdb -h 127.0.0.1 -p $DbPort -U postgres $DbName" }
+  if ((Q "select count(*) from pg_database where datname = '$DbName'" 'postgres') -ne '1') {
+    if (-not $CreateEmptyDb) { Fail "нет базы $DbName. Запустите с ключом -CreateEmptyDb (скрипт создаст новую пустую базу; существующие базы не трогает)" }
+    # имя — только konspekt_v62_restore_20261029[_2…_9] (задано выше, не из ввода); создаётся, только если такой базы нет
+    Q "create database $DbName" 'postgres' | Out-Null
+    Say "Создана новая пустая база $DbName (ключ -CreateEmptyDb). Другие базы не изменялись." 'Yellow'
+  }
   $objs = Q "select (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)') + (select count(*) from pg_namespace where nspname not in ('public', 'pg_catalog', 'information_schema') and nspname !~ '^pg_') + (select count(*) from pg_extension where extname <> 'plpgsql') + (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public')"
-  if ($objs -ne '0') { Fail "база $DbName не пустая ($objs объектов). Поверх существующей базы не восстанавливаю: создайте новую пустую и запустите с -Attempt $($Attempt + 1)" }
+  if ($objs -ne '0') { Fail "база $DbName не пустая ($objs объектов). Поверх существующей базы не восстанавливаю: запустите с -Attempt $($Attempt + 1) -CreateEmptyDb — скрипт создаст новую пустую базу $($DbName -replace '_\d$', '')_$($Attempt + 1), эту не тронет" }
 
   $avail = (Q "select string_agg(name, ',') from pg_available_extensions") -split ','
   $toc = @(& $pgRestore -l $dumpFull)
@@ -168,21 +177,59 @@ try {
   $keep | Set-Content -Path $list -Encoding ASCII
   Say ("Восстанавливаю копию (1–3 минуты). Пропущено объектов supabase_vault: $($skip.Count) — их данные (секреты Supabase) не нужны приложению")
   $rc = Run $pgRestore @('-w', '-d', $DbName, '-L', $list, $dumpFull) 'restore'
-  $errs = @(Lines $script:lastErr | Where-Object { $_ -match 'error:' })
-  Say ("pg_restore: код $rc, ошибок: $($errs.Count). Полный журнал: $script:lastErrFile") $(if ($errs.Count) { 'Yellow' } else { 'Gray' })
-  $errLines = @(Lines $script:lastErr)
-  for ($i = 0; $i -lt $errLines.Count -and $i -lt 60; $i++) { $x = $errLines[$i]; Say ('  ' + $x.Substring(0, [Math]::Min(240, $x.Length))) 'Yellow' }
-  if ($errLines.Count -gt 60) { Say "  … ещё $($errLines.Count - 60) строк — в журнале" 'Yellow' }
+  # Разбор журнала (сообщения по-английски, см. PGOPTIONS): блок «pg_restore: error: could not execute query: …» →
+  # строки ERROR/DETAIL/HINT/LINE → «Command was: …» до пустой строки; в конце «errors ignored on restore: N».
+  # Известная и единственно допустимая ошибка: ALTER EVENT TRIGGER <триггер Supabase> OWNER TO supabase_admin —
+  # владельцем событийного триггера может быть только суперпользователь; в Supabase supabase_admin — суперпользователь,
+  # в локальном PostgreSQL — нет (и делать его суперпользователем не нужно). Триггер при этом создан и включён,
+  # владелец — postgres. На v62 это не влияет: миграция событийные триггеры не создаёт и не меняет, а функция
+  # триггера выполняется одинаково при любом владельце. Любая другая ошибка или непонятная строка — FAIL.
+  $superOwnedEvt = @('issue_graphql_placeholder', 'issue_pg_cron_access', 'issue_pg_graphql_access', 'issue_pg_net_access', 'pgrst_ddl_watch', 'pgrst_drop_watch')
+  $blocks = New-Object System.Collections.Generic.List[object]; $unknown = @(); $ignored = 0; $cur = $null; $inCmd = $false
+  foreach ($ln in ($script:lastErr -split "`n")) {
+    $x = $ln.TrimEnd("`r")
+    if ($inCmd) { if ($x -eq '') { $inCmd = $false; $cur = $null } else { $cur.cmd += "`n" + $x }; continue }
+    if ($x -match '^pg_restore: (error|ошибка): (could not execute query|не удалось выполнить запрос): (.*)$') { $cur = [pscustomobject]@{ msg = $Matches[3]; cmd = '' }; $blocks.Add($cur); continue }
+    if ($cur -and $x -match '^(Command was|Выполнялась команда): (.*)$') { $cur.cmd = $Matches[2]; $inCmd = $true; continue }
+    # строки сервера: «МЕТКА:  текст» (ERROR/DETAIL/HINT… на любом языке — два пробела после двоеточия) и «LINE 1: …»
+    if ($cur -and ($x -match '^[^\s:]+:  \S' -or $x -match '^\S+ \d+: ')) { $cur.msg += ' | ' + $x.Trim(); continue }
+    if ($cur -and $x -match '^\s+\^\s*$') { continue }
+    if ($x -match '^pg_restore: (warning: errors ignored on restore|предупреждение: при восстановлении проигнорировано ошибок): (\d+)$') { $ignored = [int]$Matches[2]; continue }
+    if ($x -eq '') { continue }
+    $unknown += $x
+  }
+  $knownEvt = @(); $other = @()
+  foreach ($b in $blocks) {
+    if ($b.cmd -match '^ALTER EVENT TRIGGER (\S+) OWNER TO supabase_admin;$' -and $Matches[1] -in $superOwnedEvt) { $knownEvt += $Matches[1] } else { $other += $b }
+  }
+  Say ("pg_restore: код $rc, ошибок в журнале: $($blocks.Count) (известных — владелец событийного триггера: $($knownEvt.Count), других: $($other.Count)). Журнал: $script:lastErrFile") $(if ($other.Count -or $unknown.Count) { 'Red' } elseif ($blocks.Count) { 'Yellow' } else { 'Gray' })
+  foreach ($b in $blocks) {
+    $tag = if ($other -contains $b) { 'ОШИБКА' } else { 'известная' }
+    $c = ($b.cmd -split "`n")[0]; $m = $b.msg
+    Say ("  [$tag] " + $m.Substring(0, [Math]::Min(200, $m.Length)) + ' ← ' + $c.Substring(0, [Math]::Min(160, $c.Length))) $(if ($tag -eq 'ОШИБКА') { 'Red' } else { 'Yellow' })
+  }
+  $unknown | Select-Object -First 30 | ForEach-Object { Say ('  [нераспознанная строка] ' + $_.Substring(0, [Math]::Min(220, $_.Length))) 'Red' }
+  [void](Check '1. журнал pg_restore разобран полностью (нераспознанных строк нет)' "$($unknown.Count)" '0')
+  [void](Check '1. pg_restore: других ошибок, кроме владельцев событийных триггеров Supabase, нет' "$($other.Count)" '0')
+  [void](Check '1. pg_restore: число ошибок в журнале = в итоговой строке, код выхода согласован' "$($blocks.Count)/$rc" "$ignored/$(if ($blocks.Count) { 1 } else { 0 })")
 
   # структура приложения: объект в объект с production
-  $structSql = "select f || chr(9) || h from (select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' f, left(md5(md5(p.prosrc)||p.prosecdef||coalesce(array_to_string(p.proconfig,','),'')||coalesce(array_to_string(p.proacl,','),'')),8) h from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private','analytics') union all select n.nspname||'.'||c.relname||':'||c.relkind::text, left(md5(c.relrowsecurity::text||':'||coalesce(array_to_string(c.relacl,','),'')),8) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','private','analytics') and c.relkind in ('r','v','m','p') union all select 'policy '||schemaname||'.'||tablename||':'||policyname, left(md5(cmd||':'||array_to_string(roles,',')||':'||coalesce(qual,'')||':'||coalesce(with_check,'')),8) from pg_policies where schemaname in ('public','private','analytics','storage')) x order by 1"
+  $structSql = "select f || chr(9) || left(md5(d), 8) || chr(9) || i from (select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' f, md5(p.prosrc)||p.prosecdef::text||coalesce(array_to_string(p.proconfig,','),'')||':'||pg_get_userbyid(p.proowner)||':'||array_to_string(coalesce(p.proacl, acldefault('f', p.proowner)),',') d, 'security_definer='||p.prosecdef::text||' config='||coalesce(array_to_string(p.proconfig,','),'-')||' owner='||pg_get_userbyid(p.proowner)||' acl='||array_to_string(coalesce(p.proacl, acldefault('f', p.proowner)),',') i from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private','analytics') union all select n.nspname||'.'||c.relname||':'||c.relkind::text, c.relrowsecurity::text||':'||c.relforcerowsecurity::text||':'||pg_get_userbyid(c.relowner)||':'||array_to_string(coalesce(c.relacl, acldefault('r', c.relowner)),','), 'rls='||c.relrowsecurity::text||' force='||c.relforcerowsecurity::text||' owner='||pg_get_userbyid(c.relowner)||' acl='||array_to_string(coalesce(c.relacl, acldefault('r', c.relowner)),',') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','private','analytics') and c.relkind in ('r','v','m','p') union all select 'policy '||schemaname||'.'||tablename||':'||policyname, permissive||':'||cmd||':'||array_to_string(roles,',')||':'||coalesce(qual,'')||':'||coalesce(with_check,''), 'permissive='||permissive||' cmd='||cmd||' roles='||array_to_string(roles,',') from pg_policies where schemaname in ('public','private','analytics','storage') union all select 'event_trigger '||e.evtname, e.evtevent||':'||fn.nspname||'.'||fp.proname||':'||e.evtenabled::text||':'||coalesce(array_to_string(e.evttags,','),''), 'event='||e.evtevent||' function='||fn.nspname||'.'||fp.proname||' enabled='||e.evtenabled::text||' tags='||coalesce(array_to_string(e.evttags,','),'-') from pg_event_trigger e join pg_proc fp on fp.oid=e.evtfoid join pg_namespace fn on fn.oid=fp.pronamespace) x order by 1"
   $want = @{}; Get-Content $structFile -Encoding UTF8 | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $k, $h = $_.Split("`t"); $want[$k] = $h }
-  $got = @{}; Lines (Q $structSql) | ForEach-Object { $k, $h = $_.Split("`t"); $got[$k] = $h }
+  $got = @{}; $info = @{}; Lines (Q $structSql) | ForEach-Object { $k, $h, $d = $_.Split("`t"); $got[$k] = $h; $info[$k] = $d }
   $diff = @()
-  foreach ($k in $want.Keys) { if (-not $got.ContainsKey($k)) { $diff += "нет: $k" } elseif ($got[$k] -ne $want[$k]) { $diff += "отличается: $k" } }
+  foreach ($k in $want.Keys) { if (-not $got.ContainsKey($k)) { $diff += "нет: $k" } elseif ($got[$k] -ne $want[$k]) { $diff += "отличается: $k (в копии: $($info[$k]))" } }
   foreach ($k in $got.Keys) { if (-not $want.ContainsKey($k)) { $diff += "лишний: $k" } }
-  $structOk = Check "1. структура приложения = production ($($want.Count) объектов: функции, таблицы, права, RLS, политики)" "$($diff.Count)" '0'
-  $diff | Sort-Object | Select-Object -First 30 | ForEach-Object { Say "    $_" 'Red' }
+  $structOk = Check "1. структура приложения = production ($($want.Count) объектов: функции, таблицы, представления, владельцы, права, RLS, политики, событийные триггеры)" "$($diff.Count)" '0'
+  $diff | Sort-Object | Select-Object -First 40 | ForEach-Object { Say ("    " + $_.Substring(0, [Math]::Min(300, $_.Length))) 'Red' }
+  # владельцы событийных триггеров: как в production (ensure_rls — postgres, триггеры Supabase — supabase_admin), кроме тех,
+  # чей ALTER … OWNER TO supabase_admin не прошёл (известная ошибка выше) — у них postgres
+  $evtWant = (@('ensure_rls=postgres') + ($superOwnedEvt | ForEach-Object { if ($_ -in $knownEvt) { "$_=postgres" } else { "$_=supabase_admin" } }) | Sort-Object) -join ','
+  [void](Check '1. владельцы событийных триггеров: как в production, кроме не восстановленных владельцев (ошибки выше)' ((((Q "select string_agg(evtname || '=' || pg_get_userbyid(evtowner), ',') from pg_event_trigger") -split ',') | Sort-Object) -join ',') $evtWant)
+  if ($knownEvt.Count) {
+    Say ("  ОГРАНИЧЕНИЕ ЛОКАЛЬНОЙ КОПИИ: у $($knownEvt.Count) событийных триггеров Supabase владелец postgres вместо supabase_admin (" + ($knownEvt -join ', ') +
+         '). Сами триггеры созданы и включены как в production. supabase_admin суперпользователем не делали; на проверку v62 это не влияет.') 'Yellow'
+  }
 
   # число строк: каждая таблица в копии (COPY-блоки) = в восстановленной базе
   $copy = @{}; $cur = $null; $cnt = 0
@@ -212,7 +259,7 @@ try {
     Fail ('ВОССТАНОВЛЕНИЕ НЕПОЛНОЕ: копия восстановилась частично (см. строки FAIL и журнал pg_restore). ' +
           'Это не полноценная проверка — миграцию на ней не запускаю. Пришлите Claude строки FAIL и ошибки pg_restore')
   }
-  Say ('Восстановление ПОЛНОЕ для приложения: структура и данные совпали' + $(if ($errs.Count) { "; ошибки pg_restore ($($errs.Count)) не задели объекты и данные приложения — они перечислены выше" } else { '' })) 'Green'
+  Say ('Восстановление ПОЛНОЕ для приложения: структура (145 объектов) и данные совпали с production' + $(if ($knownEvt.Count) { "; единственное отличие — владельцы $($knownEvt.Count) событийных триггеров Supabase (см. ОГРАНИЧЕНИЕ)" } else { '' })) 'Green'
 
   # ---------- 3. снимок → миграция → снимок ----------
   $funcsSql = "select md5(string_agg(n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || md5(p.prosrc) || p.prosecdef || coalesce(array_to_string(p.proconfig, ','), '') || coalesce(array_to_string(p.proacl, ','), ''), '|' order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private', 'analytics')"
@@ -271,6 +318,7 @@ Say ''
 Say ("Итого: PASS $script:pass, FAIL $script:fail. Отчёт: " + (Join-Path $WorkDir 'report.txt'))
 if ($script:fail -eq 0) {
   Say 'РЕПЕТИЦИЯ v62 НА КОПИИ PRODUCTION ПРОЙДЕНА' 'Green'
+  if ($knownEvt.Count) { Say ("С ограничением локальной копии: владельцы $($knownEvt.Count) событийных триггеров Supabase — postgres вместо supabase_admin (на v62 не влияет).") 'Yellow' }
   Say 'Пришлите Claude файл report.txt (в нём нет паролей, текстов и данных учеников). Остальные файлы папки не пересылать.'
 } else {
   Say 'РЕПЕТИЦИЯ НЕ ПРОЙДЕНА — в production ничего не применять. Пришлите Claude файл report.txt.' 'Red'

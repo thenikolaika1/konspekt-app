@@ -16,6 +16,11 @@ const q = [...s.matchAll(/\bQ (?:\(?"((?:[^"`]|`.)*)"|'([^']*)')/g)].map((m) => 
 const rowsParts = one(/Lines \(Q \(((?:"[^"]*"\s*\+?\s*)+)\)\)/, "запрос числа строк");
 const rows = [...rowsParts.matchAll(/"([^"]*)"/g)].map((m) => m[1]).join("");
 const roles = [...one(/\$roles = @\(([^)]*)\)/, "роли").matchAll(/'([^']+)'/g)].map((m) => m[1]);
+// разбор журнала pg_restore: регулярные выражения цикла по строкам (по порядку) и список событийных триггеров Supabase
+const loop = one(/(foreach \(\$ln in \(\$script:lastErr[\s\S]*?\n  \})\n/, "цикл разбора журнала");
+const logre = [...loop.matchAll(/-match '([^']*)'/g)].map((m) => m[1]);
+const known = one(/\$b\.cmd -match '([^']*)'/, "образец известной ошибки");
+const evt = [...one(/\$superOwnedEvt = @\(([^)]*)\)/, "триггеры Supabase").matchAll(/'([^']+)'/g)].map((m) => m[1]);
 console.log(JSON.stringify({
   q,
   struct: ps(one(/\$structSql = "([^"]*)"/, "$structSql")),
@@ -24,4 +29,7 @@ console.log(JSON.stringify({
   rows,
   skip: one(/\$skip = @\(\$toc \| Where-Object \{ \$_ -match '([^']*)' \}\)/, "фильтр vault"),
   roles,
+  logre,
+  known,
+  evt,
 }));
