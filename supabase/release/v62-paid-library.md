@@ -93,6 +93,20 @@ node tools/library-split.mjs ..\konspekt-v62\library-catalog.source.js --index j
 Файл `library-seed.sql` закрытый: **не коммитить, не вставлять в чаты, не публиковать**; после выпуска его можно удалить
 (он снова собирается этой же командой).
 
+**Шаг 0в. Генеральная репетиция на своём компьютере** (не production; рекомендуется перед шагом 1). Нужен локальный
+PostgreSQL 17 и **пустая** база с именем `konspekt_v62_restore…` (например, `konspekt_v62_restore_20261029` на 127.0.0.1:55432):
+```
+powershell -ExecutionPolicy Bypass -File .\supabase\release\v62-local-pg17-check.ps1 -Dump "<папка копии>\konspekt-full.dump" -Seed ..\konspekt-v62\library-seed.sql
+```
+Скрипт восстанавливает копию в эту пустую базу (в другие базы и поверх непустой — отказывается), создаёт в локальном
+PostgreSQL роли Supabase без входа (`anon`, `authenticated`, `service_role`…), затем проходит выпуск целиком: миграция →
+снимок данных до/после → 77 параграфов с контрольными суммами → проверка доступа → повторы → откат. Ожидаемый конец:
+**«РЕПЕТИЦИЯ v62 НА КОПИИ PRODUCTION ПРОЙДЕНА»**. Ошибки `pg_restore` про расширения Supabase (`supabase_vault`, `pg_graphql`,
+`pg_net`…) ожидаемы: в обычном PostgreSQL их нет, приложение их не использует. Решает строка «отпечаток структуры
+приложения = production» — если она PASS, функции, таблицы, права и RLS приложения восстановились как в production.
+Прислать Claude строки PASS/FAIL и строку `pg_restore: …` (без файлов из папки проверки). Время миграции в этой
+репетиции — через `psql -f` (по одной команде), в production — одним запросом (шаг 2).
+
 **Шаг 1. Предпроверка и снимок данных (только чтение):**
 ```
 psql DB -X -A -t -c "select to_regclass('private.owner_panel_secrets') is not null, to_regclass('private.library_paragraphs') is null, (select count(*) from private.plans where active), (select max_total_starts||'/'||total_starts||'/'||max_in_flight from private.ai_limits)"
@@ -242,3 +256,6 @@ psql DB -X -A -t -f supabase/release/v62-access-check.sql
 событийный триггер ensure_rls, данные той же формы, резервная копия → миграция → тексты с контрольными суммами → доступ
 по ролям → восстановление из копии → откат),
 `concurrency.test.sh` (одновременные запуски и выдачи против резерва), `v62.test.js` (интерфейс, PWA v61.3 → v62).
+`v62-local-pg17-check.ps1` (шаг 0в): PowerShell в среде тестов нет, поэтому сам скрипт здесь не запускался; его SQL-запросы
+и порядок шагов проверены на PostgreSQL 16 с вымышленной копией и настоящими 77 текстами (18 из 18). На PostgreSQL 17 и
+настоящей копии production он ещё не запускался — это и есть шаг 0в.
