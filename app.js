@@ -369,18 +369,57 @@
   }
   const daysText = (n) => n + " " + pluralForm(n, "день", "дня", "дней");
 
-  // контакт владельца (config.ownerContact); не задан — только текст, без неработающей кнопки
-  function contactBlock(cls) {
-    const c = window.K.config?.ownerContact;
-    return c && c.url && c.label
-      ? '<a class="' + (cls || "primary wide") + '" href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.label) + "</a>"
-      : '<p class="ended-contact">Контакт для оплаты скоро появится здесь. Пока напиши Николаю лично — как вы обычно общаетесь.</p>';
-  }
-  // единственный тариф (Premium) — из private.plans через get_plans; пока не загружен — без цены
+  // Premium подключает Николай вручную по ID ученика. Цены, оплаты и ссылок в приложении нет (цена обсуждается лично;
+  // price_label с сервера не показывается). Срок и число генераций — только с сервера (get_plans).
   const premiumPlan = () => (S.plans.state === "list" ? S.plans.items[0] || null : null);
-  function premiumCta() {
-    const p = premiumPlan();
-    return p ? p.title + (p.price_label ? " за " + p.price_label : "") : "Подключить Premium";
+  const premiumCta = () => (accessV2()?.status === "paid" ? "Продлить Premium" : "Подключить Premium");
+  // число готовых конспектов по истории и физике — из каталога (js/library-index.js), а не из текста
+  const premiumReady = () => ["history", "physics"].reduce((n, subjectId) => n + library.readyCount({ subjectId }), 0);
+  // неразрывный пробел между числом и словом: «30 дней» не разрывается на узком экране
+  const readyText = (n) => n + "\u00a0" + pluralForm(n, "готовый конспект", "готовых конспекта", "готовых конспектов");
+  // «10 ИИ-конспектов по фотографиям за 30 дней» — если условия с сервера ещё не пришли, без чисел
+  function aiText(p) {
+    return p && p.ai_quota && p.days
+      ? p.ai_quota + "\u00a0" + pluralForm(p.ai_quota, "ИИ-конспект", "ИИ-конспекта", "ИИ-конспектов") + " по фотографиям за " + p.days + "\u00a0" + pluralForm(p.days, "день", "дня", "дней")
+      : "ИИ-конспекты по фотографиям";
+  }
+  function premiumBenefits(p) {
+    const n = premiumReady();
+    const items = [
+      (n ? readyText(n) : "Готовые конспекты") + " по истории и физике",
+      aiText(p),
+      "Экономия времени при подготовке домашних заданий",
+    ];
+    return '<ul class="plan-facts">' + items.map((x) => "<li>" + icon("check") + "<span>" + esc(x) + "</span></li>").join("") + "</ul>";
+  }
+  // «Как подключить Premium»: только ID ученика (его копирует кнопка); ключ входа здесь не показывается и не копируется
+  function premiumConnect() {
+    const acc = account();
+    const id = acc.kind === "participant" ? acc.id : "";
+    return (
+      '<section class="premium-connect" aria-labelledby="pcTitle"><h2 id="pcTitle">🔒 Как подключить Premium?</h2>' +
+      "<p>Для подключения Premium свяжитесь с Николаем.</p>" +
+      (id
+        ? '<div class="pc-id"><span>Ваш ID:</span> <b id="pcId">' + esc(id) + "</b></div>" +
+          '<button class="secondary wide" data-copy-id>Скопировать ID</button><p class="pc-copied" role="status" aria-live="polite"></p>'
+        : '<p class="pc-noid">Войдите по своему ID, чтобы Николай мог подключить Premium.</p>') +
+      "</section>"
+    );
+  }
+  // копируется только ID из текущего аккаунта (ключ входа приложение не хранит и сюда не передаёт)
+  async function copyStudentId() {
+    const acc = account();
+    const out = root.querySelector(".pc-copied");
+    if (acc.kind !== "participant" || !acc.id) return;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(acc.id);
+      ok = true;
+    } catch (e) {
+      const el = root.querySelector("#pcId");
+      if (el) getSelection()?.selectAllChildren(el);
+    }
+    if (out) out.textContent = ok ? "ID скопирован" : "Не удалось скопировать — выделите ID и скопируйте вручную";
   }
 
   // «Доступ закончился»: на главной (с панелью вкладок) и вместо полного текста готового конспекта (с «Назад»)
@@ -396,7 +435,7 @@
         : "Premium закончился";
     const lead = inLibrary
       ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
-      : "История, физика и ИИ по фото — в Premium: 30 дней, 10 конспектов по фото. Оплата — вне приложения, после неё Николай откроет доступ.";
+      : "Готовые конспекты по истории и физике и ИИ-конспекты по фотографиям — в Premium. Подключает Николай.";
     const notes = store.listNotes().length;
     return (
       app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
@@ -408,35 +447,27 @@
       '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
       '<div class="ended-actions">' +
       '<button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button>" +
-      contactBlock("secondary wide") +
       (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
       "</div></div>"
     );
   }
 
-  // «Тарифы»: только то, что владелец опубликовал (private.plans.active); пусто — условия уточняются лично
+  // экран «Premium»: преимущества (число готовых конспектов — из каталога, генерации и срок — с сервера) и
+  // «Как подключить Premium» с ID ученика. Без цены, оплаты и ссылок; описание тарифа из базы не показывается
   function tariffs() {
     const p = S.plans;
-    const card = (x) =>
-      '<div class="plan-card"><div class="plan-top"><b>' + esc(x.title) + "</b>" + (x.price_label ? '<span class="plan-price">' + esc(x.price_label) + "</span>" : "") + "</div>" +
-      '<ul class="plan-facts"><li>' + icon("check") + "История и физика — все готовые конспекты</li><li>" + icon("check") + "ИИ по фото: " + esc(String(x.ai_quota)) + " " +
-      pluralForm(x.ai_quota, "конспект", "конспекта", "конспектов") + " за срок (считаются только удачные)</li><li>" + icon("check") + "Срок: " + esc(daysText(x.days)) +
-      "</li><li>" + icon("check") + "Твои личные конспекты остаются с тобой и после окончания срока</li></ul>" +
-      (x.description ? '<p class="plan-desc">' + esc(x.description) + "</p>" : "") + "</div>";
+    const plan = premiumPlan();
+    const card =
+      '<div class="plan-card"><div class="plan-top"><b>' + esc(plan?.title || "Premium") + "</b></div>" + premiumBenefits(plan) + "</div>";
     const body =
-      p.state === "list" && p.items.length
-        ? '<div class="plan-list">' + p.items.map(card).join("") + "</div>"
+      p.state === "list" && plan
+        ? '<div class="plan-list">' + card + "</div>"
         : p.state === "list"
-          ? emptyState("Premium пока не опубликован", "Условия доступа уточняются лично — напиши Николаю.")
+          ? emptyState("Premium пока не опубликован", "Условия подключения уточните у Николая.")
           : p.state === "error"
-            ? emptyState("Не удалось загрузить тарифы", "Проверь подключение к интернету и открой экран ещё раз.")
-            : '<div class="plan-loading" role="status">Загружаем тарифы…</div>';
-    return (
-      app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body +
-      '<div class="plan-how"><b>Как подключить</b><p>Оплата — по договорённости, вне приложения. После оплаты Николай вручную включит Premium на твой ID. ' +
-      "Продлить можно заранее: новые 30 дней начнутся сразу после текущих, неиспользованные конспекты по фото на новый срок не переносятся.</p>" +
-      contactBlock() + "</div></div>"
-    );
+            ? emptyState("Не удалось загрузить условия Premium", "Проверьте подключение к интернету и откройте экран ещё раз.")
+            : '<div class="plan-loading" role="status">Загружаем условия Premium…</div>';
+    return app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
   }
   let plansAsked = false;
   function loadPlans() {
@@ -581,7 +612,7 @@
     if (limitReached())
       return accessV2()
         ? '<h1 class="hero-limit-title">Генерации ИИ закончились</h1><p class="hero-limit">На этот срок ' + pluralForm(a.quota, "использован", "использовано", "использовано") + " " + esc(notesCount(a.quota)) + ". Новые появятся с продлением доступа.</p>" +
-            '<button class="primary" data-go="tariffs">Тарифы</button>'
+            '<button class="primary" data-go="tariffs">' + esc(premiumCta()) + "</button>"
         : '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
     return (
       "<h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p>" +
@@ -1087,7 +1118,7 @@
       ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
     ];
     const faq = [
-      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или тарифа. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
+      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или Premium. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
       ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
       ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
       ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
@@ -1890,7 +1921,7 @@
     S.access = next;
     // доступ к библиотеке закончился — полученные тексты забываются (повторно их выдаст только сервер)
     if (v2 && !["owner", "paid", "trial"].includes(v2.status)) library.forget();
-    // цена Premium для кнопок («Premium за 299 ₽») — один раз, когда доступ известен
+    // условия Premium (срок, число генераций) для экранов — один раз, когда доступ известен
     if (v2 && v2.status !== "owner" && S.plans.state === "loading" && !plansAsked) (plansAsked = true), loadPlans();
     // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
     // главная, библиотека и профиль зависят от доступа («Доступ закончился», «Мой доступ»)
@@ -2182,6 +2213,7 @@
     if (t.id === "credSaved") return onInput({ target: t });
     if (el("[data-register]")) return registerCode();
     if ((x = el("[data-copy]"))) return copyCredentials(x.dataset.copy);
+    if (el("[data-copy-id]")) return copyStudentId();
     if (el("[data-cred-done]")) return credentialsDone();
     if (el("[data-login]")) return doLogin();
     if (el("[data-signout]")) return doSignOut();

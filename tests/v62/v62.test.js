@@ -86,7 +86,8 @@ async function skipWelcome(page) {
   }
   await page.waitForTimeout(700);
 }
-const text = (page) => page.evaluate(() => document.querySelector("#app > .app")?.innerText || "");
+// неразрывные пробелы (между числом и словом) сравниваются как обычные
+const text = (page) => page.evaluate(() => (document.querySelector("#app > .app")?.innerText || "").replace(/\u00a0/g, " "));
 const T_ = (page) => page.evaluate(() => window.__T);
 const libCalls = async (page) => (await T_(page)).calls.filter((c) => c.startsWith("libraryParagraph:"));
 const noErr = (errors) => !errors.filter((e) => !/CONNECTION_LOST|NETWORK|check failed|\[sync\]|PLANS_FAILED|ACCESS_REQUIRED|NOT_FOUND/.test(e)).length;
@@ -194,7 +195,7 @@ async function scenarios() {
     await click(page, "[data-lib-paragraph]:not(.soon)", 1200);
     const t = await text(page);
     check("V4. сервер отказал → «Пробный период закончился», текста нет", t.includes("Пробный период закончился") && !(await page.$(".cn-doc")), t.slice(0, 300));
-    check("V4. на экране — кнопка Premium с ценой с сервера («Premium за 299 ₽»)", t.includes("Premium за 299 ₽"), t.slice(0, 400));
+    check("V4. на экране — кнопка «Подключить Premium», цены нет (сервер её ещё присылает)", t.includes("Подключить Premium") && !/₽|299/.test(t), t.slice(0, 400));
     await tab(page, "home");
     const h = await text(page);
     check("V4. главная тоже перешла на «закончился» по ответу сервера", h.includes("Пробный период закончился"), h.slice(0, 200));
@@ -204,14 +205,13 @@ async function scenarios() {
     await ctx.close();
   }
 
-  // V5. Premium закончился: экран, CTA, контакт не задан — понятный текст без пустой кнопки
+  // V5. Premium закончился: экран, CTA без цены, ни одной ссылки
   {
     const { ctx, page, errors } = await open(P(ACC.premiumExpired, { notes: [NOTE] }));
     const t = await text(page);
-    check("V5. «Premium закончился», «Premium за 299 ₽», аккаунт и личные конспекты сохранены", t.includes("Premium закончился") && t.includes("Premium за 299 ₽")
+    check("V5. «Premium закончился», «Подключить Premium», аккаунт и личные конспекты сохранены", t.includes("Premium закончился") && t.includes("Подключить Premium")
       && t.includes("личные конспекты сохранены"), t.slice(0, 400));
-    check("V5. контакт не задан: текст «Контакт для оплаты скоро появится…», ни одной ссылки-кнопки", t.includes("Контакт для оплаты скоро появится")
-      && !(await page.$("#app > .app a")), t.slice(0, 500));
+    check("V5. без цены, слов об оплате и ссылок; подключает Николай", !/₽|299|оплат/i.test(t) && t.includes("Подключает Николай") && !(await page.$("#app > .app a")), t.slice(0, 500));
     await page.screenshot({ path: path.join(SHOTS, "premium-ended-iphone.png") });
     await toBook(page, "physics");
     check("V5. каталог после окончания виден (названия параграфов)", (await page.$$("#app > .app [data-lib-paragraph]")).length === 51);
@@ -220,20 +220,26 @@ async function scenarios() {
     await tab(page, "photo");
     check("V5. «Фото» → экран Premium, не камера", !(await page.$(".scr-camera")) && !!(await page.$(".scr-tariffs")));
     const tt = await text(page);
-    check("V5. экран Premium: 299 ₽, 30 дней, 10 конспектов (только удачные), личные конспекты остаются, как подключить",
-      tt.includes("299 ₽") && tt.includes("30 дней") && tt.includes("10 конспектов за срок (считаются только удачные)") && tt.includes("личные конспекты остаются")
-      && tt.includes("Как подключить") && tt.includes("не переносятся"), tt.slice(0, 700));
+    check("V5. экран Premium: 77 готовых конспектов, 10 ИИ-конспектов за 30 дней, экономия времени",
+      tt.includes("77 готовых конспектов по истории и физике") && tt.includes("10 ИИ-конспектов по фотографиям за 30 дней")
+      && tt.includes("Экономия времени при подготовке домашних заданий"), tt.slice(0, 700));
+    check("V5. «🔒 Как подключить Premium?», «свяжитесь с Николаем», «Ваш ID: KN-AAAAAA», кнопка «Скопировать ID»",
+      tt.includes("🔒 Как подключить Premium?") && tt.includes("Для подключения Premium свяжитесь с Николаем.") && /Ваш ID:\s*KN-AAAAAA/.test(tt)
+      && !!(await page.$("#app > .app [data-copy-id]")), tt.slice(0, 700));
+    check("V5. экран Premium: без цены, оплаты, описания тарифа из базы и ссылок", !/₽|299|оплат|История и физика целиком/i.test(tt) && !(await page.$("#app > .app a")), tt.slice(0, 700));
     await page.screenshot({ path: path.join(SHOTS, "tariffs-premium-iphone.png"), fullPage: true });
     check("V5. нет ошибок JS", noErr(errors), errors);
     await ctx.close();
   }
-  // V5б. контакт задан в настройках — одна настоящая ссылка
+  // V5б. даже если в старых настройках остался контакт (ownerContact), ссылок на мессенджеры нет — подключение только через Николая
   {
     const { ctx, page } = await open(P(ACC.premiumExpired), {
-      configPatch: (src) => src.replace("ownerContact: null", 'ownerContact: { label: "Написать Николаю (тест)", url: "https://example.invalid/test" }'),
+      configPatch: (src) => src.replace("hiddenLibrarySubjects:", 'ownerContact: { label: "Написать Николаю (тест)", url: "https://example.invalid/test" },\n    hiddenLibrarySubjects:'),
     });
-    const links = await page.$$eval("#app > .app a", (a) => a.map((x) => x.textContent + "|" + x.href));
-    check("V5б. контакт задан → ровно одна ссылка с этим текстом и адресом", links.length === 1 && links[0] === "Написать Николаю (тест)|https://example.invalid/test", [links, (await text(page)).slice(0, 300)]);
+    const ended = await page.$$eval("#app > .app a", (a) => a.length);
+    await click(page, '[data-go="tariffs"]', 900);
+    const links = await page.$$eval("#app > .app a", (a) => a.map((x) => x.href));
+    check("V5б. контакт в настройках игнорируется: ссылок нет ни на «закончился», ни на экране Premium", ended === 0 && links.length === 0, [ended, links]);
     await ctx.close();
   }
 
@@ -387,8 +393,116 @@ async function scenarios() {
     const { ctx, page } = await open(P(ACC.giftExpired, { notes: [NOTE] }));
     const t = await text(page);
     check("V14. подарок закончился: «Подарочный доступ закончился», кнопка Premium, личные конспекты сохранены",
-      t.includes("Подарочный доступ закончился") && t.includes("Premium за 299 ₽") && t.includes("личные конспекты сохранены"), t.slice(0, 400));
+      t.includes("Подарочный доступ закончился") && t.includes("Подключить Premium") && !/₽|299/.test(t) && t.includes("личные конспекты сохранены"), t.slice(0, 400));
     await ctx.close();
+  }
+
+  // V15. Premium UI без цены: все состояния ученика, «Скопировать ID» (только ID), условия с сервера, 390 и 320 px
+  {
+    // сервер (до шага «скрыть цену») ещё присылает price_label «299 ₽» — интерфейс её не показывает нигде
+    const bad = /₽|299|оплат|стоимост|руб/i;
+    const states = ["trial", "trialExpired", "premium", "premiumEnding", "premiumExpired", "gift", "giftExpired"];
+    const seen = [];
+    for (const st of states) {
+      const { ctx, page, errors } = await open(P(ACC[st], { notes: [NOTE] }));
+      const texts = [await text(page)];
+      await tab(page, "me");
+      texts.push(await text(page));
+      const toPremium = await page.$('#app > .app [data-go="tariffs"]');
+      if (toPremium) {
+        await toPremium.click();
+        await page.waitForTimeout(900);
+        texts.push(await text(page));
+      }
+      await toBook(page, "history");
+      await click(page, "[data-lib-paragraph]:not(.soon)", 1000);
+      texts.push(await text(page));
+      const hits = texts.join("\n").match(new RegExp(bad.source, "gi")) || [];
+      const links = await page.$$eval("a[href]", (a) => a.map((x) => x.getAttribute("href")).filter((h) => /^(https?:|tg:|mailto:|tel:|whatsapp:|viber:)/i.test(h)));
+      seen.push(st + ":" + (hits.length + links.length));
+      check("V15. " + st + ": главная, профиль, Premium, библиотека — без цены, оплаты и внешних ссылок", !hits.length && !links.length, [hits, links]);
+      check("V15. " + st + ": нет ошибок JS", noErr(errors), errors);
+      await ctx.close();
+    }
+
+    // «Скопировать ID»: в буфере ровно ID ученика, без ключа и лишнего текста
+    {
+      const { ctx, page, errors } = await open(P(ACC.premiumExpired));
+      await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:" + PORT });
+      await click(page, '[data-go="tariffs"]', 900);
+      const shown = await page.$eval("#pcId", (n) => n.textContent);
+      await page.screenshot({ path: path.join(SHOTS, "premium-screen-390.png"), fullPage: true });
+      await click(page, "[data-copy-id]", 500);
+      await page.screenshot({ path: path.join(SHOTS, "premium-copied-390.png") });
+      const clip = await page.evaluate(() => navigator.clipboard.readText());
+      check("V15. «Скопировать ID»: в буфере ровно ID ученика (KN-AAAAAA), как на экране", clip === "KN-AAAAAA" && shown === "KN-AAAAAA", [clip, shown]);
+      check("V15. «Скопировать ID»: сообщение «ID скопирован»", (await page.$eval(".pc-copied", (n) => n.textContent)) === "ID скопирован");
+      // слово «ключ» отдельно (не «подключить»): ни ключа входа, ни упоминания о нём
+      check("V15. на экране Premium нет ключа входа и слова «ключ»", !/(^|[^а-яё])ключ/i.test(await text(page)) && !(await page.$("#cred-key")));
+      // без доступа к буферу — ID выделяется для ручного копирования, понятное сообщение
+      await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("denied")) }, configurable: true }));
+      await click(page, "[data-copy-id]", 500);
+      check("V15. буфер недоступен: ID выделен, сообщение «скопируйте вручную»",
+        (await page.evaluate(() => String(getSelection()))) === "KN-AAAAAA" && /вручную/.test(await page.$eval(".pc-copied", (n) => n.textContent)));
+      // число готовых конспектов — из каталога приложения, а не из текста
+      const ready = await page.evaluate(() => window.K.library.readyCount({ subjectId: "history" }) + window.K.library.readyCount({ subjectId: "physics" }));
+      check("V15. «77 готовых конспектов» = число готовых параграфов истории и физики в каталоге", ready === 77 && (await text(page)).includes(ready + " готовых конспектов"), ready);
+      // 390 px: без горизонтальной прокрутки, блок подключения и кнопка в ширине экрана, кнопка не меньше 44 px
+      const box = await page.$eval(".premium-connect", (n) => n.getBoundingClientRect().toJSON());
+      const btn = await page.$eval("[data-copy-id]", (n) => n.getBoundingClientRect().toJSON());
+      check("V15. 390 px: без горизонтальной прокрутки, блок и кнопка в ширине экрана, кнопка ≥ 44 px",
+        (await noHScroll(page)) && box.left >= 0 && box.right <= 390 && btn.right <= 390 && btn.height >= 44, [box, btn]);
+      await page.evaluate(() => (scrollTo(0, 0), (document.querySelector(".pc-copied").textContent = ""), getSelection().removeAllRanges()));
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.waitForTimeout(400);
+      check("V15. 320 px (маленький телефон): без горизонтальной прокрутки", await noHScroll(page));
+      await page.screenshot({ path: path.join(SHOTS, "premium-screen-320.png"), fullPage: true });
+      check("V15. копирование ID: нет ошибок JS", noErr(errors), errors);
+      await ctx.close();
+    }
+
+    // срок и число генераций — только с сервера: другие условия в get_plans → другой текст
+    {
+      const { ctx, page } = await open(P(ACC.premiumExpired, { plans: [{ code: "premium", title: "Premium", days: 45, ai_quota: 12, price_label: "999 ₽", description: "x" }] }));
+      await click(page, '[data-go="tariffs"]', 900);
+      const t = await text(page);
+      check("V15. условия с сервера: «12 ИИ-конспектов по фотографиям за 45 дней», цены нет", t.includes("12 ИИ-конспектов по фотографиям за 45 дней") && !/₽|999/.test(t), t.slice(0, 500));
+      await ctx.close();
+    }
+    {
+      const { ctx, page } = await open(P(ACC.premiumExpired, { plans: [{ code: "premium", title: "Premium", days: 31, ai_quota: 1, price_label: null, description: null }] }));
+      await click(page, '[data-go="tariffs"]', 900);
+      check("V15. склонение: «1 ИИ-конспект по фотографиям за 31 день»", (await text(page)).includes("1 ИИ-конспект по фотографиям за 31 день"));
+      await ctx.close();
+    }
+    // условия не загрузились — блок подключения с ID всё равно есть, чисел нет
+    {
+      const { ctx, page } = await open(P(ACC.premiumExpired, { plansError: true }));
+      await click(page, '[data-go="tariffs"]', 900);
+      const t = await text(page);
+      check("V15. условия не загрузились: «Не удалось загрузить условия Premium», блок подключения с ID на месте",
+        t.includes("Не удалось загрузить условия Premium") && /Ваш ID:\s*KN-AAAAAA/.test(t) && !!(await page.$("[data-copy-id]")), t.slice(0, 500));
+      await ctx.close();
+    }
+    // Premium действует: кнопка «Продлить Premium» в «Мой доступ» ведёт на тот же экран
+    {
+      const { ctx, page } = await open(P(ACC.premiumEnding));
+      const t = await text(page);
+      check("V15. Premium заканчивается: строка «… · продлить» на главной, без цены", t.includes("продлить") && !/₽|299/.test(t), t.slice(0, 300));
+      await click(page, '[data-go="tariffs"]', 900);
+      check("V15. → экран Premium с блоком подключения и ID", /Ваш ID:\s*KN-AAAAAA/.test(await text(page)));
+      await page.screenshot({ path: path.join(SHOTS, "premium-renew-390.png"), fullPage: true });
+      await ctx.close();
+    }
+    // без входа по ID (гость) — ID нет, копировать нечего
+    {
+      const { ctx, page } = await open({ ...P(ACC.premiumExpired), kind: "guest", id: "" });
+      const go = await page.$('#app > .app [data-go="tariffs"]');
+      if (go) await go.click(), await page.waitForTimeout(900);
+      const t = await text(page);
+      check("V15. гость: «Войдите по своему ID…», кнопки «Скопировать ID» нет", !go || (t.includes("Войдите по своему ID") && !(await page.$("[data-copy-id]"))), t.slice(0, 400));
+      await ctx.close();
+    }
   }
 
   // V13. Тёмная тема устройства и компьютер: приложение остаётся светлым и читаемым, без горизонтальной прокрутки

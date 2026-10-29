@@ -58,7 +58,7 @@ function staticTests() {
   const app = fs.readFileSync(path.join(V61, "app.js"), "utf8");
   check("код: старой проверки F&F (ffEnded/serverMarks/ffEndsAt) больше нет", !/ffEnded|serverMarks|FF_ENDS_AT|ffEndsAt/.test(app + fs.readFileSync(path.join(V61, "js/cloud.js"), "utf8") + fs.readFileSync(path.join(V61, "js/config.js"), "utf8")));
   check("код: нет Date.now() в решении о доступе (paywalled/daysLeft)", !/Date\.now\(\)/.test(app.slice(app.indexOf("// ---------- доступ v61"), app.indexOf("function earlyAccess"))));
-  check("код: контакт не придуман (ownerContact: null)", /ownerContact: null/.test(fs.readFileSync(path.join(V61, "js/config.js"), "utf8")));
+  check("код (v62): контакта и ссылок связи нет — подключение Premium только через Николая", !/ownerContact/.test(fs.readFileSync(path.join(V61, "js/config.js"), "utf8") + app));
   check("код: нет реквизитов/карт/телефонов", !/\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b|\+7\s?\d|t\.me\/|@[a-z0-9-]+\.(ru|com)/i.test(app));
   const fn = fs.readFileSync(path.join(V61, "supabase/functions/analyze-pages/index.ts"), "utf8");
   check("функция: analyze-pages вызывает start_text_generation_v2", /rpc\("start_text_generation_v2"/.test(fn) && !/rpc\("start_text_generation"/.test(fn));
@@ -116,7 +116,8 @@ async function open(T, { viewport = { width: 390, height: 844 }, time = FAR_FUTU
   await page.waitForTimeout(700);
   return { ctx, page, errors, supa };
 }
-const text = (page) => page.evaluate(() => document.querySelector("#app > .app")?.innerText || "");
+// неразрывные пробелы (между числом и словом) сравниваются как обычные
+const text = (page) => page.evaluate(() => (document.querySelector("#app > .app")?.innerText || "").replace(/\u00a0/g, " "));
 const T_ = (page) => page.evaluate(() => window.__T);
 const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 async function tab(page, id) {
@@ -177,7 +178,7 @@ async function scenarios() {
     const t = await text(page);
     check("5. expired trial: «Пробный период закончился»", t.includes("Пробный период закончился"), t.slice(0, 300));
     check("5. экран: кнопка Premium, «Мои конспекты», аккаунт и личные конспекты сохранены", /Premium/.test(t) && /Мои конспекты · \d/.test(t) && t.includes("Твой аккаунт и личные конспекты сохранены"));
-    check("5. контакт не задан → понятный текст «Пока напиши Николаю лично», без кнопки-ссылки", t.includes("Пока напиши Николаю лично") && !(await page.$(".ended a")));
+    check("5. (v62) подключение через Николая: «Подключает Николай», без ссылок и оплаты", t.includes("Подключает Николай") && !(await page.$(".ended a")) && !/оплат/i.test(t), t.slice(0, 400));
     check("5. нет цен и придуманных тарифов", !/₽|руб\./i.test(t));
     await page.screenshot({ path: path.join(SHOTS, "trial-ended-iphone.png") });
     check("5. без горизонтальной прокрутки (390)", await noHScroll(page));
@@ -217,31 +218,31 @@ async function scenarios() {
     await ctx.close();
   }
 
-  // Тарифы: пустое состояние, ошибка загрузки, опубликованные тарифы (тестовые данные), контакт из настроек
+  // Экран Premium (v62): пустое состояние, ошибка загрузки, условия из get_plans — без цены, описания и ссылок;
+  // подключение — только через Николая (ID ученика), контакт из старых настроек игнорируется
   {
     const a = await open(P(ACC.trialExpired));
     await click(a.page, '[data-go="tariffs"]', 900);
     const t = await text(a.page);
-    check("тарифы: пусто → «Premium пока не опубликован», условия лично; без цен", t.includes("Premium пока не опубликован") && t.includes("уточняются лично") && !/₽/.test(t), t.slice(0, 400));
-    check("тарифы: «Как подключить» — оплата вне приложения, без реквизитов", t.includes("вне приложения") && !/карт[аы]\s*\d|\d{16}/.test(t));
+    check("тарифы: пусто → «Premium пока не опубликован», условия уточнить у Николая; без цен", t.includes("Premium пока не опубликован") && t.includes("уточните у Николая") && !/₽/.test(t), t.slice(0, 400));
+    check("тарифы: «Как подключить Premium?» — через Николая, без оплаты и реквизитов", t.includes("Как подключить Premium?") && t.includes("свяжитесь с Николаем") && !/оплат|карт[аы]\s*\d|\d{16}/i.test(t), t.slice(0, 400));
     await a.page.screenshot({ path: path.join(SHOTS, "tariffs-empty-iphone.png") });
     check("тарифы: без горизонтальной прокрутки", await noHScroll(a.page));
     check("тарифы: нет ошибок JS", noErr(a.errors), a.errors);
     await a.ctx.close();
     const b = await open(P(ACC.trialExpired, { plansError: true }));
     await click(b.page, '[data-go="tariffs"]', 900);
-    check("тарифы: ошибка сети → «Не удалось загрузить тарифы»", (await text(b.page)).includes("Не удалось загрузить тарифы"));
+    check("тарифы: ошибка сети → «Не удалось загрузить условия Premium»", (await text(b.page)).includes("Не удалось загрузить условия Premium"));
     await b.ctx.close();
-    const plans = [{ code: "t1", title: "Тестовый тариф А (данные теста)", days: 30, ai_quota: 10, price_label: null, description: null },
-                   { code: "t2", title: "Тестовый тариф Б (данные теста)", days: 90, ai_quota: 40, price_label: "цена теста", description: "описание теста" }];
-    const c = await open(P(ACC.paid, { plans }), { configPatch: (s) => s.replace("ownerContact: null", 'ownerContact: { label: "Написать Николаю", url: "https://example.invalid/contact" }') });
+    const plans = [{ code: "t1", title: "Тестовый тариф А (данные теста)", days: 30, ai_quota: 10, price_label: "цена теста", description: "описание теста" },
+                   { code: "t2", title: "Тестовый тариф Б (данные теста)", days: 90, ai_quota: 40, price_label: "цена теста 2", description: "описание теста 2" }];
+    const c = await open(P(ACC.paid, { plans }), { configPatch: (s) => s.replace("hiddenLibrarySubjects:", 'ownerContact: { label: "Написать Николаю", url: "https://example.invalid/contact" },\n    hiddenLibrarySubjects:') });
     await tab(c.page, "me");
     await click(c.page, '[data-go="tariffs"]', 900);
     const tc = await text(c.page);
-    check("тарифы: карточки из get_plans — название, срок, генерации", tc.includes("Тестовый тариф А") && tc.includes("Срок: 30 дней") && tc.includes("ИИ по фото: 10 конспектов за срок (считаются только удачные)") && tc.includes("Срок: 90 дней"), tc.slice(0, 500));
-    check("тарифы: цена показывается, только если задана владельцем", tc.includes("цена теста") && (tc.match(/цена теста/g) || []).length === 1);
-    check("тарифы: контакт из настроек → кнопка-ссылка", !!(await c.page.$('.plan-how a[href="https://example.invalid/contact"]')));
-    check("тарифы: ссылка оформлена как кнопка (по центру, без подчёркивания)", await c.page.$eval(".plan-how a.primary", (a) => getComputedStyle(a).textDecorationLine === "none" && getComputedStyle(a).display === "flex"));
+    check("тарифы: единственный тариф из get_plans — название, генерации и срок с сервера", tc.includes("Тестовый тариф А") && tc.includes("10 ИИ-конспектов по фотографиям за 30 дней") && !tc.includes("Тестовый тариф Б"), tc.slice(0, 500));
+    check("тарифы: цена и описание тарифа с сервера не показываются", !tc.includes("цена теста") && !tc.includes("описание теста"), tc.slice(0, 500));
+    check("тарифы: контакт из настроек игнорируется — ссылок нет", !(await c.page.$("#app > .app a")));
     await c.page.screenshot({ path: path.join(SHOTS, "tariffs-list-iphone.png"), fullPage: true });
     await c.ctx.close();
   }
@@ -285,7 +286,7 @@ async function scenarios() {
     await click(page, '[data-go="help"]', 800);
     // ответы справки свёрнуты (<details>) — читаем весь текст экрана, а не только видимый
     const h = await page.evaluate(() => document.querySelector("#app > .app")?.textContent || "");
-    check("v61.1 справка: «зависит от доступа — пробного периода или тарифа», без «в пробном периоде — одна»", h.includes("пробного периода или тарифа") && !h.includes("в пробном периоде — одна"), h.slice(0, 200));
+    check("v61.1 справка: «зависит от доступа — пробного периода или Premium», без «в пробном периоде — одна»", h.includes("пробного периода или Premium") && !h.includes("в пробном периоде — одна"), h.slice(0, 200));
     check("v61.2 справка: объяснения COOLDOWN, AI_UNAVAILABLE, RETRY_LIMIT, DAILY_LIMIT есть",
       ["ИИ сейчас не отвечает.", "Сервис ИИ временно недоступен.", "Слишком много попыток с нечитаемыми фото.", "На сегодня запуски ИИ закончились."].every((x) => h.includes(x)));
     await ctx.close();
