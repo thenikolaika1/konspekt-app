@@ -82,6 +82,14 @@ if ($seedSrc -ne $wantSrc) {
         'Обычно так бывает, если исходник сохранён командой PowerShell «git show … > файл» (она перекодирует кириллицу). ' +
         'Соберите файл заново (шаг 0б): node tools/library-split.mjs --git 53d3203:js/library-catalog.js --index js/library-index.js --seed ..\konspekt-v62\library-seed.sql --expect supabase/release/v62-library-manifest.tsv')
 }
+# окончания строк: в SQL-файлах только LF. Git на Windows (core.autocrlf=true) раньше писал их с CRLF — тогда «\r» попадает
+# в тексты функций, и откат пересоздаёт функции не байт в байт как в production (вторая репетиция 29.10: 5 функций отката)
+$crlf = @(@($mig, "$rel\rollback-v62.sql", "$rel\v62-snapshot.sql", "$rel\v62-access-check.sql", $seedFull) | Where-Object { [Array]::IndexOf([IO.File]::ReadAllBytes($_), [byte]13) -ge 0 })
+if ($crlf.Count) {
+  Fail ('в SQL-файлах окончания строк CRLF: ' + (($crlf | ForEach-Object { Split-Path $_ -Leaf }) -join ', ') + '. ' +
+        'Пересоздайте файлы репозитория с LF (правило в .gitattributes): git status --short (должно быть пусто), затем ' +
+        'Remove-Item supabase\migrations\*.sql, supabase\release\*.sql; git checkout -- supabase\migrations supabase\release')
+}
 if ($seedHead.Count -lt 3 -or $seedHead[2] -notmatch 'Параграфов: 77 \(history: 26, physics: 51\)') { Fail 'в шапке library-seed.sql не «Параграфов: 77 (history: 26, physics: 51)» — соберите файл заново (шаг 0б)' }
 if (-not (Select-String -Path $seedFull -Pattern 'контрольные суммы совпали' -SimpleMatch -Quiet -Encoding UTF8)) { Fail 'в library-seed.sql нет встроенных контрольных сумм — собирайте с --expect (шаг 0б)' }
 if (-not $WorkDir) { $WorkDir = Join-Path (Split-Path $repo -Parent) ('konspekt-v62\pg17-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }

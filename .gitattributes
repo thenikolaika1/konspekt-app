@@ -1,0 +1,4 @@
+# v62: SQL и манифест — всегда с LF, на любом компьютере (в том числе Windows с core.autocrlf=true).
+# CRLF попадает в тексты функций (prosrc): откат пересоздал бы функции с \r и они отличались бы от production.
+*.sql text eol=lf
+*.tsv text eol=lf

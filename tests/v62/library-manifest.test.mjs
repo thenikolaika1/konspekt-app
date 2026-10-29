@@ -66,6 +66,13 @@ const gi = read(".gitignore");
 check("M7. .gitignore: library-seed*.sql, *.source.js, *.dump, konspekt-v62/", ["library-seed", ".source.js", ".dump", "konspekt-v62/"].filter((x) => !gi.includes(x)), []);
 
 
+// окончания строк: SQL и манифест — LF на любом компьютере (.gitattributes), иначе на Windows (core.autocrlf=true)
+// «\r» попадает в тексты функций и откат пересоздаёт их не байт в байт как в production (вторая репетиция 29.10)
+const sqlFiles = tracked.filter((f) => /\.(sql|tsv)$/.test(f));
+const attr = execSync("git check-attr eol -- " + sqlFiles.map((f) => JSON.stringify(f)).join(" "), { cwd: ROOT, encoding: "utf8" });
+check("M8. .gitattributes: у всех SQL и TSV eol=lf (" + sqlFiles.length + " файлов)", attr.split("\n").filter((l) => l && !/: eol: lf$/.test(l)), []);
+check("M8. в SQL и TSV рабочего дерева нет CR", sqlFiles.filter((f) => existsSync(path.join(ROOT, f)) && readFileSync(path.join(ROOT, f)).includes(13)), []);
+
 // генератор: исходник назначен манифестом (# source-sha256); --git читает его из git байт в байт; перекодированный
 // оболочкой исходник (как PowerShell «git show … > файл» на русской Windows) отклоняется до записи файлов
 const mf = read("supabase/release/v62-library-manifest.tsv");
