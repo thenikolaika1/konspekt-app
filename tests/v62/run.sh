@@ -35,6 +35,10 @@ bash "$HERE/migration.test.sh"
 bash "$HERE/prodcopy.test.sh"
 # 3. одновременные запросы: запуски и выдачи против резерва
 bash "$HERE/concurrency.test.sh"
+# 3в. интерфейс v61.3 (у учеников до обновления PWA) с базой v62: все его вызовы работают
+bash "$HERE/oldclient.test.sh"
+# 3б. перенос 77 параграфов: манифест = публичный каталог, закрытых текстов в публичных файлах нет
+node "$HERE/library-manifest.test.mjs"
 # 4. интерфейс и PWA (Chromium)
 node "$HERE/v62.test.js"
 # 5. загрузка страниц в GigaChat (providers.ts) с имитацией GigaChat API — настоящий GigaChat не вызывается

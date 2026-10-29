@@ -276,6 +276,13 @@ $P -d $RD -c "delete from public.notes where id = (select id from public.notes l
 check "7. пропажа одной строки замечается" "$($P -d $RD -c "$ROWSQ" | sort | diff "$OUT/vcopy.tsv" - | grep -c '^>')" "1"
 $P -d postgres -c "drop database $RD" -c "create database $RD" >/dev/null
 pg_restore $PGD -d $RD -L "$OUT/vkeep.txt" "$OUT/vault.dump" 2>/dev/null
+# функции, которые миграция v62 или откат создают, заменяют, удаляют или переносят: до миграции и после отката они
+# должны совпадать с production байт в байт (текст, SECURITY DEFINER, search_path, права) — эталон v62-prod-structure.tsv
+TOUCH=$(grep -ohE '(function|on function|procedure) (public|private)\.[a-z0-9_]+' "$M/20261028120000_v62_paid_library.sql" "$ROOT/supabase/release/rollback-v62.sql" | awk '{print $NF}' | sort -u)
+touched() { grep -v '^#' | grep -F "$(echo "$TOUCH" | sed 's/$/(/')" | grep -v '^policy' | sort; }
+PRODT=$(touched < "$ROOT/supabase/release/v62-prod-structure.tsv")
+check "7. функции, которые трогают миграция и откат ($(echo "$PRODT" | wc -l | tr -d ' ') шт.), в копии до миграции = production" \
+  "$($P -d $RD -c "$(js struct)" | touched | diff <(echo "$PRODT") - | grep -c '^[<>]')" "0"
 # дальше — шаги скрипта: предпроверка, снимок, миграция, снимок, тексты, доступ, повторы, откат
 Q() { $P -d $RD -c "$(js q | grep -F "$1" | head -1)"; }
 check "7. предпроверка скрипта: панель есть, библиотеки нет, private.plans пустая" "$(Q "private.owner_panel_secrets")" "true|true|0"
@@ -286,13 +293,16 @@ check "7. миграция на восстановленной копии, да�
 check "7. запросы скрипта после миграции: тарифы, права таблицы, права функции" "$(Q "price_label")/$(Q "has_table_privilege('anon'")/$(Q "has_function_privilege('authenticated'")" "gift:7:1:-:false,premium:30:10:299 ₽:true/true|false|false|false/true|false"
 $P -d $RD -v ON_ERROR_STOP=1 -f "$OUT/seed.sql" >/dev/null 2>&1
 check "7. запросы скрипта после текстов: по предметам, дубли" "$(Q "group by 1) s")/$(Q "count(distinct")" "history:2,physics:1/0"
-check "7. все запросы-проверки скрипта выполняются без ошибок (на копии после миграции и текстов)" \
-  "$(js q | grep -v '\$' | grep -v '^create' | grep -v 'from (values' | grep -v "then '-1' $" | while IFS= read -r q; do $P -d $RD -c "$q" >/dev/null 2>&1 || echo "ошибка: $q"; done | tee /dev/stderr | wc -l | tr -d ' ')" "0"
+QERR=$(js q | grep -v '\$' | grep -v '^create' | grep -v 'from (values' | grep -v "then '-1' $" | while IFS= read -r q; do $P -d $RD -c "$q" >/dev/null 2>&1 || echo "ошибка: $q"; done)
+[ -n "$QERR" ] && echo "$QERR"
+check "7. все запросы-проверки скрипта выполняются без ошибок (на копии после миграции и текстов)" "$(echo -n "$QERR" | grep -c .)" "0"
 F8=$($P -d $RD -c "$(js funcs)")
 check "7. повтор миграции → код 3, функции те же" "$($P -d $RD -v ON_ERROR_STOP=1 -f "$M/20261028120000_v62_paid_library.sql" >/dev/null 2>&1; echo $?)/$($P -d $RD -c "$(js funcs)")" "3/$F8"
 $P -d $RD -v ON_ERROR_STOP=1 -f "$ROOT/supabase/release/rollback-v62.sql" >/dev/null 2>&1; RC=$?; $P -d $RD -f "$SNAP" > "$OUT/s7c.txt"
 check "7. откат: функции и данные как до миграции, таблицы текстов нет" \
   "$RC/$([ "$($P -d $RD -c "$(js funcs)")" = "$F7" ] && echo same)/$(cmp -s "$OUT/s7a.txt" "$OUT/s7c.txt" && echo same)/$($P -d $RD -c "$(js q | grep -Fx "select (to_regclass('private.library_paragraphs') is null)::text")")" "0/same/same/true"
+check "7. после отката эти функции снова = production (откат возвращает именно версии production)" \
+  "$($P -d $RD -c "$(js struct)" | touched | diff <(echo "$PRODT") - | grep -c '^[<>]')" "0"
 check "7. копия за репетицию не изменилась" "$(cmp -s "$OUT/vault.dump" "$OUT/vault.dump.orig" && echo same)" "same"
 check "7. скрипт: только 127.0.0.1:55432 и база konspekt_v62_restore_20261029, без drop/create/alter, без pg_dump/createdb/dropdb, роли только по ключу" \
   "$(grep -c "^\$DbHost = '127.0.0.1'; \$DbPort = 55432" "$PS1")/$(grep -c "^\$DbName = 'konspekt_v62_restore_20261029'" "$PS1")/$(sed "s/Fail .*//; s/Say .*//" "$PS1" | grep -E '(\bQ |Run )' | grep -ciE "drop |create database|alter (system|role|database)|truncate|dropdb|createdb" | tr -d ' ')/$(grep -cE "Find-Tool '(dropdb|createdb|pg_dump)'" "$PS1")/$(grep -B12 'create role \$r nologin' "$PS1" | grep -c 'if (-not \$CreateMissingRoles)')" "1/1/0/0/1"
