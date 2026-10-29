@@ -1,0 +1,142 @@
+# Структура приложения в production на 29.10.2026 (v61.3, до v62): 138 объектов public/private/analytics и политик RLS.
+# Объект<TAB>первые 8 знаков md5 (текст функции, SECURITY DEFINER, search_path, права; для таблиц — RLS и права).
+# Только имена и хеши, данных пользователей нет. Получено запросом только на чтение; md5 всего списка = e1ddba3a557feff102910fb4ba485667.
+# Нужен v62-local-pg17-check.ps1: показывает, какой объект восстановился из копии не так, как в production.
+analytics.ai_provider(p_model text)	f9441c4f
+analytics.app_events:r	c8b2112c
+analytics.catalog_paragraphs:r	c8b2112c
+analytics.ff_period:v	266635b3
+analytics.fmt_duration(p_seconds bigint)	fb76bd75
+analytics.fmt_msk(p_ts timestamp with time zone)	b953dfba
+analytics.paragraph_views:r	c8b2112c
+analytics.period_stats(p_from date, p_to date)	ceea74d2
+analytics.r1_users:v	266635b3
+analytics.r2_views:v	266635b3
+analytics.r3_paragraphs:v	266635b3
+analytics.r4_daily:v	266635b3
+analytics.r5_ai:v	266635b3
+analytics.r6_summary:v	266635b3
+analytics.track_at(p_uid uuid, p_events jsonb, p_now timestamp with time zone)	00e6379c
+analytics.user_days:v	266635b3
+analytics.view_day_seconds:r	c8b2112c
+policy public.ai_generations:Users can read own AI generations	ecf0e114
+policy public.ai_generations:ai_generations: select own	273f3620
+policy public.bookmark_notes:Users can create own bookmark notes	6aa557f9
+policy public.bookmark_notes:Users can delete own bookmark notes	dcac72c1
+policy public.bookmark_notes:Users can read own bookmark notes	ecf0e114
+policy public.bookmarks:Users can create own bookmarks	6aa557f9
+policy public.bookmarks:Users can delete own bookmarks	dcac72c1
+policy public.bookmarks:Users can read own bookmarks	ecf0e114
+policy public.bookmarks:Users can update own bookmarks	6c97107f
+policy public.notes:notes: delete own	ea6b2432
+policy public.notes:notes: insert own processing	69522080
+policy public.notes:notes: select own	273f3620
+policy public.notes:notes: update own title	fc8fc57c
+policy storage.objects:temp-pages: delete own folder	421dc769
+policy storage.objects:temp-pages: insert own folder	60e934ee
+policy storage.objects:temp-pages: select own folder	f9e0c3d8
+private.access_grants:r	c8b2112c
+private.access_json(p_user_id uuid, p_resource text)	59bead7b
+private.access_log:r	c8b2112c
+private.access_settings:r	c8b2112c
+private.access_state(p_user_id uuid)	050d177a
+private.active_grant(p_user_id uuid, p_at timestamp with time zone)	8287a039
+private.admin_add_beta_invite(p_code_hash text, p_quota integer, p_label text, p_expires_at timestamp with time zone)	5dbdf016
+private.admin_extend(p_kn_id text, p_plan text, p_days integer, p_ai_quota integer, p_note text, p_granted_by text)	d85ae2ab
+private.admin_grant(p_kn_id text, p_plan text, p_days integer, p_ai_quota integer, p_note text, p_granted_by text)	1fc1c510
+private.admin_grant_trial(p_kn_id text, p_note text)	c2313f34
+private.admin_lock(p_user_id uuid)	524fbcca
+private.admin_panel_revoke_sessions(p_kn_id text)	91c1df8f
+private.admin_panel_setup(p_kn_id text)	f54b0e51
+private.admin_raise_beta_quota(p_min_quota integer)	9206edfc
+private.admin_revoke(p_kn_id text, p_note text, p_kind text, p_granted_by text)	755e7b79
+private.admin_set_entitlement(p_user_id uuid, p_quota integer, p_plan text, p_source text)	dfac1777
+private.admin_set_owner(p_kn_id text, p_note text)	889881a1
+private.admin_status(p_kn_id text)	d30e9179
+private.admin_terms(p_plan text, p_days integer, p_ai_quota integer)	c6dbe673
+private.admin_user(p_kn_id text)	6d497bcf
+private.ai_breaker()	d74f740f
+private.ai_limits:r	c8b2112c
+private.beta_invites:r	c8b2112c
+private.entitlement_active(p_source text)	f18a5e7c
+private.failed_starts(p_user_id uuid, p_since timestamp with time zone, p_kind text, p_lease interval)	38884cd1
+private.failure_kind(p_error_code text)	bccc072d
+private.finalize_note_usage()	22a504b4
+private.finish_generation_start()	bf65198d
+private.generation_starts:r	c8b2112c
+private.grant_trial_on_register()	8b93166e
+private.grant_usage(p_grant_id uuid, p_exclude_op text)	54b92981
+private.invite_code_hash(p_code text)	765a4dbf
+private.invite_code_normalize(p_code text)	5d353095
+private.invite_meta:r	c8b2112c
+private.invite_meta_on_insert()	52a34a6b
+private.invite_registrations:r	c8b2112c
+private.invite_status()	621ca14d
+private.kn_email(p_kn_id text)	ee22220d
+private.owner_panel_secrets:r	c8b2112c
+private.owner_panel_sessions:r	c8b2112c
+private.owner_requests:r	c8b2112c
+private.owner_security_log:r	c8b2112c
+private.panel_ai_state()	4e3bea44
+private.panel_check(p_session text, OUT o_uid uuid, OUT o_kn text, OUT o_err text)	d53e70a2
+private.panel_error(p_state text, p_message text)	c2f41cdc
+private.panel_extend_start(p_user_id uuid)	cb645e51
+private.panel_failed_attempt(p_user_id uuid, p_what text)	f4d7b3e2
+private.panel_invite_status(p_redeemed_at timestamp with time zone, p_revoked_at timestamp with time zone, p_expires_at timestamp with time zone)	9fa9393c
+private.panel_kn(p_user_id uuid)	13abc130
+private.panel_kn_input(p_kn_id text)	aa67e8ca
+private.panel_lock_interval(p_level integer)	1c8aaf79
+private.panel_log(p_user_id uuid, p_event text, p_details jsonb)	bc2cffbc
+private.panel_new_session(p_user_id uuid)	67a3a9ea
+private.panel_normalize(p_value text)	47c1eadd
+private.panel_owner_uid()	2e033bfa
+private.panel_paid_periods(p_user_id uuid)	881439eb
+private.panel_post_only()	5e7bda1c
+private.panel_random(p_len integer, p_alphabet text)	7f203fbd
+private.panel_refused(p_user_id uuid, p_action text, p_result jsonb)	5206ddd0
+private.panel_request(p_request_id uuid, p_user_id uuid, p_action text, p_args jsonb)	2677c48d
+private.panel_request_done(p_request_id uuid, p_result jsonb)	62258a15
+private.panel_sha256(p_value text)	8d5d1444
+private.panel_store_password(p_user_id uuid, p_password text)	1ef6f814
+private.panel_student_matches(p_access jsonb, p_filter text)	86ff6643
+private.panel_students()	86b1b366
+private.panel_target(p_kn_id text, OUT o_kn text, OUT o_uid uuid)	238c4acc
+private.panel_user_by_kn(p_kn text)	708d08b9
+private.plans:r	c8b2112c
+private.register_attempts:r	c8b2112c
+private.usage_counts(p_user_id uuid, p_resource text, p_exclude_op text)	f0707091
+private.usage_ledger:r	c8b2112c
+private.user_entitlements:r	c8b2112c
+public.ai_generations:r	b4c90d60
+public.bookmark_notes:r	28261255
+public.bookmarks:r	28261255
+public.get_my_access()	aa0d94fa
+public.get_my_access_v2()	9ee40a89
+public.get_plans()	0cbf8c4f
+public.hook_before_user_created(event jsonb)	c1d38e11
+public.notes:r	7fc4552b
+public.owner_ai(p_session text)	8b0eda27
+public.owner_change_password(p_session text, p_current_password text, p_new_password text)	6d13638e
+public.owner_extend(p_session text, p_request_id uuid, p_kn_id text, p_days integer, p_ai_quota integer, p_note text, p_expect_starts_at timestamp with time zone)	6e987675
+public.owner_grant(p_session text, p_request_id uuid, p_kn_id text, p_days integer, p_ai_quota integer, p_note text)	17171f96
+public.owner_history(p_session text, p_limit integer, p_offset integer)	be12863f
+public.owner_invite_create(p_session text, p_request_id uuid, p_label text, p_valid_days integer)	1fc82be5
+public.owner_invite_revoke(p_session text, p_request_id uuid, p_invite_id uuid)	11efdbdd
+public.owner_invites(p_session text, p_filter text, p_limit integer, p_offset integer)	1fc6613d
+public.owner_lock(p_session text)	a4f5a98e
+public.owner_lock_all(p_session text)	7e7d177b
+public.owner_overview(p_session text)	b4b0d271
+public.owner_panel_setup(p_setup_code text, p_new_password text)	62839b4e
+public.owner_panel_state()	ce86ce24
+public.owner_preview(p_session text, p_kn_id text, p_action text, p_days integer, p_ai_quota integer)	6b793fd9
+public.owner_revoke(p_session text, p_request_id uuid, p_kn_id text, p_note text, p_expect_periods integer)	a58e448d
+public.owner_student(p_session text, p_kn_id text)	776fa6e1
+public.owner_students(p_session text, p_query text, p_filter text, p_limit integer, p_offset integer)	30dea97f
+public.owner_unlock(p_password text)	9d7c3df6
+public.redeem_beta_invite(p_code text)	9eb2dace
+public.register_invite_begin(p_code text, p_kn_id text, p_ip_hash text)	97ce3aa6
+public.register_invite_finish(p_code text, p_reservation uuid, p_user_id uuid)	023062a4
+public.rls_auto_enable()	03473d49
+public.start_text_generation(p_user_id uuid, p_note_id uuid, p_stale_seconds integer, p_lease_seconds integer, p_page_count integer)	26a44eb9
+public.start_text_generation_v2(p_user_id uuid, p_note_id uuid, p_stale_seconds integer, p_lease_seconds integer, p_page_count integer)	c4e71647
+public.track(p_events jsonb)	a03753fb

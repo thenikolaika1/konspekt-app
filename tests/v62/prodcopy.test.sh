@@ -242,5 +242,61 @@ check "6. после отката функции = v61.3 (как до мигра
 check "6. после отката выдачи и конспекты на месте (кроме выданного в тесте Premium — он остаётся)" \
   "$($P -d $DB -c "select count(*) from private.access_grants")/$($P -d $DB -c "select count(*) from public.notes")" "3/9"
 
+# ---------- 7. репетиция v62-local-pg17-check.ps1: ЕГО запросы и фильтр, его порядок шагов ----------
+# PowerShell в среде тестов нет: ps1-sql.mjs достаёт SQL из скрипта, здесь он выполняется на копии из шага 1
+# (с добавленной схемой vault — как supabase_vault в production: её объекты должны пропускаться).
+PS1="$ROOT/supabase/release/v62-local-pg17-check.ps1"
+J="$OUT/ps1.json"; node "$HERE/ps1-sql.mjs" "$PS1" > "$J"
+js() { node -e 'const j=require(process.argv[1]);const v=j[process.argv[2]];console.log(Array.isArray(v)?v.join("\n"):v)' "$J" "$1"; }
+RD=konspekt_v62_restore_t
+$P -d postgres -c "drop database if exists ${DB}v" -c "drop database if exists $RD" -c "create database ${DB}v" -c "create database $RD" >/dev/null
+pg_restore $PGD -d ${DB}v --exit-on-error "$OUT/full.dump" 2>/dev/null
+$P -d ${DB}v -v ON_ERROR_STOP=1 -c "create schema vault" -c "create table vault.secrets (id int, secret text)" \
+  -c "insert into vault.secrets values (1, 'секрет')" -c "create function vault.decrypt(t text) returns text language sql as 'select t'" >/dev/null
+pg_dump $PGD -d ${DB}v -Fc -f "$OUT/vault.dump"; $P -d ${DB}v -c "$(js struct)" > "$OUT/want.tsv"
+$P -d postgres -c "drop database ${DB}v" >/dev/null
+cp "$OUT/vault.dump" "$OUT/vault.dump.orig"
+check "7. пустая база: проверка пустоты = 0" "$($P -d $RD -c "$(js objs)")" "0"
+pg_restore -l "$OUT/vault.dump" > "$OUT/vtoc.txt"
+grep -P "$(js skip)" "$OUT/vtoc.txt" > "$OUT/vskip.txt"; grep -vP "$(js skip)" "$OUT/vtoc.txt" > "$OUT/vkeep.txt"
+check "7. фильтр оглавления: пропущены ровно объекты vault (схема, таблица, данные, функция), больше ничего" \
+  "$(wc -l < "$OUT/vskip.txt" | tr -d ' ')/$(grep -vc ' vault ' "$OUT/vskip.txt")" "4/0"
+pg_restore $PGD -d $RD -L "$OUT/vkeep.txt" "$OUT/vault.dump" 2>"$OUT/vrestore.err"; RC=$?
+check "7. восстановление без vault: pg_restore без ошибок" "$RC/$(grep -c 'error:' "$OUT/vrestore.err")" "0/0"
+check "7. после восстановления база не пустая, объектов vault нет" \
+  "$([ "$($P -d $RD -c "$(js objs)")" -gt 0 ] && echo full)/$($P -d $RD -c "select to_regnamespace('vault') is null")" "full/t"
+check "7. структура объект в объект = копии (запрос \$structSql скрипта)" "$($P -d $RD -c "$(js struct)" | diff "$OUT/want.tsv" - | grep -c '^[<>]')" "0"
+# число строк: COPY-блоки копии (как в скрипте) против запроса скрипта по восстановленной базе
+pg_restore -f - --data-only -L "$OUT/vkeep.txt" "$OUT/vault.dump" | awk '/^COPY [^ ]+\.[^ ]+ /{split($2,a,".");gsub(/"/,"",a[1]);gsub(/"/,"",a[2]);cur=a[1]"."a[2];n=0;next} cur!=""{if($0=="\\.") {print cur"\t"n; cur=""} else n++}' | sort > "$OUT/vcopy.tsv"
+VALS=$(awk -F'\t' '{split($1,a,"."); printf "%s(\x27%s\x27, \x27%s\x27)", (NR>1?", ":""), a[1], a[2]}' "$OUT/vcopy.tsv")
+ROWSQ=$(js rows | sed "s/\$vals/$VALS/")
+check "7. число строк каждой таблицы = в копии ($(wc -l < "$OUT/vcopy.tsv" | tr -d ' ') таблиц, без vault)" \
+  "$($P -d $RD -c "$ROWSQ" | sort | diff "$OUT/vcopy.tsv" - | grep -c '^[<>]')/$(grep -c '^vault' "$OUT/vcopy.tsv")" "0/0"
+$P -d $RD -c "delete from public.notes where id = (select id from public.notes limit 1)" >/dev/null
+check "7. пропажа одной строки замечается" "$($P -d $RD -c "$ROWSQ" | sort | diff "$OUT/vcopy.tsv" - | grep -c '^>')" "1"
+$P -d postgres -c "drop database $RD" -c "create database $RD" >/dev/null
+pg_restore $PGD -d $RD -L "$OUT/vkeep.txt" "$OUT/vault.dump" 2>/dev/null
+# дальше — шаги скрипта: предпроверка, снимок, миграция, снимок, тексты, доступ, повторы, откат
+Q() { $P -d $RD -c "$(js q | grep -F "$1" | head -1)"; }
+check "7. предпроверка скрипта: панель есть, библиотеки нет, private.plans пустая" "$(Q "private.owner_panel_secrets")" "true|true|0"
+F7=$($P -d $RD -c "$(js funcs)"); $P -d $RD -f "$SNAP" > "$OUT/s7a.txt"
+$P -d $RD -v ON_ERROR_STOP=1 -f "$M/20261028120000_v62_paid_library.sql" >/dev/null 2>&1; RC=$?
+$P -d $RD -f "$SNAP" > "$OUT/s7b.txt"
+check "7. миграция на восстановленной копии, данные не изменились" "$RC/$(cmp -s "$OUT/s7a.txt" "$OUT/s7b.txt" && echo same)" "0/same"
+check "7. запросы скрипта после миграции: тарифы, права таблицы, права функции" "$(Q "price_label")/$(Q "has_table_privilege('anon'")/$(Q "has_function_privilege('authenticated'")" "gift:7:1:-:false,premium:30:10:299 ₽:true/true|false|false|false/true|false"
+$P -d $RD -v ON_ERROR_STOP=1 -f "$OUT/seed.sql" >/dev/null 2>&1
+check "7. запросы скрипта после текстов: по предметам, дубли" "$(Q "group by 1) s")/$(Q "count(distinct")" "history:2,physics:1/0"
+check "7. все запросы-проверки скрипта выполняются без ошибок (на копии после миграции и текстов)" \
+  "$(js q | grep -v '\$' | grep -v '^create' | grep -v 'from (values' | grep -v "then '-1' $" | while IFS= read -r q; do $P -d $RD -c "$q" >/dev/null 2>&1 || echo "ошибка: $q"; done | tee /dev/stderr | wc -l | tr -d ' ')" "0"
+F8=$($P -d $RD -c "$(js funcs)")
+check "7. повтор миграции → код 3, функции те же" "$($P -d $RD -v ON_ERROR_STOP=1 -f "$M/20261028120000_v62_paid_library.sql" >/dev/null 2>&1; echo $?)/$($P -d $RD -c "$(js funcs)")" "3/$F8"
+$P -d $RD -v ON_ERROR_STOP=1 -f "$ROOT/supabase/release/rollback-v62.sql" >/dev/null 2>&1; RC=$?; $P -d $RD -f "$SNAP" > "$OUT/s7c.txt"
+check "7. откат: функции и данные как до миграции, таблицы текстов нет" \
+  "$RC/$([ "$($P -d $RD -c "$(js funcs)")" = "$F7" ] && echo same)/$(cmp -s "$OUT/s7a.txt" "$OUT/s7c.txt" && echo same)/$($P -d $RD -c "$(js q | grep -Fx "select (to_regclass('private.library_paragraphs') is null)::text")")" "0/same/same/true"
+check "7. копия за репетицию не изменилась" "$(cmp -s "$OUT/vault.dump" "$OUT/vault.dump.orig" && echo same)" "same"
+check "7. скрипт: только 127.0.0.1:55432 и база konspekt_v62_restore_20261029, без drop/create/alter, без pg_dump/createdb/dropdb, роли только по ключу" \
+  "$(grep -c "^\$DbHost = '127.0.0.1'; \$DbPort = 55432" "$PS1")/$(grep -c "^\$DbName = 'konspekt_v62_restore_20261029'" "$PS1")/$(sed "s/Fail .*//; s/Say .*//" "$PS1" | grep -E '(\bQ |Run )' | grep -ciE "drop |create database|alter (system|role|database)|truncate|dropdb|createdb" | tr -d ' ')/$(grep -cE "Find-Tool '(dropdb|createdb|pg_dump)'" "$PS1")/$(grep -B12 'create role \$r nologin' "$PS1" | grep -c 'if (-not \$CreateMissingRoles)')" "1/1/0/0/1"
+$P -d postgres -c "drop database $RD" >/dev/null
+
 echo "ИТОГО: $pass PASS, $fail FAIL"
 [ $fail = 0 ]
