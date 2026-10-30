@@ -439,11 +439,24 @@ async function scenarios() {
       check("V15. «Скопировать ID»: сообщение «ID скопирован»", (await page.$eval(".pc-copied", (n) => n.textContent)) === "ID скопирован");
       // слово «ключ» отдельно (не «подключить»): ни ключа входа, ни упоминания о нём
       check("V15. на экране Premium нет ключа входа и слова «ключ»", !/(^|[^а-яё])ключ/i.test(await text(page)) && !(await page.$("#cred-key")));
-      // без доступа к буферу — ID выделяется для ручного копирования, понятное сообщение
-      await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("denied")) }, configurable: true }));
-      await click(page, "[data-copy-id]", 500);
-      check("V15. буфер недоступен: ID выделен, сообщение «скопируйте вручную»",
-        (await page.evaluate(() => String(getSelection()))) === "KN-AAAAAA" && /вручную/.test(await page.$eval(".pc-copied", (n) => n.textContent)));
+      // без Clipboard API (http в локальной сети, старые iOS): копируется выделенный ID (execCommand) в том же нажатии
+      const viaExec = async (clipboard, execResult) => {
+        await page.evaluate(([c, r]) => {
+          Object.defineProperty(navigator, "clipboard", { value: c === "none" ? undefined : { writeText: () => Promise.reject(new Error("denied")) }, configurable: true });
+          window.__copied = null;
+          document.execCommand = (cmd) => ((window.__copied = cmd === "copy" ? String(getSelection()) : null), r);
+          document.querySelector(".pc-copied").textContent = "";
+        }, [clipboard, execResult]);
+        await click(page, "[data-copy-id]", 400);
+        return page.evaluate(() => [window.__copied, document.querySelector(".pc-copied").textContent, String(getSelection())]);
+      };
+      let r = await viaExec("none", true);
+      check("V15. нет Clipboard API (http): копируется выделенный ID — ровно «KN-AAAAAA», «ID скопирован», выделение снято",
+        r[0] === "KN-AAAAAA" && r[1] === "ID скопирован" && r[2] === "", r);
+      r = await viaExec("denied", true);
+      check("V15. Clipboard API отказал: запасной способ копирует ровно ID", r[0] === "KN-AAAAAA" && r[1] === "ID скопирован", r);
+      r = await viaExec("none", false);
+      check("V15. оба способа не сработали: ID выделен, сообщение «скопируйте вручную»", r[2] === "KN-AAAAAA" && /вручную/.test(r[1]), r);
       // число готовых конспектов — из каталога приложения, а не из текста
       const ready = await page.evaluate(() => window.K.library.readyCount({ subjectId: "history" }) + window.K.library.readyCount({ subjectId: "physics" }));
       check("V15. «77 готовых конспектов» = число готовых параграфов истории и физики в каталоге", ready === 77 && (await text(page)).includes(ready + " готовых конспектов"), ready);

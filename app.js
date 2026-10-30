@@ -406,18 +406,27 @@
       "</section>"
     );
   }
-  // копируется только ID из текущего аккаунта (ключ входа приложение не хранит и сюда не передаёт)
+  // копируется только ID из текущего аккаунта (ключ входа приложение не хранит и сюда не передаёт).
+  // 1) Clipboard API — на сайте (HTTPS); 2) без него (http в локальной сети, старые iOS, встроенные браузеры) —
+  // копирование выделенного ID (execCommand) в том же нажатии; 3) не вышло — ID остаётся выделенным для ручного копирования
   async function copyStudentId() {
     const acc = account();
     const out = root.querySelector(".pc-copied");
     if (acc.kind !== "participant" || !acc.id) return;
+    const el = root.querySelector("#pcId");
     let ok = false;
-    try {
-      await navigator.clipboard.writeText(acc.id);
-      ok = true;
-    } catch (e) {
-      const el = root.querySelector("#pcId");
-      if (el) getSelection()?.selectAllChildren(el);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(acc.id);
+        ok = true;
+      } catch (e) {}
+    }
+    if (!ok && el && el.textContent === acc.id) {
+      getSelection()?.selectAllChildren(el);
+      try {
+        ok = document.execCommand("copy") === true;
+      } catch (e) {}
+      if (ok) getSelection()?.removeAllRanges();
     }
     if (out) out.textContent = ok ? "ID скопирован" : "Не удалось скопировать — выделите ID и скопируйте вручную";
   }
