@@ -16,7 +16,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.1
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
-import { criticalIssues, extractJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
+import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -40,7 +40,7 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
 
-// Отказы start_text_generation: AI не запускается, note помечается failed с этим кодом (фото остаются для повтора).
+// Отказы start_text_generation_v2: AI не запускается, note помечается failed с этим кодом (фото остаются для повтора).
 export const REFUSALS: Record<string, [number, string]> = {
   no_access: [403, "NO_ACCESS"],
   limit_reached: [403, "LIMIT_REACHED"],
@@ -48,6 +48,10 @@ export const REFUSALS: Record<string, [number, string]> = {
   too_many_pages: [400, "TOO_MANY_PAGES"],
   ai_paused: [503, "AI_PAUSED"],
   ai_busy: [429, "AI_BUSY"],
+  retry_limit: [429, "RETRY_LIMIT"],
+  daily_limit: [429, "DAILY_LIMIT"],
+  cooldown: [429, "COOLDOWN"],
+  ai_unavailable: [503, "AI_UNAVAILABLE"],
 };
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -154,17 +158,18 @@ Deno.serve(async (req) => {
   const quota = await checkQuota(admin, user.id);
   if (quota) return json(429, { error: quota }, cors);
 
-  // Атомарно в одной транзакции (start_text_generation, только service_role): захват note из uploading/failed
-  // или из «зависшей» генерации и резерв одной операции лимита раннего доступа (op = note_id).
-  // Второй одновременный запрос по той же note получит already_processing — второй платной генерации не будет;
-  // повтор той же note не занимает второй слот. Итог резерва фиксирует триггер на notes.status:
-  // ready → списан, failed → возвращён. Без права или при исчерпанном лимите AI не запускается.
-  const { data: start, error: startError } = await admin.rpc("start_text_generation", {
+  // Атомарно в одной транзакции (start_text_generation_v2, только service_role): захват note из uploading/failed
+  // или из «зависшей» генерации и резерв одной операции лимита (op = note_id) в счёт действующей выдачи доступа
+  // (пробный период, оплаченный срок, владелец; срок — по часам сервера). Без выдач — прежняя проверка
+  // start_text_generation (участники F&F, служебные аккаунты). Второй одновременный запрос по той же note получит
+  // already_processing — второй платной генерации не будет; повтор той же note не занимает второй слот. Итог резерва
+  // фиксирует триггер на notes.status: ready → списан, failed → возвращён. Без доступа или при исчерпанном лимите AI не запускается.
+  const { data: start, error: startError } = await admin.rpc("start_text_generation_v2", {
     p_user_id: user.id,
     p_note_id: noteId,
     p_stale_seconds: STALE_MS / 1000,
     p_lease_seconds: LEASE_S,
-    // лимит страниц F&F (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
+    // лимит страниц (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
     p_page_count: paths.length,
   });
   if (startError) {
@@ -267,7 +272,8 @@ async function processNote(job: Job) {
   const m = {
     page_count: paths.length, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
     sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
-    retry_used: false, fallback_used: false, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "", error_code: "",
+    retry_used: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "",
+    error_code: "",
   };
   let aiCalled = false;
   let t = Date.now();
@@ -336,10 +342,18 @@ async function processNote(job: Job) {
       if (reply.fallbacks.length) m.fallback_used = true;
 
       t = Date.now();
-      const parsed = extractJson(reply.text);
-      const result: ReturnType<typeof validateStudyContent> = parsed
-        ? validateStudyContent(parsed, images.length)
-        : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : "not json" };
+      const parsed = parseModelJson(reply.text);
+      if (parsed.repaired) m.json_repaired++;
+      // тип и позиция ошибки JSON — без текста ответа (в нём текст учебника)
+      if (parsed.diag) {
+        console.warn(
+          "[analyze-pages] attempt " + (attempt + 1) + " json " + (parsed.repaired ? "repaired" : "invalid") + ": " +
+            JSON.stringify({ ...parsed.diag, truncated: reply.truncated }),
+        );
+      }
+      const result: ReturnType<typeof validateStudyContent> = parsed.value
+        ? validateStudyContent(parsed.value, images.length)
+        : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : parsed.diag?.kind || "not json" };
       m.parse_ms += Date.now() - t;
       last = result;
       let problems: string[];
@@ -360,7 +374,11 @@ async function processNote(job: Job) {
       } else {
         // страницы действительно не читаются — повтор не поможет
         if (result.code === "UNREADABLE_PAGES" && !best) break;
-        problems = [result.code === "AI_BAD_JSON" ? "ответ не является корректным JSON по схеме (" + result.reason + ")" : "в ответе нет ни разделов, ни терминов"];
+        problems = [
+          result.code === "AI_BAD_JSON"
+            ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
+            : "в ответе нет ни разделов, ни терминов",
+        ];
       }
       console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
       messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });

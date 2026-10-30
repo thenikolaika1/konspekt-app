@@ -48,7 +48,10 @@
     tab: "home",
     // ранний доступ: "off" — без Supabase (mock); "unknown" — сервер ещё не ответил или нет связи (приложение работает как обычно);
     // "ok" — доступ есть, info — ответ get_my_access(); "none" — сервер ответил, что доступа нет
-    access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null },
+    // v2 — ответ get_my_access_v2 (статус v61) или null, если сервер без v61
+    access: { state: generator.kind === "cloud" ? "unknown" : "off", info: null, v2: null },
+    // тарифы (get_plans) для экрана «Тарифы»
+    plans: { state: "loading", items: [] },
   };
 
   const icon = (n) => {
@@ -200,6 +203,7 @@
     if (push && S.screen !== s && !TRANSIENT.includes(S.screen)) S.history.push(S.screen);
     S.screen = s;
     S.sheet = null;
+    if (s === "tariffs") loadPlans();
     render();
     scrollTo(0, 0);
   }
@@ -343,9 +347,219 @@
   // ---------- ранний доступ ----------
 
   const hasAccess = () => S.access.state === "ok";
-  const limitReached = () => hasAccess() && S.access.info.remaining <= 0;
+  // без личного лимита (владелец) остаток null — «закончились» не бывает
+  const limitReached = () => hasAccess() && S.access.info.remaining !== null && S.access.info.remaining <= 0;
   // «Остался 1 конспект», «Осталось 2 конспекта», «Осталось 100 конспектов» — число только с сервера
   const remainingText = (n) => pluralForm(n, "Остался", "Осталось", "Осталось") + " " + notesCount(n);
+
+  // ---------- доступ v61: статус только с сервера (get_my_access_v2) ----------
+  // owner | paid | trial | expired | none; null — сервер без v61 (тогда приложение работает как v59, без экранов оплаты).
+  // Сроки и «осталось N дней» считаются от времени сервера (server_now), часы устройства не участвуют.
+  // Это интерфейс: генерацию ИИ закрывает сервер, а тексты библиотеки лежат в публичном файле и экраном не защищены.
+  const accessV2 = () => S.access.v2 || null;
+  const paywalled = () => accessV2()?.status === "expired";
+  // полный текст готового конспекта и главная заменяются экраном «Доступ закончился»; каталог остаётся виден
+  const paywallHere = () => (S.screen === "home" || S.screen === "library-paragraph") && paywalled();
+  const DAY_MS = 86_400_000;
+  const msk = (iso) => new Date(iso).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", year: "numeric" });
+  /** Дней до конца срока по часам сервера (неполный день — целый). */
+  function daysLeft(a) {
+    const end = Date.parse(a?.paid_until || a?.ends_at || ""), now = Date.parse(a?.server_now || "");
+    return end && now ? Math.max(0, Math.ceil((end - now) / DAY_MS)) : null;
+  }
+  const daysText = (n) => n + " " + pluralForm(n, "день", "дня", "дней");
+
+  // Premium подключает Николай вручную по ID ученика. Цены, оплаты и ссылок в приложении нет (цена обсуждается лично;
+  // price_label с сервера не показывается). Срок и число генераций — только с сервера (get_plans).
+  const premiumPlan = () => (S.plans.state === "list" ? S.plans.items[0] || null : null);
+  const premiumCta = () => (accessV2()?.status === "paid" ? "Продлить Premium" : "Подключить Premium");
+  // число готовых конспектов по истории и физике — из каталога (js/library-index.js), а не из текста
+  const premiumReady = () => ["history", "physics"].reduce((n, subjectId) => n + library.readyCount({ subjectId }), 0);
+  // неразрывный пробел между числом и словом: «30 дней» не разрывается на узком экране
+  const readyText = (n) => n + "\u00a0" + pluralForm(n, "готовый конспект", "готовых конспекта", "готовых конспектов");
+  // «10 ИИ-конспектов по фотографиям за 30 дней» — если условия с сервера ещё не пришли, без чисел
+  function aiText(p) {
+    return p && p.ai_quota && p.days
+      ? p.ai_quota + "\u00a0" + pluralForm(p.ai_quota, "ИИ-конспект", "ИИ-конспекта", "ИИ-конспектов") + " по фотографиям за " + p.days + "\u00a0" + pluralForm(p.days, "день", "дня", "дней")
+      : "ИИ-конспекты по фотографиям";
+  }
+  function premiumBenefits(p) {
+    const n = premiumReady();
+    const items = [
+      (n ? readyText(n) : "Готовые конспекты") + " по истории и физике",
+      aiText(p),
+      "Экономия времени при подготовке домашних заданий",
+    ];
+    return '<ul class="plan-facts">' + items.map((x) => "<li>" + icon("check") + "<span>" + esc(x) + "</span></li>").join("") + "</ul>";
+  }
+  // «Как подключить Premium»: только ID ученика (его копирует кнопка); ключ входа здесь не показывается и не копируется
+  function premiumConnect() {
+    const acc = account();
+    const id = acc.kind === "participant" ? acc.id : "";
+    return (
+      '<section class="premium-connect" aria-labelledby="pcTitle"><h2 id="pcTitle">🔒 Как подключить Premium?</h2>' +
+      "<p>Для подключения Premium свяжитесь с Николаем.</p>" +
+      (id
+        ? '<div class="pc-id"><span>Ваш ID:</span> <b id="pcId">' + esc(id) + "</b></div>" +
+          '<button class="secondary wide" data-copy-id>Скопировать ID</button><p class="pc-copied" role="status" aria-live="polite"></p>'
+        : '<p class="pc-noid">Войдите по своему ID, чтобы Николай мог подключить Premium.</p>') +
+      "</section>"
+    );
+  }
+  // копируется только ID из текущего аккаунта (ключ входа приложение не хранит и сюда не передаёт).
+  // 1) Clipboard API — на сайте (HTTPS); 2) без него (http в локальной сети, старые iOS, встроенные браузеры) —
+  // копирование выделенного ID (execCommand) в том же нажатии; 3) не вышло — ID остаётся выделенным для ручного копирования
+  async function copyStudentId() {
+    const acc = account();
+    const out = root.querySelector(".pc-copied");
+    if (acc.kind !== "participant" || !acc.id) return;
+    const el = root.querySelector("#pcId");
+    let ok = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(acc.id);
+        ok = true;
+      } catch (e) {}
+    }
+    if (!ok && el && el.textContent === acc.id) {
+      getSelection()?.selectAllChildren(el);
+      try {
+        ok = document.execCommand("copy") === true;
+      } catch (e) {}
+      if (ok) getSelection()?.removeAllRanges();
+    }
+    if (out) out.textContent = ok ? "ID скопирован" : "Не удалось скопировать — выделите ID и скопируйте вручную";
+  }
+
+  // «Доступ закончился»: на главной (с панелью вкладок) и вместо полного текста готового конспекта (с «Назад»)
+  function accessEnded() {
+    const a = accessV2() || {};
+    const inLibrary = S.screen === "library-paragraph";
+    const title =
+      a.kind === "trial" ? "Пробный период закончился"
+        : a.kind === "legacy" ? "Бесплатное тестирование завершено"
+        : a.kind === "owner" ? "Доступ закончился"
+        : a.status === "none" || !a.kind ? "Библиотека — в Premium"
+        : a.plan === "gift" ? "Подарочный доступ закончился"
+        : "Premium закончился";
+    const lead = inLibrary
+      ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
+      : "Готовые конспекты по истории и физике и ИИ-конспекты по фотографиям — в Premium. Подключает Николай.";
+    const notes = store.listNotes().length;
+    return (
+      app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
+      (inLibrary ? '<div class="ended-back"><button class="back" data-back aria-label="Назад">' + icon("back") + "</button></div>" : "") +
+      logo() +
+      brand() +
+      "<h1>" + title + "</h1>" +
+      '<p class="ended-lead">' + lead + "</p>" +
+      '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
+      '<div class="ended-actions">' +
+      '<button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button>" +
+      (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
+      "</div></div>"
+    );
+  }
+
+  // экран «Premium»: преимущества (число готовых конспектов — из каталога, генерации и срок — с сервера) и
+  // «Как подключить Premium» с ID ученика. Без цены, оплаты и ссылок; описание тарифа из базы не показывается
+  function tariffs() {
+    const p = S.plans;
+    const plan = premiumPlan();
+    const card =
+      '<div class="plan-card"><div class="plan-top"><b>' + esc(plan?.title || "Premium") + "</b></div>" + premiumBenefits(plan) + "</div>";
+    const body =
+      p.state === "list" && plan
+        ? '<div class="plan-list">' + card + "</div>"
+        : p.state === "list"
+          ? emptyState("Premium пока не опубликован", "Условия подключения уточните у Николая.")
+          : p.state === "error"
+            ? emptyState("Не удалось загрузить условия Premium", "Проверьте подключение к интернету и откройте экран ещё раз.")
+            : '<div class="plan-loading" role="status">Загружаем условия Premium…</div>';
+    return app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
+  }
+  let plansAsked = false;
+  function loadPlans() {
+    S.plans = { state: "loading", items: [] };
+    cloud
+      .getPlans()
+      .then((items) => (S.plans = { state: "list", items }), () => (S.plans = { state: "error", items: [] }))
+      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && render());
+  }
+
+  // «Мой доступ» в профиле: статус, срок, дни, генерации — только по ответу сервера
+  function accessCard() {
+    const a = accessV2();
+    if (!a || a.status === "none") return "";
+    const left = daysLeft(a);
+    const until = a.paid_until || a.ends_at;
+    const rows = [];
+    let status, renew = true;
+    if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
+    else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
+    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + (a.plan_title || "Оплачен") + " до " + msk(until);
+    else if (a.status === "trial") status = "Пробный период до " + msk(until);
+    else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
+    if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));
+    if (a.status !== "expired")
+      rows.push(a.ai_quota === null ? "ИИ по фото: без личного лимита" : "ИИ по фото: осталось " + a.ai_remaining + " из " + a.ai_quota);
+    return (
+      '<h3 class="pf-h">Мой доступ</h3><div class="access-card status-' + esc(a.status) + '"><b class="access-status">' + esc(status) + "</b>" +
+      rows.map((r) => '<span class="access-row">' + esc(r) + "</span>").join("") +
+      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить Premium" : "Premium и продление") + "</button>" : "") +
+      "</div>"
+    );
+  }
+
+  // v61.3: вход в панель владельца — только при статусе owner с сервера (это удобство, а не защита:
+  // каждую функцию панели проверяет сервер — роль, постоянный пароль панели и её сессию)
+  function ownerEntry() {
+    if (accessV2()?.status !== "owner" || account().kind !== "participant") return "";
+    return (
+      '<button class="owner-entry" data-owner-panel><span class="owner-entry-ico" aria-hidden="true">👑</span>' +
+      "<span>Панель владельца<small>Ученики, подписки, приглашения, ИИ</small></span></button>"
+    );
+  }
+  let ownerLoad = null;
+  // код и стили панели загружаются только по нажатию — ученики их не скачивают
+  function openOwnerPanel() {
+    ownerLoad =
+      ownerLoad ||
+      new Promise((resolve, reject) => {
+        const css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = "./owner.css?v=62";
+        document.head.appendChild(css);
+        const js = document.createElement("script");
+        js.src = "./js/owner.js?v=62";
+        js.onload = resolve;
+        js.onerror = () => {
+          ownerLoad = null;
+          js.remove();
+          reject(new Error("OWNER_LOAD_FAILED"));
+        };
+        document.head.appendChild(js);
+      });
+    return ownerLoad.then(() => window.K.owner.open(), () => alert("Не удалось открыть панель. Проверь подключение к интернету."));
+  }
+
+  // строка на главной во время пробного периода (без всплывающих окон)
+  // за 3 дня до конца оплаченного срока (с учётом продления заранее — paid_until) — напоминание на главной
+  function premiumLine() {
+    const a = accessV2();
+    if (a?.status !== "paid" || a.kind !== "paid") return "";
+    const left = daysLeft(a);
+    if (left === null || left > 3) return "";
+    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(a.plan_title || "Premium") + " закончится " +
+      (left <= 1 ? "в течение суток" : "через " + esc(daysText(left))) + " · продлить</span>" + icon("chev") + "</button>";
+  }
+  function trialLine() {
+    const a = accessV2();
+    if (a?.status !== "trial" || a.kind !== "trial") return "";
+    const left = daysLeft(a);
+    if (left === null) return "";
+    return '<button class="trial-line" data-go="tariffs">' + icon("sparkle") + "<span>Пробный период: осталось " + esc(daysText(left)) + "</span>" + icon("chev") + "</button>";
+  }
 
   function earlyAccess() {
     return (
@@ -405,10 +619,13 @@
         '<button class="primary" data-go="login">Войти</button>'
       );
     if (limitReached())
-      return '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
+      return accessV2()
+        ? '<h1 class="hero-limit-title">Генерации ИИ закончились</h1><p class="hero-limit">На этот срок ' + pluralForm(a.quota, "использован", "использовано", "использовано") + " " + esc(notesCount(a.quota)) + ". Новые появятся с продлением доступа.</p>" +
+            '<button class="primary" data-go="tariffs">' + esc(premiumCta()) + "</button>"
+        : '<h1 class="hero-limit-title">Бесплатные конспекты закончились</h1><p class="hero-limit">Ты использовал ' + esc(notesCount(a.quota)) + " раннего доступа.</p>";
     return (
       "<h1>Новый конспект</h1><p>Сфотографируй страницы учебника — остальное сделает ИИ</p>" +
-      (hasAccess() ? '<div class="hero-quota">' + esc(remainingText(a.remaining)) + "</div>" : "") +
+      (hasAccess() && a.remaining !== null ? '<div class="hero-quota">' + esc(remainingText(a.remaining)) + "</div>" : "") +
       '<button class="primary" data-go="camera">' + icon("camera") + "Сфотографировать</button>"
     );
   }
@@ -420,7 +637,7 @@
       app() +
       '<div class="top">' +
       brand() +
-      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div><div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
+      '<div class="brand-spark">' + icon("sparkle") + '</div></div><div class="home-kicker">ТВОЯ УЧЁБА · В ОДНОМ МЕСТЕ</div>' + trialLine() + premiumLine() + '<div class="section-row"><h2>Закладки</h2><button class="link" data-go="bookmarks">Все ›</button></div><div class="bookmarks"><button class="bm" data-go="new-bookmark"><div class="bm-icon kt tone-new">' +
       bmGlyph("plus") +
       "</div><span>Новая</span></button>" +
       store
@@ -565,10 +782,10 @@
     });
     // номер параграфа — отдельной меткой, название — крупно; без номера (итоги главы) — значок
     const row = (p) =>
-      '<button class="lib-par' + (p.content ? "" : " soon") + '" data-lib-paragraph="' + esc(p.id) + '" aria-label="' + esc(paragraphLabel(p)) + '">' +
+      '<button class="lib-par' + (library.ready(p) ? "" : " soon") + '" data-lib-paragraph="' + esc(p.id) + '" aria-label="' + esc(paragraphLabel(p)) + '">' +
       '<span class="lib-par-num' + (p.number ? "" : " extra") + '">' + (p.number ? "§&nbsp;" + esc(p.number) : icon("sparkle")) + "</span>" +
       '<span class="lib-par-title">' + esc(p.title) + (p.kind ? '<span class="lib-par-kind">' + esc(p.kind) + "</span>" : "") + "</span>" +
-      (p.content ? '<span class="chev">' + icon("chev") + "</span>" : '<span class="lib-soon">Скоро</span>') + "</button>";
+      (library.ready(p) ? '<span class="chev">' + icon("chev") + "</span>" : '<span class="lib-soon">Скоро</span>') + "</button>";
     const hero =
       '<div class="lib-book-hero">' + LIB_DECO + libCover(b, "big") + '<div class="lib-book-text"><span class="lib-kicker">' + esc(s.title) + "</span><b>" + esc(b.title) + "</b>" +
       (b.authors || b.publisher ? '<span class="lib-book-authors">' + esc([b.authors, b.publisher].filter(Boolean).join(" · ")) + "</span>" : "") +
@@ -587,25 +804,73 @@
     );
   }
 
-  // готовый конспект: сохранённый материал тем же просмотрщиком, что и конспекты по фото; AI не вызывается
+  // готовый конспект: сохранённый материал тем же просмотрщиком, что и конспекты по фото; AI не вызывается.
+  // v62: текст приходит с сервера (только с доступом) и живёт в памяти страницы — K.library.load / forget
   function libraryParagraph() {
     const p = library.paragraph(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
-    if (!p || !p.content) return libraryBook();
+    if (!p || !library.ready(p)) return libraryBook();
+    const content = library.text(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
+    if (!content) return libraryLoading(p);
     const b = library.book(S.lib.subjectId, S.lib.bookId);
     let view;
     try {
-      // данные каталога проходят ту же проверку, что и ответ AI: только схема StudyContent, текст экранируется при выводе
-      view = modes.classic.render(study.normalize(p.content), { layout: "library", book: b?.title || "" });
+      // данные с сервера проходят ту же проверку, что и ответ AI: только схема StudyContent, текст экранируется при выводе
+      view = modes.classic.render(study.normalize(content), { layout: "library", book: b?.title || "" });
     } catch {
       return libraryBook();
     }
     return (
-      app("note-view lib-note nt-" + esc(p.content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
+      app("note-view lib-note nt-" + esc(content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
       '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>" +
       '<div class="cn-doc">' + view.head + view.body + "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
+  }
+
+  // загрузка текста параграфа: один запрос на открытие; ответ применяется, только если параграф всё ещё открыт
+  let libLoad = { key: "", state: "idle", error: "" };
+  const libKey = () => [S.lib.subjectId, S.lib.bookId, S.lib.paragraphId].join("/");
+  function loadParagraph() {
+    const key = libKey();
+    const job = (libLoad = { key, state: "loading", error: "" });
+    library.load(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId).then(
+      () => {
+        if (libLoad !== job) return;
+        libLoad = { key, state: "done", error: "" };
+        if (S.screen === "library-paragraph" && libKey() === key) render();
+      },
+      (e) => {
+        if (libLoad !== job) return;
+        const code = e?.message || "";
+        // сервер сказал «нет доступа» — это его состояние доступа: экран «Доступ закончился» / предложение Premium
+        if (code === "ACCESS_REQUIRED" && e.access) setAccess(fromV2(e.access), true, e.access);
+        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : "network" };
+        if (S.screen === "library-paragraph" && libKey() === key) render();
+      },
+    );
+  }
+  function libraryLoading(p) {
+    if (libLoad.key !== libKey() || libLoad.state === "done" || libLoad.state === "idle") loadParagraph();
+    const bar =
+      '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
+      '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>";
+    const e = libLoad.state === "error" ? libLoad.error : "";
+    let body;
+    if (!e) {
+      body = '<div class="lib-state" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div><p>Загружаем конспект…</p></div>';
+    } else if (e === "access") {
+      body =
+        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и в Premium.") +
+        '<div class="error-actions"><button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button></div></div>";
+    } else if (e === "missing") {
+      body = '<div class="lib-state">' + emptyState("Конспект пока недоступен", "Мы уже готовим его. Загляни позже.") + "</div>";
+    } else {
+      body =
+        '<div class="lib-state">' + emptyState("Не удалось загрузить конспект", "Проверь интернет и попробуй ещё раз. Готовые конспекты загружаются с сервера.") +
+        '<div class="error-actions"><button class="primary wide" data-lib-retry>Попробовать снова</button></div></div>';
+    }
+    return app("note-view lib-note " + subjClass(S.lib.subjectId)) + bar + body + "</div>";
   }
 
   function bookmarks() {
@@ -843,6 +1108,8 @@
       '<section class="pf-hero"><div class="hero-orb orb-a"></div><div class="hero-orb orb-b"></div>' + DECO.hero() +
       '<div class="pf-avatar" aria-hidden="true">' + icon("user") + '</div><div class="pf-id">' + accountHead() + "</div></section>" +
       accountCard() +
+      accessCard() +
+      ownerEntry() +
       '<h3 class="pf-h">Приложение</h3><div class="pf-tiles">' +
       tile("all-notes", "doc", "blue", "Конспекты", notesMeta) +
       tile("bookmarks", "bookmark", "lav", "Закладки", marks + " создано") +
@@ -860,14 +1127,14 @@
       ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
     ];
     const faq = [
-      ["Сколько конспектов можно создать?", "В раннем доступе число конспектов ограничено. Сколько осталось, видно на главном экране."],
+      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или Premium. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
       ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
       ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
       ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
       ["Где хранятся мои конспекты?", "Они привязаны к анонимному профилю на этом устройстве. Если очистить данные браузера или сменить устройство, доступ к ним может пропасть."],
-      ["Тратит ли библиотека лимит?", "Нет. Готовые конспекты библиотеки открываются без кода приглашения и без ограничений."],
+      ["Тратит ли библиотека лимит?", "Нет. Готовые конспекты не тратят генерации ИИ. Полный текст открывается, пока действует доступ; список предметов и параграфов виден всегда."],
     ];
-    const errs = ["NETWORK", "UNREADABLE_PAGES", "AI_TIMEOUT", "AI_RATE_LIMITED", "TOO_MANY_PAGES", "AI_PAUSED", "LIMIT_REACHED", "ACCESS_EXPIRED"];
+    const errs = ["NETWORK", "UNREADABLE_PAGES", "AI_TIMEOUT", "AI_RATE_LIMITED", "TOO_MANY_PAGES", "AI_PAUSED", "LIMIT_REACHED", "ACCESS_EXPIRED", "COOLDOWN", "AI_UNAVAILABLE", "RETRY_LIMIT", "DAILY_LIMIT"];
     return (
       app("help-screen") + DECO.head() +
       head("Помощь", "Как пользоваться приложением") +
@@ -916,11 +1183,16 @@
     PAGES_MISSING: ["Фотографии этого конспекта не сохранились.", "Сфотографируй страницы ещё раз."],
     // отказ сервера по раннему доступу (обычно вместо этого экрана — главная с экраном кода или «закончились»)
     NO_ACCESS: ["Нужен код раннего доступа.", "Введи код приглашения на главном экране."],
-    LIMIT_REACHED: ["Бесплатные конспекты закончились.", "Если другой конспект ещё создаётся, дождись его."],
-    ACCESS_EXPIRED: ["Тестовый период закончился.", "Спасибо за участие! Библиотека по-прежнему доступна."],
+    LIMIT_REACHED: ["Генерации ИИ на этот срок закончились.", "Если другой конспект ещё создаётся, дождись его. Продлить доступ можно в профиле."],
+    ACCESS_EXPIRED: ["Доступ закончился.", "Твой аккаунт и личные конспекты сохранены. Продлить доступ можно в профиле."],
     TOO_MANY_PAGES: ["Слишком много страниц.", "Можно отправить не больше " + MAX_PAGES + " страниц."],
     AI_PAUSED: ["Создание конспектов временно приостановлено.", "Библиотека работает как обычно. Попробуй позже."],
     AI_BUSY: ["Сейчас создаётся много конспектов.", "Подожди пару минут и попробуй ещё раз."],
+    // защита общего бюджета ИИ (сервер): неудачные запуски генерацию не тратят, но частота повторов ограничена
+    RETRY_LIMIT: ["Слишком много попыток с нечитаемыми фото.", "Генерация не потрачена. Пересними страницы чётко и попробуй завтра."],
+    DAILY_LIMIT: ["На сегодня запуски ИИ закончились.", "Генерация не потрачена. Попробуй завтра."],
+    COOLDOWN: ["ИИ сейчас не отвечает.", "Это не твоя ошибка — генерация не потрачена. Подожди 15 минут и попробуй снова."],
+    AI_UNAVAILABLE: ["Сервис ИИ временно недоступен.", "Генерация не потрачена. Создание конспектов возобновится само — попробуй позже."],
   };
   GEN_ERRORS.UPLOAD_INTERRUPTED = GEN_ERRORS.PAGES_MISSING;
 
@@ -1037,6 +1309,7 @@
     processing,
     note,
     "new-bookmark": newBookmark,
+    tariffs,
     profile,
     login,
     register,
@@ -1231,7 +1504,7 @@
     { id: "me", label: "Я", icon: "user", screen: "profile" },
   ];
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
-  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null };
+  const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null, tariffs: null };
   let tabbar = null;
 
   function currentTab() {
@@ -1288,14 +1561,14 @@
   }
 
   // камеру нельзя открыть без доступа и после «закончились» (это не защита лимита: её делает сервер)
-  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut();
+  const cameraBlocked = () => S.access.state === "none" || limitReached() || signedOut() || paywalled();
 
   const tabState = {}; // вкладка → { screen, history, lib, y }: где пользователь был в этом разделе
   function openTab(id) {
     const t = TABS.find((x) => x.id === id);
     if (!t) return;
     // «Фото» — тот же вход в существующий генератор, что и кнопка «Сфотографировать»; «назад» вернёт в раздел
-    if (t.id === "photo") return cameraBlocked() ? render() : go("camera");
+    if (t.id === "photo") return paywalled() ? go("tariffs") : cameraBlocked() ? render() : go("camera");
     const here = currentTab();
     if (here === t.id) {
       // повторное нажатие: в глубине раздела — к его корню, на корне — к началу
@@ -1331,7 +1604,8 @@
     const dir = calm() ? null : navDir;
     navDir = null;
     document.querySelectorAll(".screen-ghost").forEach((g) => g.remove());
-    const html = (SCREENS[S.screen] || home)();
+    const ended = paywallHere();
+    const html = (ended ? accessEnded : SCREENS[S.screen] || home)();
     const oldScreen = root.querySelector(":scope > .app");
 
     // экран: пересоздаём только если он изменился
@@ -1358,7 +1632,9 @@
     }
     firstPaint = false;
     // аналитика: начало и конец сессии просмотра параграфа, вход в библиотеку (js/analytics.js)
-    window.K.analytics?.screen(S.screen, S.screen === "library-paragraph" ? S.lib.paragraphId : null);
+    // просмотр — только если готовый конспект действительно на экране (не скрыт и не заменён экраном завершения)
+    const shown = !ended && S.screen === "library-paragraph" && library.text(S.lib.subjectId, S.lib.bookId, S.lib.paragraphId);
+    window.K.analytics?.screen(ended ? "access-ended" : S.screen, shown ? S.lib.paragraphId : null);
     renderTabbar();
     S.pages.forEach((p) => seenPages.add(p));
 
@@ -1648,12 +1924,32 @@
   let accessGen = 0; // номер пользователя устройства: растёт при каждой смене
 
   /** Новое состояние доступа с сервера; главная перерисовывается, только если оно изменилось. */
-  function setAccess(info, quiet) {
-    const next = { state: info ? "ok" : "none", info: info || null };
+  function setAccess(info, quiet, v2 = null) {
+    const next = { state: info ? "ok" : "none", info: info || null, v2 };
     if (JSON.stringify(next) === JSON.stringify(S.access)) return;
     S.access = next;
+    // доступ к библиотеке закончился — полученные тексты забываются (повторно их выдаст только сервер)
+    if (v2 && !["owner", "paid", "trial"].includes(v2.status)) library.forget();
+    // условия Premium (срок, число генераций) для экранов — один раз, когда доступ известен
+    if (v2 && v2.status !== "owner" && S.plans.state === "loading" && !plansAsked) (plansAsked = true), loadPlans();
     // до первой отрисовки не рисуем: её делает запуск, когда загружены конспекты
-    if (!quiet && !firstPaint && S.screen === "home" && !S.sheet && !document.activeElement?.matches?.("input")) render();
+    // главная, библиотека и профиль зависят от доступа («Доступ закончился», «Мой доступ»)
+    if (!quiet && !firstPaint && (S.screen === "home" || S.screen === "profile" || S.screen.startsWith("library")) && !S.sheet && !document.activeElement?.matches?.("input")) render();
+  }
+
+  // ответ v61 → прежняя форма (quota/used/remaining) для главной, камеры и экрана ошибки
+  function fromV2(a) {
+    if (!a || a.status === "none") return null;
+    return {
+      resource: "text_generation", plan: a.kind, quota: a.ai_quota, used: a.ai_used || 0, reserved: a.ai_reserved || 0,
+      remaining: a.ai_quota === null ? null : a.ai_remaining || 0, available: a.ai_quota === null ? null : a.ai_available || 0,
+    };
+  }
+  /** Доступ с сервера: v61 (get_my_access_v2); сервер без v61 — прежний get_my_access, как в v59. */
+  async function fetchAccess() {
+    const v2 = cloud.getAccessV2 ? await cloud.getAccessV2() : null;
+    if (v2) return { info: fromV2(v2), v2 };
+    return { info: await cloud.getAccess(), v2: null };
   }
 
   /**
@@ -1664,10 +1960,9 @@
     if (S.access.state === "off") return Promise.resolve();
     if (!accessPromise) {
       const gen = accessGen;
-      accessPromise = cloud
-        .getAccess()
+      accessPromise = fetchAccess()
         // ответ для прежнего пользователя (аккаунт сменился, пока шёл запрос) не применяется
-        .then((info) => gen === accessGen && setAccess(info), (e) => console.warn("[access] check failed", e.message))
+        .then((r) => gen === accessGen && setAccess(r.info, false, r.v2), (e) => console.warn("[access] check failed", e.message))
         .finally(() => (accessPromise = null));
     }
     return accessPromise;
@@ -1677,9 +1972,11 @@
   function onUserChange(uid) {
     const changed = store.bind(uid);
     if (!changed) return;
+    library.forget(); // тексты библиотеки прежнего пользователя не остаются в памяти
+    libLoad = { key: "", state: "idle", error: "" };
     accessGen++;
     accessPromise = null;
-    S.access = { state: "unknown", info: null };
+    S.access = { state: "unknown", info: null, v2: null };
     S.noteId = null;
     S.bookmarkId = null;
     tabState.home = tabState.me = null;
@@ -1760,6 +2057,8 @@
       if (msg) msg.textContent = LOGIN_ERRORS.BUSY;
       return;
     }
+    // сессия панели владельца закрывается до выхода (на сервере она без сессии входа и так недействительна)
+    await window.K.owner?.beforeSignOut?.();
     const uid = await cloud.signOut();
     // копии облачных конспектов участника не остаются следующему пользователю устройства
     if (account().kind !== "participant") store.forget(uid);
@@ -1923,9 +2222,11 @@
     if (t.id === "credSaved") return onInput({ target: t });
     if (el("[data-register]")) return registerCode();
     if ((x = el("[data-copy]"))) return copyCredentials(x.dataset.copy);
+    if (el("[data-copy-id]")) return copyStudentId();
     if (el("[data-cred-done]")) return credentialsDone();
     if (el("[data-login]")) return doLogin();
     if (el("[data-signout]")) return doSignOut();
+    if (el("[data-owner-panel]")) return openOwnerPanel();
     if (el("[data-guest]")) return continueAsGuest();
 
     if (el("[data-start]")) {
@@ -2044,6 +2345,7 @@
     if (el("[data-gallery]")) return openPicker(gallery);
     if (el("[data-process]")) return startGeneration();
     if (el("[data-retry]")) return S.gen.mode === "note" && S.gen.noteId ? resumeGeneration(S.gen.noteId) : startGeneration();
+    if (el("[data-lib-retry]")) return (libLoad = { key: "", state: "idle", error: "" }), render();
 
     // нижняя панель
     if ((x = el("[data-tab]"))) return openTab(x.dataset.tab);
@@ -2063,7 +2365,7 @@
     }
     if ((x = el("[data-lib-paragraph]"))) {
       const p = library.paragraph(S.lib.subjectId, S.lib.bookId, x.dataset.libParagraph);
-      if (!p || !p.content) return; // конспект ещё не готов: строка помечена «Скоро»
+      if (!library.ready(p)) return; // конспект ещё не готов: строка помечена «Скоро»
       S.lib = { ...S.lib, paragraphId: p.id };
       return go("library-paragraph");
     }
@@ -2195,7 +2497,7 @@
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
   // пока первое ещё не завершилось, игнорируется (иначе — две закладки или ошибка у закрытого листа).
-  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-register],[data-cred-done],[data-login],[data-signout],[data-guest]";
+  const ONCE = "[data-create-bm],[data-save-rename],[data-confirm-delete],[data-process],[data-retry],[data-register],[data-cred-done],[data-login],[data-signout],[data-guest],[data-owner-panel]";
   let busy = false;
   const NAV = "[data-go],[data-back],[data-note],[data-bookmark],[data-open-note],[data-start],[data-lib-grade],[data-lib-subject],[data-lib-book],[data-lib-paragraph],[data-tab],.fab";
   root.addEventListener("click", (e) => {

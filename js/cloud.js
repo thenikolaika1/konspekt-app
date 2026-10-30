@@ -87,6 +87,8 @@
   }
   const peekUid = () => peekUser()?.id || null;
 
+
+
   // смена пользователя (вход, выход, потеря сессии): store и аналитика переключают свои данные на его uid
   const userListeners = [];
   let lastUid;
@@ -405,6 +407,58 @@
   }
 
   /**
+   * Доступ v61 (get_my_access_v2) — только по часам и данным сервера:
+   * { status: owner|paid|trial|expired|none, kind, plan, plan_title, starts_at, ends_at, paid_until, server_now,
+   *   ai_quota (null — без личного лимита), ai_used, ai_remaining, ai_available, revoked? }.
+   * null — на сервере ещё нет v61 (миграция не применена): приложение работает по старому get_my_access.
+   */
+  async function getAccessV2() {
+    await ensureUser();
+    try {
+      const data = await retryNetwork(() => callRpc("get_my_access_v2", undefined, "ACCESS_FAILED"));
+      return data && typeof data === "object" && typeof data.status === "string" ? data : null;
+    } catch (e) {
+      // функции нет — старая база: PostgREST отвечает PGRST202 (Could not find the function), PostgreSQL — 42883
+      if (e?.cause?.code === "PGRST202" || e?.cause?.code === "42883") return null;
+      throw e;
+    }
+  }
+
+  /** Тарифы, которые владелец сделал видимыми (private.plans.active). Пустой список — тарифы не заданы. */
+  async function getPlans() {
+    await ensureUser();
+    const data = await retryNetwork(() => callRpc("get_plans", undefined, "PLANS_FAILED"));
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Готовый конспект библиотеки (v62): текст — только с сервера, public.get_library_paragraph (POST; доступ проверяет
+   * сервер: владелец, пробный период или Premium). Ответ — StudyContent; отказ — Error с кодом ACCESS_REQUIRED
+   * (e.access — состояние доступа с сервера) или NOT_FOUND; без ответа сервера — connectionError, как у других вызовов.
+   */
+  async function libraryParagraph(subjectId, bookId, paragraphId) {
+    await ensureUser();
+    const data = await retryNetwork(() =>
+      callRpc("get_library_paragraph", { p_subject: subjectId, p_book: bookId, p_paragraph: paragraphId }, "LIBRARY_FAILED"));
+    if (data && typeof data === "object" && data.content && typeof data.content === "object") return data.content;
+    const err = new Error(data?.error === "ACCESS_REQUIRED" || data?.error === "NOT_FOUND" ? data.error : "LIBRARY_FAILED");
+    if (data?.access && typeof data.access === "object") err.access = data.access;
+    throw err;
+  }
+
+  /**
+   * Панель владельца (js/owner.js): только функции public.owner_* — каждая сама проверяет на сервере роль владельца,
+   * пароль панели и её сессию (миграция 20261026120000). Ответ — объект; отказ приходит как { error }.
+   * Повтор при сбое связи безопасен: изменяющие действия идут с идентификатором операции (request_id).
+   */
+  async function ownerRpc(fn, args) {
+    if (!/^owner_[a-z_]+$/.test(fn)) throw new Error("OWNER_BAD_CALL");
+    await ensureUser();
+    const data = await retryNetwork(() => callRpc(fn, args, "OWNER_FAILED"));
+    return data && typeof data === "object" ? data : { error: "SERVER_ERROR" };
+  }
+
+  /**
    * Аналитика (js/analytics.js): пакет событий в RPC public.track. Пользователя сервер берёт из JWT.
    * keepalive — при уходе страницы: supabase-js так не умеет, поэтому прямой запрос с последним токеном
    * (нет токена — не отправляем, события останутся в очереди до следующего запуска).
@@ -598,7 +652,7 @@
 
   K.cloud = {
     enabled, ensureUser, listNotes, getNote, createProcessingNote, renameNote, deleteNote, uploadPages, listPagePaths, cleanupPhotos,
-    startAnalysis, waitForNote, getAccess, track,
+    startAnalysis, waitForNote, getAccess, getAccessV2, getPlans, libraryParagraph, track, ownerRpc,
     peekUid, onUser, getAccount, signInWithId, signOut, continueAsGuest, normalizeId, normalizeKey,
     registerWithInvite, finishRegistration, pendingRegistration, clearPendingRegistration,
   };

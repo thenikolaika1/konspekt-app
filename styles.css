@@ -1769,3 +1769,55 @@ body.has-tabbar .fab{bottom:calc(var(--tabbar-h) + 18px)}
 .cred-check input{width:22px;height:22px;accent-color:var(--blue);flex:0 0 auto}
 .cred-error{min-height:20px;margin:10px 0;font-size:14px;line-height:20px;color:var(--wine)}
 .credentials-screen .primary:disabled{opacity:.5;box-shadow:none}
+/* v60: бесплатное тестирование завершено — тот же каркас, что у экрана раннего доступа */
+.ended{padding-top:64px}
+.ended h1{font-size:29px;margin:30px 0 12px}
+.ended-lead{margin:0 6px;font-size:15px;line-height:1.5;color:var(--muted)}
+.ended-safe{display:flex;align-items:flex-start;gap:10px;width:100%;margin:24px 0 0;padding:13px 14px;border-radius:14px;background:var(--greenbg);color:#24684a;font-size:14px;line-height:1.45;text-align:left}
+.ended-safe .ui-icon{width:20px;height:20px;flex:0 0 auto;margin-top:1px}
+.ended-actions{display:grid;gap:10px;width:100%;margin-top:auto;padding-top:28px}
+.ended .ended-actions .primary{margin-top:0;display:flex;align-items:center;justify-content:center;text-decoration:none}
+.ended .secondary.wide{width:100%}
+@media(max-height:700px){.ended{padding-top:36px}.ended h1{margin-top:20px}}
+/* v61: доступ — «Мой доступ», «Тарифы», строка пробного периода, «Доступ закончился» в библиотеке */
+.access-card{display:grid;gap:6px;padding:16px;border:1px solid var(--ds-line,var(--line));border-radius:var(--ds-r-lg,18px);background:#fff;box-shadow:var(--ds-sh-1,none)}
+.access-status{font-size:17px;line-height:22px;font-weight:800;color:var(--k-ink)}
+.access-row{font-size:14px;line-height:19px;color:var(--muted)}
+.access-card .wide{width:100%;margin-top:8px}
+.access-card.status-owner .access-status,.access-card.status-paid .access-status{color:var(--green)}
+.access-card.status-expired .access-status{color:var(--wine)}
+.trial-line{display:flex;align-items:center;gap:8px;width:100%;margin:10px 0 0;padding:10px 12px;border:1px solid #dcecff;border-radius:12px;background:#f3f8ff;color:var(--blue-deep,var(--blue));font-size:14px;font-weight:700;text-align:left;cursor:pointer}
+.trial-line span{flex:1 1 auto}
+.trial-line .ui-icon{width:16px;height:16px;flex:0 0 auto}
+.plan-list{display:grid;gap:12px;margin-top:6px}
+.plan-card{padding:16px;border:1px solid var(--ds-line,var(--line));border-radius:var(--ds-r-lg,18px);background:#fff;box-shadow:var(--ds-sh-1,none)}
+.plan-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.plan-top b{font-size:18px;line-height:23px;font-weight:800;color:var(--k-ink);overflow-wrap:anywhere}
+.plan-facts{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px;font-size:14px;line-height:19px;color:var(--k-text,var(--navy))}
+.plan-facts li{display:flex;gap:8px;align-items:flex-start}
+.plan-facts .ui-icon{width:17px;height:17px;flex:0 0 auto;margin-top:1px;color:var(--green)}
+.plan-loading{padding:30px 0;text-align:center;color:var(--muted);font-size:14px}
+/* v62: «Как подключить Premium» — без цены, оплаты и ссылок; ID ученика и кнопка «Скопировать ID» */
+.premium-connect{margin:22px 0 0;padding:16px;border-radius:16px;background:#f5f8fc;display:grid;gap:10px}
+.premium-connect h2{margin:0;font-size:16px;line-height:21px;font-weight:800;color:var(--k-ink)}
+.premium-connect p{margin:0;font-size:14px;line-height:1.45;color:var(--muted)}
+.pc-id{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;font-size:15px;color:var(--navy)}
+.pc-id b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;letter-spacing:.02em;color:var(--k-ink);overflow-wrap:anywhere;user-select:all;-webkit-user-select:all}
+.premium-connect .secondary.wide{width:100%;margin:0}
+.pc-copied{min-height:19px;font-size:13.5px;color:var(--green)}
+.pc-copied:empty{min-height:0}
+.ended .ended-actions .secondary.wide{display:flex;align-items:center;justify-content:center;text-decoration:none}
+.ended-lib{padding-top:12px}
+.ended-back{align-self:stretch;display:flex;margin-bottom:6px}
+.ended-back .back{width:40px;height:40px;display:flex;align-items:center;justify-content:flex-start;padding:0;color:var(--k-ink)}
+a.primary.wide,a.secondary.wide{display:flex;align-items:center;justify-content:center;text-decoration:none;box-sizing:border-box}
+a.primary.wide{color:#fff}
+/* v61.3: кнопка «Панель владельца» в профиле (видна только владельцу; сама панель — owner.css) */
+.owner-entry{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #f1e2c2;background:linear-gradient(135deg,#fffaf0,#fff);border-radius:var(--ds-r,16px);padding:14px;margin:14px 0 4px;color:var(--k-ink,#0d1747);font-weight:700;font-size:16px;text-align:left;cursor:pointer}
+.owner-entry .owner-entry-ico{width:40px;height:40px;border-radius:12px;background:#fbf2df;display:grid;place-items:center;font-size:21px}
+.owner-entry small{display:block;font-weight:500;color:var(--k-muted,#6c7696);font-size:12.5px;margin-top:2px}
+/* v62: загрузка готового конспекта с сервера и напоминание о конце Premium */
+.lib-state{padding:48px 8px 24px;text-align:center}
+.lib-state>p{color:var(--k-muted,#6c7696);font-size:14px;margin:0}
+.lib-state .error-actions{margin-top:8px}
+.trial-line.ending{border-color:#f0e1cb;background:#fff8ee;color:var(--brown,#9a673e)}
