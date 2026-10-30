@@ -7,9 +7,13 @@
 // сценарию; в js/config.js адрес Supabase пустой и аналитика выключена — запросов к production нет и быть не может.
 // Только чтение (GET/HEAD), только файлы сайта (не supabase/, tests/, tools/, .git). Ничего не публикует.
 //
-// Запуск (в папке репозитория):  node tools/premium-preview.mjs          — для iPhone в той же Wi-Fi-сети
-//                                 node tools/premium-preview.mjs --local  — только на этом компьютере
-// Остановить: Ctrl+C. Windows спросит про брандмауэр — разрешить только для «Частных сетей».
+// Запуск (в папке репозитория):  node tools/premium-preview.mjs        — только на этом компьютере (Chrome: localhost)
+//                                 node tools/premium-preview.mjs --lan  — ещё и для iPhone в той же Wi-Fi-сети
+//                                   (Windows спросит про брандмауэр — разрешить только для «Частных сетей»)
+// Остановить: Ctrl+C.
+// Изоляция от production: (1) js/cloud.js — имитация, (2) в настройках нет адреса и ключа Supabase, аналитика выключена,
+// (3) заголовок Content-Security-Policy: браузеру разрешены запросы только к этому серверу (connect-src 'self') —
+// запрос к *.supabase.co заблокирует сам Chrome, даже если какой-то код его попробует.
 import http from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -20,7 +24,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const portArg = args.includes("--port") ? args[args.indexOf("--port") + 1] : "";
 const PORT = /^\d{2,5}$/.test(portArg || "") ? Number(portArg) : 8765;
-const HOST = args.includes("--local") ? "127.0.0.1" : "0.0.0.0";
+const HOST = args.includes("--lan") ? "0.0.0.0" : "127.0.0.1";
 const BASE = "/konspekt-app/";
 
 // только файлы сайта
@@ -109,8 +113,13 @@ ID ученика: <b>KN-TEST42</b>. Выбор сценария стирает 
   '<a class="s" href="../?s=' + k + '">' + t + '<small>' + k + '</small></a>').join("");</script>
 </body></html>`;
 
+// только этот сервер: скрипты, стили, картинки, запросы (fetch/XHR/WebSocket), service worker, манифест
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+  "font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; media-src 'self' blob:; frame-src 'none'; " +
+  "object-src 'none'; base-uri 'self'; form-action 'none'";
 function send(res, status, type, body, head) {
-  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...head });
+  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": CSP, "Referrer-Policy": "no-referrer", ...head });
   res.end(res.req.method === "HEAD" ? undefined : body);
 }
 
@@ -148,10 +157,10 @@ server.on("error", (e) => {
 server.listen(PORT, HOST, () => {
   const lan = Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === "IPv4" && !n.internal).map((n) => n.address);
   console.log("\nKonspekt v62 — ТЕСТОВЫЙ режим (имитация сервера, без production). Остановить: Ctrl+C\n");
-  console.log("  На этом компьютере:  http://localhost:" + PORT + BASE + "__preview/");
+  console.log("  Открыть в Chrome:  http://localhost:" + PORT + BASE + "__preview/");
   if (HOST === "0.0.0.0") {
     if (lan.length) lan.forEach((ip) => console.log("  На iPhone (та же Wi-Fi): http://" + ip + ":" + PORT + BASE + "__preview/"));
     else console.log("  Адрес в локальной сети не найден — подключите компьютер к Wi-Fi/сети");
-  } else console.log("  (--local: только на этом компьютере)");
+  } else console.log("  (только на этом компьютере; для iPhone в той же Wi-Fi — запуск с --lan)");
   console.log("");
 });

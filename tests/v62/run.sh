@@ -39,6 +39,8 @@ bash "$HERE/concurrency.test.sh"
 bash "$HERE/hide-price.test.sh"
 # 3в. интерфейс v61.3 (у учеников до обновления PWA) с базой v62: все его вызовы работают
 bash "$HERE/oldclient.test.sh"
+# 3д. тестовый сервер для ручной проверки (tools/premium-preview.mjs): изоляция от production
+node "$HERE/preview.test.mjs"
 # 3б. перенос 77 параграфов: манифест = публичный каталог, закрытых текстов в публичных файлах нет
 node "$HERE/library-manifest.test.mjs"
 # 4. интерфейс и PWA (Chromium)
