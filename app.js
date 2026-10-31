@@ -528,10 +528,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=62";
+        css.href = "./owner.css?v=63";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=62";
+        js.src = "./js/owner.js?v=63";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -566,12 +566,13 @@
       app("welcome access") +
       logo() +
       brand() +
-      "<h1>Ранний доступ</h1>" + registerForm() + "</div>"
+      "<h1>Ранний доступ</h1>" + registerForm(true) + "</div>"
     );
   }
 
   // форма регистрации по приглашению: на экране раннего доступа и на отдельном экране из «Я»
-  function registerForm() {
+  // withHint — подсказка «Где получить код приглашения?» (только на экране раннего доступа)
+  function registerForm(withHint) {
     const p = idLogin ? cloud.pendingRegistration() : null;
     const resume = p && !p.done;
     return (
@@ -580,8 +581,17 @@
       '<input id="inviteCode" class="field invite-field" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" placeholder="XXXX-XXXX-XXXX" aria-label="Код приглашения"' +
       (resume ? ' value="' + esc(p.code) + '"' : "") + ">" +
       '<p class="invite-error" role="alert">' + (resume ? "Регистрация не завершилась. Нажми «Создать аккаунт» ещё раз." : "") + "</p></div>" +
+      (withHint ? inviteHint() : "") +
       '<button class="primary" data-register>Создать аккаунт</button>' +
       '<button class="text-action" data-go="login">У меня есть ID и ключ</button>'
+    );
+  }
+
+  function inviteHint() {
+    return (
+      '<aside class="invite-hint" aria-labelledby="inviteHintTitle"><span class="invite-hint-icon" aria-hidden="true">🔑</span>' +
+      '<div><h2 id="inviteHintTitle">Где получить код приглашения?</h2>' +
+      "<p>Чтобы получить код, обратитесь к&nbsp;<b>Капустину&nbsp;Николаю</b> любым удобным способом.</p></div></aside>"
     );
   }
 

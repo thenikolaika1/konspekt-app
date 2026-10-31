@@ -467,8 +467,8 @@ async function pwaTest() {
   await page.waitForTimeout(800);
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=62", /v=62/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался konspekt-v62", keys.length === 1 && keys[0] === "konspekt-v62", keys);
+  check("PWA: после обновления — app.js?v=63", /v=63/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался konspekt-v63", keys.length === 1 && keys[0] === "konspekt-v63", keys);
   check("PWA: после обновления — статус с сервера (экран «Пробный период закончился»)", (await text(page)).includes("Пробный период закончился"));
   check("PWA: личный конспект сохранён", await page.evaluate(() => Object.values(localStorage).some((v) => v.includes("Мой конспект по биологии"))));
   await ctx.close();

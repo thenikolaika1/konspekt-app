@@ -1349,6 +1349,12 @@ button:active,.note-card:active,.bm-row:active,.pick-row:active,.sheet-action:ac
 .access .invite-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,124,244,.12)}
 .access .invite-error{min-height:20px;margin:10px 0 0;font-size:14px;line-height:20px;color:var(--wine)}
 .access .primary:disabled{opacity:.7}
+/* v63: подсказка «Где получить код приглашения?» под полем кода (экран раннего доступа) */
+.access .invite-hint{width:100%;display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:start;margin:6px 0 20px;padding:14px 16px 14px 14px;border:1px solid #dcecff;border-radius:16px;background:linear-gradient(145deg,#f8fbff,#eef6ff);box-shadow:0 8px 20px rgba(10,124,244,.07);text-align:left}
+.invite-hint-icon{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:#fff;border:1px solid #dcecff;font-size:20px;line-height:1}
+.access .invite-hint h2{margin:1px 0 4px;font-size:15.5px;line-height:20px;font-weight:800;letter-spacing:-.2px;color:var(--navy)}
+.access .invite-hint p{margin:0;font-size:14px;line-height:1.45;color:var(--muted);overflow-wrap:anywhere}
+.access .invite-hint b{font-weight:800;color:var(--navy)}
 
 /* ---------- библиотека готовых конспектов: те же поверхности, рамки и радиусы, что у закладок и карточек ---------- */
 .lib-entry,.lib-row{width:100%;display:grid;grid-template-columns:52px minmax(0,1fr) 20px;gap:14px;align-items:center;padding:11px 14px 11px 12px;border:1px solid #e3eaf2;border-radius:17px;background:linear-gradient(180deg,#fff,#fcfdff);box-shadow:0 8px 24px rgba(30,57,85,.055);color:var(--navy);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform .18s ease,box-shadow .18s ease}

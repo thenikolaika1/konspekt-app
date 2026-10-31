@@ -601,8 +601,8 @@ async function pwaTest() {
   });
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=62", /v=62/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался только konspekt-v62", keys.length === 1 && keys[0] === "konspekt-v62", keys);
+  check("PWA: после обновления — app.js?v=63", /v=63/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался только konspekt-v63", keys.length === 1 && keys[0] === "konspekt-v63", keys);
   check("PWA: js/library-catalog.js нет ни в кэше, ни среди загруженных файлов", !after.some((x) => x.includes("library-catalog")) && !served.some((x) => x.includes("library-catalog")), after);
   check("PWA: js/library-index.js загружен", served.some((x) => x.includes("library-index.js")));
   await toBook(page, "history");
@@ -645,11 +645,11 @@ async function pwaTest() {
   // без браузера: в сайте нет текстов, SW не кэширует запросы к Supabase и POST
   const idx = fs.readFileSync(path.join(V62, "js/library-index.js"), "utf8");
   check("S1. js/library-index.js без текстов (нет content, sections, blocks)", !/"content"\s*:|"sections"\s*:|"blocks"\s*:/.test(idx));
-  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=62",
-    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=62/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
+  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=63",
+    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=63/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
     && !/library-catalog/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8")));
   const sw = fs.readFileSync(path.join(V62, "service-worker.js"), "utf8");
-  check("S2. service worker: VERSION konspekt-v62, кэширует только GET своего сайта", /VERSION = "konspekt-v62"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
+  check("S2. service worker: VERSION konspekt-v63, кэширует только GET своего сайта", /VERSION = "konspekt-v63"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
   check("S2. service worker не упоминает library-catalog в списке файлов", !/library-catalog\.js"/.test(sw.replace(/\/\/.*$/gm, "")));
   const big = fs.readdirSync(path.join(V62, "js")).filter((f) => fs.statSync(path.join(V62, "js", f)).size > 400000 && f !== "vendor");
   check("S3. в js/ нет больших файлов (тексты были 2 МБ)", !big.filter((f) => !/supabase/.test(f)).length, big);
