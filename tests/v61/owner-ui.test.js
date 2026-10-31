@@ -577,8 +577,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
         for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(k + " " + new URL(r.url).pathname);
         return out;
       });
-      check("U42. ученик: сервис-воркер работает (кэш konspekt-v62), файлов панели в кэше нет",
-        keys.some((k) => k.startsWith("konspekt-v62 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
+      check("U42. ученик: сервис-воркер работает (кэш konspekt-v63), файлов панели в кэше нет",
+        keys.some((k) => k.startsWith("konspekt-v63 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
       await s1.ctx.close();
       const s2 = await open(OWNER, undefined, { sw: true });
       await s2.page.reload();
