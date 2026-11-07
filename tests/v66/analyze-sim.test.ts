@@ -63,6 +63,18 @@ const sc = {
   systems: [] as string[],
   /** номера вызовов chat, на которые модель не отвечает (висит до тайм-аута) */
   hang: new Set<number>(),
+  /** v66.3, поток: вызовы, где модель шлёт два фрагмента и замолкает до тайм-аута (частичный ответ) */
+  hangMid: new Set<number>(),
+  /** вызовы, где поток закрывается после двух фрагментов без конца ответа */
+  eof: new Set<number>(),
+  /** вызовы, где в потоке приходит неразборчивый фрагмент / событие ошибки */
+  badChunk: new Set<number>(), errorEvent: new Set<number>(),
+  /** сервер отвечает обычным JSON даже на stream: true */
+  noStream: false,
+  /** запрошен ли поток в каждом вызове chat */
+  streamReq: [] as boolean[],
+  /** «время» до первого токена (сдвиг часов функции перед первым фрагментом) */
+  firstTokenMs: 0,
 };
 const TITLE_WARNING = "Фото 1 — титульный лист учебника «Физика 8», автор Перышкин, текста темы нет";
 const shortRefusal = () => JSON.stringify({ error: "UNREADABLE_PAGES", warnings: [TITLE_WARNING] });
@@ -73,7 +85,7 @@ const longRefusal = (n: number) => JSON.stringify({
 const jsonRes = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const filler = "Ученики разбирают этот пункт учебника подробно, с определениями, примерами и выводами по каждому абзацу страницы. ";
 function contentFor(pages: number[], prompt: string) {
-  const second = /часть [23] из [23]/.test(prompt); // не первая часть
+  const second = /часть [2-9] из [2-9]/.test(prompt); // не первая часть
   const text = pages.filter((p) => !sc.titles.has(p));
   const sections = text.map((p) => ({ p, i: pages.indexOf(p) })).map(({ p, i }) => ({
     heading: sc.continueHeading && second && i === 0 ? "Пункт " + (p - 1) : "Пункт " + p,
@@ -89,6 +101,41 @@ function contentFor(pages: number[], prompt: string) {
     selfCheck: text.map((p) => ({ q: "Вопрос по странице " + p + "?", a: "Ответ " + p + "." })),
     warnings: [],
   };
+}
+/**
+ * Потоковый ответ как у GigaChat (Server-Sent Events): «data: {choices:[{delta:{content}}]}» по кусочкам, в последнем —
+ * finish_reason и usage, затем «data: [DONE]». Режимы sc.hangMid / eof / badChunk / errorEvent — сбои посреди потока.
+ */
+function sse(k: number, content: string, usage: unknown, signal?: AbortSignal | null) {
+  const enc = new TextEncoder();
+  const size = Math.ceil(content.length / 6);
+  const pieces = Array.from({ length: Math.ceil(content.length / size) }, (_, i) => content.slice(i * size, (i + 1) * size));
+  const ev = (o: unknown) => enc.encode("data: " + (typeof o === "string" ? o : JSON.stringify(o)) + "\n\n");
+  const chunk = (c: string, extra: Record<string, unknown> = {}) =>
+    ev({ model: "GigaChat-2-Max:2.0", object: "chat.completion", created: 1, choices: [{ index: 0, delta: { role: "assistant", content: c }, ...extra }] });
+  let i = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(ctl) {
+      if (i === 0) skew += sc.firstTokenMs;
+      if (i === 2 && (sc.hangMid.has(k) || sc.eof.has(k) || sc.badChunk.has(k) || sc.errorEvent.has(k))) {
+        if (sc.eof.has(k)) return ctl.close();
+        if (sc.badChunk.has(k)) return (ctl.enqueue(enc.encode("data: {не json\n\n")), void i++);
+        if (sc.errorEvent.has(k)) return (ctl.enqueue(ev({ status: 500, message: "internal error" })), void i++);
+        return new Promise<void>((_, reject) => {
+          const stop = () => reject(new DOMException("aborted", "AbortError"));
+          if (signal?.aborted) stop();
+          signal?.addEventListener("abort", stop, { once: true });
+        });
+      }
+      if (i < pieces.length - 1) ctl.enqueue(chunk(pieces[i]));
+      else if (i === pieces.length - 1) ctl.enqueue(chunk(pieces[i], { finish_reason: "stop" }));
+      else if (i === pieces.length) ctl.enqueue(ev({ model: "GigaChat-2-Max:2.0", object: "chat.completion", created: 1, choices: [{ index: 0, delta: { content: "" }, finish_reason: "stop" }], usage }));
+      else if (i === pieces.length + 1) ctl.enqueue(ev("[DONE]"));
+      else return ctl.close();
+      i++;
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
 }
 globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
   const u = String(input instanceof Request ? input.url : input);
@@ -116,6 +163,7 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
     sc.systems.push(system);
     sc.calls.push({ pages, prompt });
     const k = sc.calls.length - 1;
+    sc.streamReq.push(body.stream === true);
     skew += sc.chatMs;
     if (k === sc.chatFailOn) return jsonRes(500, { message: "boom" });
     if (sc.hang.has(k)) {
@@ -126,10 +174,10 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
       });
     }
     if (sc.chatStatus.has(k)) return jsonRes(sc.chatStatus.get(k)!, { message: "refused" });
-    const reply = (content: string, out: number) => jsonRes(200, {
-      model: "GigaChat-2-Max:2.0", choices: [{ message: { content }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 2700 + 1930 * pages.length, completion_tokens: out },
-    });
+    const usage = (out: number) => ({ prompt_tokens: 2700 + 1930 * pages.length, completion_tokens: out });
+    const reply = (content: string, out: number) => body.stream === true && !sc.noStream
+      ? sse(k, content, usage(out), init.signal)
+      : jsonRes(200, { model: "GigaChat-2-Max:2.0", choices: [{ message: { content }, finish_reason: "stop" }], usage: usage(out) });
     if (sc.refuseLong.has(k)) return reply(longRefusal(pages.length), 400);
     // модель: на одних титульных листах текста нет — отказ; титульный лист среди страниц с текстом — отказ при
     // прежней инструкции, конспект по остальным при новой («НЕ причина для отказа»)
@@ -183,6 +231,13 @@ const reset = () => {
   sc.chatMs = 0;
   sc.systems = [];
   sc.hang = new Set();
+  sc.hangMid = new Set();
+  sc.eof = new Set();
+  sc.badChunk = new Set();
+  sc.errorEvent = new Set();
+  sc.noStream = false;
+  sc.streamReq = [];
+  sc.firstTokenMs = 0;
   timers.fast = false;
   timers.asked = [];
   logs.length = 0;
@@ -595,6 +650,7 @@ for (const [status, code] of [[403, "AI_AUTH"], [429, "AI_RATE_LIMITED"], [400, 
   check("[части] повтор внутри вызова — только если успеет: осталось 85 с после ответа 50 с → да; 100 с/45 с → да; 60 с/50 с → нет; 47 с после тайм-аута 90 с → нет",
     partRetryFits(85_000, 50_000) && partRetryFits(100_000, 45_000) && !partRetryFits(60_000, 50_000) && !partRetryFits(47_000, 90_000));
 }
+const { planLabel } = await import("../../supabase/functions/analyze-pages/parts.ts");
 const gensOf = (id: string) => sim.gens.filter((g) => g.note_id === id);
 const inTok = (sizes: number[]) => sizes.reduce((a, n) => a + 2700 + 1930 * n, 0);
 // резерв генерации: 1–4 страницы — как раньше (600 с), по частям — 1200 с
@@ -608,49 +664,148 @@ reset();
   check("[резерв] срок резерва генерации: 4 страницы — 600 с (как v65), 8 страниц — 1200 с (до трёх частей и повтор)", la === 600 && lb === 1200, { la, lb });
 }
 
-// тайм-аут части → повтор этой части в новом вызове функции (один раз за генерацию)
-for (const [n, hang, label] of [[8, [0], "часть 1"], [8, [1], "часть 2"], [8, [2], "часть 3"], [7, [2], "часть 3 из 3+2+2"], [6, [1], "часть 2 из 3+3"], [5, [0], "часть 1 из 3+2"]] as const) {
+// ---------- v66.3: повтор части после тайм-аута — больше времени и меньше фото (3 → 2+1), не больше двух повторов ----------
+const pagesOf = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i + 1);
+const P = (...xs: number[]) => JSON.stringify(xs);
+const callPages = () => sc.calls.map((c) => JSON.stringify(c.pages));
+type Case = { n: number; label: string; hang?: number[]; eof?: number[]; hangMid?: number[]; expect: number[][]; ok: boolean; why?: RegExp };
+const cases: Case[] = [
+  { n: 8, label: "часть 1 (3 фото) не ответила → 2+1", hang: [0], expect: [[1, 2, 3], [1, 2], [3], [4, 5, 6], [7, 8]], ok: true },
+  { n: 8, label: "часть 1, затем её половина 2 фото → 1+1", hang: [0, 1], expect: [[1, 2, 3], [1, 2], [1], [2], [3], [4, 5, 6], [7, 8]], ok: true },
+  { n: 8, label: "часть 2 (3 фото) → 2+1", hang: [1], expect: [[1, 2, 3], [4, 5, 6], [4, 5], [6], [7, 8]], ok: true },
+  { n: 8, label: "часть 3 (2 фото) → 1+1", hang: [2], expect: [[1, 2, 3], [4, 5, 6], [7, 8], [7], [8]], ok: true },
+  { n: 7, label: "часть 3 из 3+2+2 → 1+1", hang: [2], expect: [[1, 2, 3], [4, 5], [6, 7], [6], [7]], ok: true },
+  { n: 6, label: "часть 2 из 3+3 → 2+1", hang: [1], expect: [[1, 2, 3], [4, 5, 6], [4, 5], [6]], ok: true },
+  { n: 5, label: "часть 1 из 3+2 → 2+1", hang: [0], expect: [[1, 2, 3], [1, 2], [3], [4, 5]], ok: true },
+  { n: 8, label: "тайм-аут на разных частях: часть 1, затем стр. 4–6 (часть 3 плана 2*+1*+3+2)", hang: [0, 3], expect: [[1, 2, 3], [1, 2], [3], [4, 5, 6], [4, 5], [6], [7, 8]], ok: true },
+  { n: 8, label: "три тайм-аута подряд: третий — без повтора (предел 2 повтора)", hang: [0, 1, 2], expect: [[1, 2, 3], [1, 2], [1]], ok: false, why: /no retry: retry limit 2/ },
+  { n: 8, label: "третий тайм-аут на части из 3 фото (её ещё можно поделить) — всё равно без повтора: предел 2", hang: [0, 1, 5], expect: [[1, 2, 3], [1, 2], [1], [2], [3], [4, 5, 6]], ok: false, why: /no retry: retry limit 2/ },
+  { n: 8, label: "одно фото не ответило и при долгом ожидании — без повтора", hang: [2, 3], expect: [[1, 2, 3], [4, 5, 6], [7, 8], [7]], ok: false, why: /no retry: one page already had the longest wait/ },
+  { n: 8, label: "поток закрылся раньше конца (сеть) → та же часть с долгим ожиданием", eof: [1], expect: [[1, 2, 3], [4, 5, 6], [4, 5, 6], [7, 8]], ok: true },
+  { n: 8, label: "частичный ответ: два фрагмента и тишина до тайм-аута → 2+1, начало ответа не используется", hangMid: [0], expect: [[1, 2, 3], [1, 2], [3], [4, 5, 6], [7, 8]], ok: true },
+];
+for (const cs of cases) {
   reset();
   timers.fast = true;
-  sc.hang = new Set(hang);
+  sc.hang = new Set(cs.hang || []);
+  sc.eof = new Set(cs.eof || []);
+  sc.hangMid = new Set(cs.hangMid || []);
   const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
-  const { id, paths } = makeNote(n);
+  const { id, paths } = makeNote(cs.n);
   await start(id, paths);
   const nn = note(id);
-  const sizes = partSizes(n);
-  const h = hang[0];
-  // вызовы chat по порядку частей; зависший вызов h — часть h+1, её повтор — сразу следом (вызов h+1)
-  const sentSizes = sc.calls.map((c) => c.pages.length);
-  const heads = nn.content?.sections.map((s: any) => s.heading) || [];
-  check(`[тайм-аут, ${n} фото, ${label}] модель не ответила → эта часть повторена в новом вызове → конспект готов, все страницы по порядку`,
-    nn.status === "ready" && sc.calls.length === sizes.length + 1 && JSON.stringify(sentSizes.filter((_, i) => i !== h)) === JSON.stringify(sizes)
-      && JSON.stringify(sc.calls[h].pages) === JSON.stringify(sc.calls[h + 1].pages)
-      && JSON.stringify(heads) === JSON.stringify(Array.from({ length: n }, (_, i) => "Пункт " + (i + 1))),
-    { st: nn.status, err: nn.error_code, calls: sc.calls.map((c) => c.pages), heads });
-  check(`[тайм-аут, ${n} фото, ${label}] одна генерация: один резерв, списана один раз, одна строка ai_generations (токены ответивших запросов)`,
-    sim.starts.length - startsBefore === 1 && sim.ledger.get(id) === "charged" && sim.gens.length - gensBefore === 1 && gensOf(id).length === 1
-      && gensOf(id)[0].status === "success" && gensOf(id)[0].input_tokens === inTok(sizes),
-    { ledger: sim.ledger.get(id), gens: gensOf(id) });
-  check(`[тайм-аут, ${n} фото, ${label}] ожидание ответа на часть ограничено 90 с; в лог — этап и время (вход, загрузка, ожидание), повтор части отмечен`,
-    timers.asked.includes(90_000) && logs.some((l) => /stage=chat timeout/.test(l) && /upload_ms=\d+/.test(l) && /chat_ms=\d+/.test(l))
-      && logs.some((l) => l.includes("metrics") && l.includes('"fail_stage":"chat"') && l.includes('"part_retry":true'))
-      && logs.some((l) => l.includes("retrying the part in a new call")) && !logs.some((l) => l.includes("data:image") || l.includes("PAGE:")),
-    logs.filter((l) => /timeout|metrics/.test(l)).slice(0, 4));
+  const t = `[повтор, ${cs.n} фото, ${cs.label}]`;
+  check(`${t} запросы к модели: ${cs.expect.map((x) => x.length).join(", ")} фото — ровно такие страницы и в таком порядке`,
+    JSON.stringify(callPages()) === JSON.stringify(cs.expect.map((x) => JSON.stringify(x))), sc.calls.map((c) => c.pages));
+  const g = gensOf(id);
+  if (cs.ok) {
+    const heads = nn.content?.sections.map((s: any) => s.heading) || [];
+    const c = nn.content;
+    check(`${t} готово: каждая страница ровно один раз — разделы «Пункт 1…${cs.n}», meta.pages 0…${cs.n - 1}, термины без дублей`,
+      nn.status === "ready" && JSON.stringify(heads) === JSON.stringify(pagesOf(0, cs.n).map((p) => "Пункт " + p))
+        && c.meta.pages.length === cs.n && c.meta.pages.every((p: any, i: number) => p.index === i)
+        && pagesOf(0, cs.n).every((p) => c.glossary.terms.filter((x: any) => x.term === "Термин " + p).length === 1 && (plainText(c).match(new RegExp("Страница " + p + "\\*", "g")) || []).length === 1)
+        && c.conclusion === "Итог всей темы.",
+      { st: nn.status, err: nn.error_code, heads });
+    const answered = sc.calls.filter((_, i) => !(cs.hang || []).includes(i) && !(cs.eof || []).includes(i) && !(cs.hangMid || []).includes(i));
+    check(`${t} одна генерация: один резерв, списана один раз, одна строка ai_generations; токены — только ответивших запросов`,
+      sim.starts.length - startsBefore === 1 && sim.ledger.get(id) === "charged" && sim.gens.length - gensBefore === 1 && g.length === 1
+        && g[0].status === "success" && g[0].input_tokens === inTok(answered.map((c) => c.pages.length)),
+      { l: sim.ledger.get(id), g });
+  } else {
+    check(`${t} failed AI_TIMEOUT, причина в логе; резерв возвращён, фото сохранены, одна строка ai_generations, конспект не записан`,
+      nn.status === "failed" && nn.error_code === "AI_TIMEOUT" && sim.ledger.get(id) === "refunded" && paths.every((p) => sim.files.has(p))
+        && g.length === 1 && g[0].status === "failed" && !nn.content && logs.some((l) => cs.why!.test(l)),
+      { st: nn.status, err: nn.error_code, l: sim.ledger.get(id), g: g.length, logs: logs.filter((l) => /no retry|retrying/.test(l)) });
+  }
+  if (cs.hang?.[0] === 0 && cs.ok) {
+    check(`${t} первая попытка ждёт 90 с, повтор — 120 с; в лог — план до и после, этап и время ожидания`,
+      timers.asked.includes(90_000) && timers.asked.includes(120_000)
+        && logs.some((l) => l.includes("retrying in a new call, plan " + (cs.n === 5 ? "3+2 → 2*+1*+2" : "3+3+2 → 2*+1*+3+2")))
+        && logs.some((l) => /stage=chat timeout/.test(l) && /chat_ms=\d+/.test(l) && /ttft_ms=-1/.test(l) && /end=timeout/.test(l))
+        && logs.some((l) => l.includes("metrics") && l.includes('"part_retry":true') && l.includes('"stream_end":"timeout"') && l.includes('"ttft_ms":-1')),
+      { asked: [...new Set(timers.asked)], logs: logs.filter((l) => /timeout|retrying/.test(l)).slice(0, 4) });
+  }
+  if (cs.hangMid) {
+    check(`${t} метрики обрыва: первый токен пришёл (ttft_ms ≥ 0), 2 фрагмента, причина timeout; текст ответа в лог не попал`,
+      logs.some((l) => /stage=chat timeout/.test(l) && /ttft_ms=\d+/.test(l) && /chunks=2 /.test(l) && /tokens=-1/.test(l) && /end=timeout/.test(l))
+        && logs.some((l) => l.includes("metrics") && l.includes('"stream_chunks":2') && l.includes('"stream_end":"timeout"'))
+        && !logs.some((l) => l.includes("Ученики разбирают") || l.includes("Страница 1") || l.includes("PAGE:")),
+      logs.filter((l) => /timeout|metrics/.test(l)).slice(0, 3));
+  }
+  if (cs.eof) {
+    check(`${t} поток без конца ответа → AI_NETWORK (end=eof), повтор той же части с долгим ожиданием`,
+      logs.some((l) => /AI_NETWORK/.test(l) && /stream ended/.test(l)) && logs.some((l) => l.includes("plan 3+3+2 → 3+3*+2")), logs.filter((l) => /AI_NETWORK|plan/.test(l)).slice(0, 3));
+  }
 }
 
-// второй тайм-аут в той же генерации — без повтора: ошибка, резерв возвращён
-for (const [n, hang, label] of [[8, [0, 1], "часть 1 дважды"], [8, [1, 3], "часть 2, затем часть 3"], [5, [1, 2], "часть 2 дважды"]] as const) {
+// поток: успешный ответ — метрики в лог и в metrics, только числа; 1–4 фото поток не запрашивают
+reset();
+{
+  sc.firstTokenMs = 7_000;
+  const { id, paths } = makeNote(8);
+  await start(id, paths);
+  const ok = logs.filter((l) => /ai provider=gigachat .* status=200 /.test(l));
+  check("[поток] 8 фото: все запросы частей — stream: true; в лог — время до первого токена, генерация, фрагменты, токены, причина окончания",
+    note(id).status === "ready" && sc.streamReq.length === 3 && sc.streamReq.every(Boolean) && ok.length === 3
+      && ok.every((l) => /ttft_ms=7\d{3} /.test(l) && /gen_ms=\d+/.test(l) && /chunks=\d+ /.test(l) && /tokens=(900|600) /.test(l) && /end=stop/.test(l))
+      && logs.some((l) => l.includes("metrics") && /"ttft_ms":7\d{3}/.test(l) && l.includes('"stream_end":"stop"') && /"stream_tokens":(900|600)/.test(l)),
+    ok.slice(0, 2));
+  check("[поток] в логах нет текста конспекта, учебника и фото", !logs.some((l) => l.includes("Ученики разбирают") || l.includes("Страница 1") || l.includes("Термин 1") || l.includes("PAGE:")));
+}
+reset();
+{
+  const { id, paths } = makeNote(4);
+  await start(id, paths);
+  check("[поток] 1–4 фото — как раньше: поток не запрашивается (stream: false), ответ одним JSON, готово",
+    note(id).status === "ready" && sc.streamReq.length === 1 && sc.streamReq[0] === false && !logs.some((l) => /ttft_ms=/.test(l)), sc.streamReq);
+}
+reset();
+{
+  sc.noStream = true;
+  const { id, paths } = makeNote(8);
+  await start(id, paths);
+  check("[поток] сервер ответил обычным JSON на stream: true — разбирается как раньше (end=not_streamed), готово",
+    note(id).status === "ready" && sc.calls.length === 3 && logs.some((l) => /end=not_streamed/.test(l)), { st: note(id).status, err: note(id).error_code });
+}
+for (const [mode, label] of [["badChunk", "неразборчивый фрагмент"], ["errorEvent", "событие ошибки в потоке"]] as const) {
   reset();
-  timers.fast = true;
-  sc.hang = new Set(hang);
-  const { id, paths } = makeNote(n);
+  (sc as any)[mode] = new Set([1]);
+  const { id, paths } = makeNote(8);
   await start(id, paths);
   const nn = note(id);
-  const g = gensOf(id);
-  check(`[тайм-аут дважды, ${n} фото, ${label}] не больше одного повтора за генерацию: failed AI_TIMEOUT, резерв возвращён, фото сохранены, одна строка ai_generations`,
-    nn.status === "failed" && nn.error_code === "AI_TIMEOUT" && sim.ledger.get(id) === "refunded" && paths.every((p) => sim.files.has(p))
-      && g.length === 1 && g[0].status === "failed" && sc.calls.length === hang[1] + 1,
-    { st: nn.status, err: nn.error_code, l: sim.ledger.get(id), g, calls: sc.calls.map((c) => c.pages) });
+  check(`[поток] ${label} во второй части → AI_ERROR без повтора части: failed, резерв возвращён, одна строка ai_generations`,
+    nn.status === "failed" && nn.error_code === "AI_ERROR" && sc.calls.length === 2 && sim.ledger.get(id) === "refunded" && gensOf(id).length === 1
+      && logs.some((l) => l.includes("metrics") && l.includes(mode === "badChunk" ? '"stream_end":"bad_chunk"' : '"stream_end":"error"'))
+      && logs.some((l) => /stream failed: AI_ERROR/.test(l) && /chunks=2 /.test(l)) && !logs.some((l) => l.includes("internal error") || l.includes("Ученики разбирают")),
+    { st: nn.status, err: nn.error_code, calls: sc.calls.length });
+}
+
+// общий бюджет генерации: часть, которая не уложится в 10 мин от запуска, не начинается
+reset();
+{
+  timers.fast = true;
+  sc.hang = new Set([0]);
+  sc.chatMs = 140_000; // каждый запрос к модели «длится» 140 с
+  const { id, paths } = makeNote(8);
+  await start(id, paths);
+  const nn = note(id);
+  check("[бюджет] запросы по 140 с: после 4 запросов (560 с) последняя часть плана 2*+1*+3+2 не начинается и не передаётся (3 передачи, не 4) — failed AI_TIMEOUT, резерв возвращён, одна строка ai_generations",
+    nn.status === "failed" && nn.error_code === "AI_TIMEOUT" && sc.calls.length === 4 && sc.continuationHits === 3 && sim.ledger.get(id) === "refunded" && gensOf(id).length === 1
+      && logs.some((l) => /generation budget exhausted before part 4/.test(l)),
+    { st: nn.status, err: nn.error_code, calls: sc.calls.map((c) => c.pages), l: logs.filter((l) => /budget|failed/.test(l)) });
+}
+{
+  const { fitsGeneration, retryPlan, planFor, GEN_BUDGET_MS, PART_RETRY_CALL_MS, MAX_PART_RETRIES } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const plan = planFor(8);
+  check("[бюджет] оценка: в начале 8 фото помещаются; через 520 с часть с повтором (120 с) не начинается; повтор после 400 с из 2+1+3+2 — тоже нет",
+    GEN_BUDGET_MS === 600_000 && PART_RETRY_CALL_MS === 120_000 && MAX_PART_RETRIES === 2 && fitsGeneration(0, plan, 0)
+      && !fitsGeneration(520_000, retryPlan(plan, 2, "AI_TIMEOUT")!, 2) && !fitsGeneration(400_000, retryPlan(plan, 0, "AI_TIMEOUT")!, 0));
+  const r1 = retryPlan(plan, 0, "AI_TIMEOUT")!, r2 = retryPlan(r1, 0, "AI_TIMEOUT")!;
+  check("[план] 3 → 2+1, 2 → 1+1, одно фото после долгого ожидания → без повтора, сеть → та же часть; страницы подряд без пропусков",
+    planLabel(r1) === "2*+1*+3+2" && planLabel(r2) === "1*+1*+1*+3+2" && retryPlan(r2, 0, "AI_TIMEOUT") === null
+      && planLabel(retryPlan(plan, 1, "AI_NETWORK")!) === "3+3*+2"
+      && [r1, r2].every((pl) => pl[0].from === 0 && pl[pl.length - 1].to === 8 && pl.every((x, i) => i === 0 || x.from === pl[i - 1].to)));
 }
 
 // 1–4 фото — тайм-ауты как раньше: без предела 90 с и без повтора части
@@ -704,19 +859,27 @@ reset();
     nn.status === "failed" && sim.ledger.get(id) === "refunded" && !nn.content && gensOf(id).length === 1, { st: nn.status, g: gensOf(id).length });
 }
 
-// подделанное продолжение: часть 1 без пометки «повтор», часть за пределами, нет готовых частей
+// подделанное продолжение с верной подписью: неверная форма → 400; неверные готовые части или исчерпанный бюджет → failed без ИИ
 reset();
 {
-  const { signContinuation } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const { signContinuation, planFor } = await import("../../supabase/functions/analyze-pages/parts.ts");
   const { id, paths } = makeNote(8);
   sim.notes.get(id)!.stage = "analyzing";
-  const base = { note_id: id, user_id: "u1", paths, handoff_at: String(sim.notes.get(id)!.updated_at), exp: Date.now() + 60_000,
-    acc: { input: 0, output: 0, ms: 0, attempts: 0, model: "", provider: "" } };
+  const plan = planFor(8);
+  const base = { note_id: id, user_id: "u1", paths, handoff_at: String(sim.notes.get(id)!.updated_at), exp: Date.now() + 60_000, t0: Date.now(),
+    acc: { input: 0, output: 0, ms: 0, attempts: 0, model: "", provider: "" }, plan, retries: 0 };
+  const prev2 = { sections: [], meta: { pages: [{}, {}, {}] } };
   const bad = [
-    { ...base, part: 0, retried: false, prev: null },
-    { ...base, part: 3, retried: false, prev: { sections: [] } },
-    { ...base, part: 1, retried: false, prev: null },
-    { ...base, paths: paths.slice(0, 4), part: 1, retried: false, prev: { sections: [] } },
+    { ...base, part: 0, prev: null },
+    { ...base, part: 3, prev: prev2 },
+    { ...base, part: 1, prev: null },
+    { ...base, paths: paths.slice(0, 4), plan: [{ from: 0, to: 2 }, { from: 2, to: 4 }], part: 1, prev: prev2 },
+    { ...base, part: 1, prev: prev2, plan: [{ from: 0, to: 4 }, { from: 4, to: 8 }] },
+    { ...base, part: 1, prev: prev2, plan: [{ from: 0, to: 3 }, { from: 4, to: 8 }] },
+    { ...base, part: 1, prev: prev2, plan: [{ from: 0, to: 3 }, { from: 3, to: 6 }] },
+    { ...base, part: 1, prev: prev2, retries: 3 },
+    { ...base, part: 1, prev: prev2, t0: undefined },
+    { ...base, part: 1, prev: prev2, plan: undefined },
   ];
   const st: number[] = [];
   for (const c of bad) {
@@ -724,8 +887,31 @@ reset();
     st.push((await post(JSON.stringify({ continuation: s2.payload, sig: s2.sig }))).status);
   }
   await settle();
-  check("[продолжение] даже с верной подписью неверная форма → 400: часть 1 без пометки «повтор», часть за пределами, без готовых частей, 1–4 страницы",
-    st.every((x) => x === 400) && sc.calls.length === 0, st);
+  check("[продолжение] с верной подписью неверная форма → 400: первая часть не как повтор, часть вне плана, без готовых частей, 1–4 страницы, " +
+    "часть больше 3 фото, пропуск или нехватка страниц в плане, больше 2 повторов, без времени запуска, без плана",
+    st.length === 10 && st.every((x) => x === 400) && sc.calls.length === 0, st);
+}
+for (const [label, patch, code, re] of [
+  ["готовые части не совпадают с началом части (2 страницы вместо 3)", { prev: { sections: [], meta: { pages: [{}, {}] } } }, "CONTINUATION_FAILED", /do not match/],
+  ["генерация идёт уже 590 с — часть не уложится в 10 мин", { t0: -590_000 }, "AI_TIMEOUT", /generation budget exhausted before part 2/],
+] as const) {
+  reset();
+  const { signContinuation, planFor } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const { id, paths } = makeNote(8);
+  sim.ledger.set(id, "reserved");
+  sim.notes.get(id)!.stage = "analyzing";
+  const c: any = { note_id: id, user_id: "u1", paths, handoff_at: String(sim.notes.get(id)!.updated_at), exp: Date.now() + 60_000, t0: Date.now(),
+    acc: { input: 0, output: 0, ms: 0, attempts: 0, model: "", provider: "" }, plan: planFor(8), retries: 0, part: 1,
+    prev: { sections: [], meta: { pages: [{}, {}, {}] } }, ...patch };
+  if (c.t0 < 0) c.t0 = Date.now() + c.t0;
+  const s2 = await signContinuation("svc-secret-test", c);
+  const r = await post(JSON.stringify({ continuation: s2.payload, sig: s2.sig }));
+  await settle();
+  const nn = note(id);
+  check(`[продолжение] ${label}: ИИ не вызывается, failed ${code}, резерв возвращён, фото сохранены`,
+    r.status === 202 && sc.calls.length === 0 && nn.status === "failed" && nn.error_code === code && sim.ledger.get(id) === "refunded"
+      && paths.every((p) => sim.files.has(p)) && logs.some((l) => re.test(l)),
+    { r: r.status, st: nn.status, err: nn.error_code, l: sim.ledger.get(id) });
 }
 
 console.log(`ИТОГО: ${pass} PASS, ${fail} FAIL (имитация Supabase и GigaChat; настоящий ИИ не вызывался)`);

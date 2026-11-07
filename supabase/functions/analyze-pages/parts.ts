@@ -31,6 +31,81 @@ export const PART_CALL_MS = 90_000;
 /** подпись продолжения действует столько (вторая часть стартует сразу после первой) */
 export const CONTINUATION_TTL_MS = 10 * 60_000;
 
+// ---------- повтор части после тайм-аута и общий бюджет генерации (v66.3) ----------
+//
+// 07.11.2026 (v29): часть из 3 фото дважды не дождалась ответа GigaChat за 90 с (chat 87 с), повтор получил те же 90 с.
+// Теперь повтор получает больше времени (PART_RETRY_CALL_MS) и меньше фото: часть из 2–3 фото делится пополам
+// (3 → 2+1, 2 → 1+1). Повторов не больше MAX_PART_RETRIES за генерацию; новый вызов не начинается, если вместе с
+// оставшимися частями он заведомо не уложится в GEN_BUDGET_MS (клиент ждёт дольше — см. WAIT_LONG_MS в js/cloud.js).
+
+/** ожидание ответа модели при повторе части (новый вызов функции: бюджет 140 с минус чтение фото и передача) */
+export const PART_RETRY_CALL_MS = 120_000;
+/** повторов частей за одну генерацию не больше этого (бесконечных повторов нет) */
+export const MAX_PART_RETRIES = 2;
+/**
+ * вся генерация по частям: новый вызов начинается, только если по оценке закончится до этого срока. Оценка вызова —
+ * partCapMs + CALL_OVERHEAD_MS; если вызов затянется (повтор по качеству внутри вызова), его всё равно оборвёт лимит
+ * Supabase 150 с, поэтому итог записан не позже ~GEN_BUDGET_MS − PART_CALL_MS − CALL_OVERHEAD_MS + 150 с ≈ 10 мин 45 с
+ * от запуска. Клиент ждёт 12 мин (WAIT_LONG_MS в js/cloud.js) — дольше сервера.
+ */
+export const GEN_BUDGET_MS = 10 * 60_000;
+/** сверх ожидания модели на вызов функции: запуск, чтение фото, вход, загрузка в GigaChat, передача следующей части */
+export const CALL_OVERHEAD_MS = 15_000;
+/** самая быстрая часть, которую видели (3 фото: 45–49 с с загрузкой) — меньше на часть не закладываем */
+export const MIN_PART_MS = 45_000;
+
+/** Часть плана: страницы [from, to); long — повтор после тайм-аута, ожидание модели PART_RETRY_CALL_MS. */
+export type Part = { from: number; to: number; long?: boolean };
+
+/** План частей для n страниц (как splitPages). */
+export const planFor = (n: number): Part[] => splitPages(n).map(([from, to]) => ({ from, to }));
+
+/** Сколько ждать ответа модели на эту часть. */
+export const partCapMs = (p: Part) => (p.long ? PART_RETRY_CALL_MS : PART_CALL_MS);
+
+/** Описание плана для лога: «3+3+2», повторные части — со звёздочкой: «2*+1*+3+2». */
+export const planLabel = (plan: Part[]) => plan.map((p) => p.to - p.from + (p.long ? "*" : "")).join("+");
+
+/**
+ * Уложится ли генерация, если сейчас начать часть i: её вызов в худшем случае + самые быстрые оставшиеся части.
+ * elapsedMs — сколько уже идёт генерация (с запуска пользователем).
+ */
+export function fitsGeneration(elapsedMs: number, plan: Part[], i: number): boolean {
+  if (!plan[i]) return false;
+  return elapsedMs + partCapMs(plan[i]) + CALL_OVERHEAD_MS + MIN_PART_MS * (plan.length - i - 1) <= GEN_BUDGET_MS;
+}
+
+/**
+ * Новый план после того, как модель не ответила на часть i (code — AI_TIMEOUT или AI_NETWORK), или null — повторять
+ * бессмысленно. Тайм-аут части из 2–3 фото → она делится пополам (3 → 2+1, 2 → 1+1): страницы те же, по порядку, каждая
+ * ровно в одной части. Тайм-аут одного фото → тот же запрос с долгим ожиданием, но только если его ещё не было.
+ * Сетевая ошибка → та же часть с долгим ожиданием. Готовые части (до i) не меняются.
+ */
+export function retryPlan(plan: Part[], i: number, code: string): Part[] | null {
+  const p = plan[i];
+  if (!p) return null;
+  const size = p.to - p.from;
+  let repl: Part[];
+  if (code === "AI_TIMEOUT" && size >= 2) {
+    const mid = p.from + Math.ceil(size / 2);
+    repl = [{ from: p.from, to: mid, long: true }, { from: mid, to: p.to, long: true }];
+  } else if (code === "AI_TIMEOUT" && p.long) return null; // одно фото уже ждали дольше всего
+  else repl = [{ from: p.from, to: p.to, long: true }];
+  return [...plan.slice(0, i), ...repl, ...plan.slice(i + 1)];
+}
+
+/** План из подписанного продолжения: части подряд от 0 до n, в каждой 1…PART_MAX страниц, частей 2…n. */
+export function validPlan(plan: unknown, n: number): plan is Part[] {
+  if (!Array.isArray(plan) || plan.length < 2 || plan.length > n) return false;
+  let at = 0;
+  for (const p of plan) {
+    if (!p || typeof p !== "object" || !Number.isInteger(p.from) || !Number.isInteger(p.to)) return false;
+    if (p.from !== at || p.to - p.from < 1 || p.to - p.from > PART_MAX || (p.long !== undefined && typeof p.long !== "boolean")) return false;
+    at = p.to;
+  }
+  return at === n;
+}
+
 /** Границы частей: [начало, конец) по индексам страниц. Части почти равные, большие — первыми. */
 export function splitPages(n: number): [number, number][] {
   if (n <= SINGLE_MAX) return [[0, n]];
@@ -151,10 +226,14 @@ export type Continuation = {
   /** notes.updated_at, записанный при передаче: продолжение действует только для этого состояния note */
   handoff_at: string;
   exp: number;
-  /** какую часть (с 0) обрабатывать */
+  /** план частей (после повтора с делением — изменённый); part — индекс в нём */
+  plan: Part[];
+  /** какую часть плана (с 0) обрабатывать */
   part: number;
-  /** часть уже повторялась в этой генерации (повтор — не больше одного раза за генерацию) */
-  retried: boolean;
+  /** сколько повторов частей уже было в этой генерации (не больше MAX_PART_RETRIES) */
+  retries: number;
+  /** когда генерацию запустил пользователь (мс, часы сервера) — для общего бюджета GEN_BUDGET_MS */
+  t0: number;
   /** объединённый конспект готовых частей (null — готовых частей нет: повтор первой) */
   prev: StudyContent | null;
   /** расход всех предыдущих вызовов */

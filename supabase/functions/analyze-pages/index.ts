@@ -17,7 +17,8 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, UNREADABLE_RETRY_PROBLEM, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
 import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, unreadableDiag, validateStudyContent } from "./study-content.ts";
-import { type Continuation, CONTINUATION_TTL_MS, contextOf, mergeParts, PART_CALL_MS, partPrompt, signContinuation, SINGLE_MAX, splitPages, type Usage, verifyContinuation } from "./parts.ts";
+import { type Continuation, CONTINUATION_TTL_MS, contextOf, fitsGeneration, MAX_PART_RETRIES, mergeParts, PART_CALL_MS, partCapMs, partPrompt, planFor, planLabel, retryPlan, signContinuation, SINGLE_MAX, type Usage, validPlan, verifyContinuation } from "./parts.ts";
+import type { StreamStats } from "./providers.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -287,10 +288,13 @@ type Job = {
   noteId: string;
   paths: string[];
   /** продолжение генерации по частям (из подписанного продолжения): часть, готовые части, расход, был ли повтор */
-  cont?: Pick<Continuation, "part" | "retried" | "prev" | "acc">;
+  cont?: Next;
   /** для передачи следующей части: адрес функции и ключи */
   self?: { url: string; adminKey: string; publicKey: string };
 };
+
+/** Что передаётся следующему вызову функции: план частей, номер части, готовое, расход, повторы, начало генерации. */
+type Next = Pick<Continuation, "plan" | "part" | "retries" | "prev" | "acc" | "t0">;
 
 /** Как Promise.all(items.map(fn)), но не больше limit одновременно; порядок результатов сохраняется. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -351,7 +355,8 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
     let reply;
     const attemptStarted = Date.now();
     try {
-      reply = await generate(messages, deadline, used, giga, capMs);
+      // по частям GigaChat отвечает потоком — ради метрик (время до первого токена и т. д.); 1–4 страницы — как раньше
+      reply = await generate(messages, deadline, used, giga, capMs, !!capMs);
     } catch (e) {
       if (attempt > 0) m.retry_ms = Date.now() - attemptStarted;
       // время этапов неудачного вызова — в метрики (вход, загрузка фото, ожидание ответа)
@@ -360,6 +365,7 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
         m.upload_ms += e.timings.uploadMs;
         m.chat_ms += e.timings.chatMs;
         m.fail_stage = e.timings.stage;
+        if (e.timings.stream) streamMetrics(m, e.timings.stream);
       }
       // повтор не удался из-за провайдеров — остаётся уже полученный вариант
       if (best && e instanceof ProviderError) {
@@ -379,6 +385,7 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
     m.upload_ms += reply.timings.uploadMs;
     m.chat_ms += reply.timings.chatMs;
     if (reply.fallbacks.length) m.fallback_used = true;
+    if (reply.stream) streamMetrics(m, reply.stream);
 
     t = Date.now();
     const parsed = parseModelJson(reply.text);
@@ -447,6 +454,17 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
   return best;
 }
 
+/** Метрики потока последнего ответа модели в метрики вызова (только числа и код причины). */
+// deno-lint-ignore no-explicit-any
+function streamMetrics(m: any, s: StreamStats) {
+  m.ttft_ms = s.ttftMs;
+  m.gen_ms = s.genMs;
+  m.stream_chunks = s.chunks;
+  m.stream_chars = s.chars;
+  m.stream_tokens = s.tokens;
+  m.stream_end = s.end;
+}
+
 async function processNote(job: Job) {
   const { admin, storage, noteId, userId, paths, cont } = job;
   const started = Date.now();
@@ -458,14 +476,19 @@ async function processNote(job: Job) {
     page_count: paths.length, part: 0, parts: 0, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
     sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
     retry_used: false, unreadable_retry: false, part_retry: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0,
-    input_tokens: 0, output_tokens: 0, status: "", error_code: "", fail_stage: "",
+    input_tokens: 0, output_tokens: 0, status: "", error_code: "", fail_stage: "", plan: "", retries: 0, gen_elapsed_ms: 0,
+    ttft_ms: -1, gen_ms: 0, stream_chunks: 0, stream_chars: 0, stream_tokens: -1, stream_end: "",
   };
   let aiCalled = false;
   let t = Date.now();
-  // по частям (больше SINGLE_MAX страниц): этот вызов делает одну часть и передаёт готовое следующему
-  const ranges = splitPages(paths.length);
-  const split = ranges.length > 1;
+  // по частям (больше SINGLE_MAX страниц): этот вызов делает одну часть плана и передаёт готовое следующему.
+  // План — из продолжения (после повтора с делением он отличается от исходного) или исходный: splitPages.
+  const plan = cont?.plan ?? planFor(paths.length);
+  const split = plan.length > 1;
   const partIndex = cont?.part ?? 0;
+  const retries = cont?.retries ?? 0;
+  // начало всей генерации (запуск пользователем) — для общего бюджета GEN_BUDGET_MS
+  const t0 = cont?.t0 ?? started;
   // расход всей генерации: предыдущие вызовы + этот
   const total = (): Usage => ({
     input: (cont?.acc.input || 0) + usage.input,
@@ -477,10 +500,17 @@ async function processNote(job: Job) {
   });
 
   try {
-    if (!ranges[partIndex]) throw new StepError("CONTINUATION_FAILED", "bad part " + partIndex);
-    const [from, to] = ranges[partIndex];
+    if (!plan[partIndex]) throw new StepError("CONTINUATION_FAILED", "bad part " + partIndex);
+    const { from, to } = plan[partIndex];
     m.part = split ? partIndex + 1 : 0;
-    m.parts = split ? ranges.length : 0;
+    m.parts = split ? plan.length : 0;
+    m.plan = split ? planLabel(plan) : "";
+    m.retries = retries;
+    m.gen_elapsed_ms = Date.now() - t0;
+    // каждая страница — ровно в одной части: готовые части покрывают страницы до from, не больше и не меньше
+    if ((cont?.prev?.meta.pages.length ?? 0) !== from) throw new StepError("CONTINUATION_FAILED", "pages before part " + (partIndex + 1) + " do not match");
+    // продолжение, которое уже не уложится в общий бюджет генерации, модель не вызывает
+    if (cont && !fitsGeneration(Date.now() - t0, plan, partIndex)) throw new StepError("AI_TIMEOUT", "generation budget exhausted before part " + (partIndex + 1));
     // 6. фотографии этой части из private bucket, в порядке страниц
     const images = await mapLimit(paths.slice(from, to), 4, async (path) => {
       const { data, error } = await storage.storage.from(BUCKET).download(path);
@@ -492,19 +522,20 @@ async function processNote(job: Job) {
     m.storage_ms = Date.now() - t;
 
     const prompt = split
-      ? partPrompt(userPrompt(images.length), partIndex, ranges.length, from, to, paths.length, cont?.prev ? contextOf(cont.prev) : undefined)
+      ? partPrompt(userPrompt(images.length), partIndex, plan.length, from, to, paths.length, cont?.prev ? contextOf(cont.prev) : undefined)
       : userPrompt(images.length);
     aiCalled = true;
-    // 1–4 страницы — как раньше; по частям — ожидание ответа на часть не дольше PART_CALL_MS
-    const best = await runModel(images, prompt, deadline, giga, usage, m, split ? PART_CALL_MS : undefined);
+    // 1–4 страницы — как раньше; по частям — ожидание ответа на часть не дольше PART_CALL_MS (повтор — PART_RETRY_CALL_MS)
+    const best = await runModel(images, prompt, deadline, giga, usage, m, split ? partCapMs(plan[partIndex]) : undefined);
     usage.model = best.model;
     m.provider = best.provider;
     const merged = cont?.prev ? mergeParts(cont.prev, best.content) : best.content;
 
-    if (partIndex < ranges.length - 1) {
-      // часть готова: файлы GigaChat больше не нужны, следующая часть — в новом вызове функции
+    if (partIndex < plan.length - 1) {
+      // часть готова: файлы GigaChat больше не нужны, следующая часть — в новом вызове функции, если она уложится
+      if (!fitsGeneration(Date.now() - t0, plan, partIndex + 1)) throw new StepError("AI_TIMEOUT", "generation budget exhausted before part " + (partIndex + 2));
       await closeGigaSession(giga);
-      await handOff(job, { part: partIndex + 1, retried: cont?.retried ?? false, prev: merged, acc: total() });
+      await handOff(job, { plan, part: partIndex + 1, retries, prev: merged, acc: total(), t0 });
       m.status = "handed_off";
       return;
     }
@@ -565,18 +596,28 @@ async function processNote(job: Job) {
     const code = known ? e.code : "INTERNAL";
     m.error_code = code;
     console.error("[analyze-pages] failed:", code, known ? e.detail : String(e));
-    // по частям: модель не ответила (тайм-аут, сеть) — эта же часть повторяется в новом вызове функции со своим
-    // полным бюджетом времени; один раз за генерацию. Ошибки авторизации, лимитов и ответы с ошибкой не повторяются.
-    if (split && e instanceof ProviderError && (code === "AI_TIMEOUT" || code === "AI_NETWORK") && !cont?.retried) {
-      try {
-        await closeGigaSession(giga);
-        await handOff(job, { part: partIndex, retried: true, prev: cont?.prev ?? null, acc: total() });
-        m.status = "handed_off";
-        m.part_retry = true;
-        console.warn("[analyze-pages] part " + (partIndex + 1) + " of " + ranges.length + ": " + code + " — retrying the part in a new call");
-        return;
-      } catch (h) {
-        console.error("[analyze-pages] part retry not handed off:", h instanceof StepError ? h.detail : String(h));
+    // по частям: модель не ответила (тайм-аут, сеть) — часть повторяется в новом вызове функции с долгим ожиданием
+    // (PART_RETRY_CALL_MS), часть из 2–3 фото при тайм-ауте — поделённой пополам (retryPlan). Не больше
+    // MAX_PART_RETRIES повторов за генерацию и только если повтор уложится в общий бюджет. Готовые части передаются
+    // как есть. Ошибки авторизации, лимитов и ответы с ошибкой не повторяются.
+    if (split && e instanceof ProviderError && (code === "AI_TIMEOUT" || code === "AI_NETWORK")) {
+      const next = retries < MAX_PART_RETRIES ? retryPlan(plan, partIndex, code) : null;
+      const why = retries >= MAX_PART_RETRIES ? "retry limit " + MAX_PART_RETRIES : !next ? "one page already had the longest wait"
+        : !fitsGeneration(Date.now() - t0, next, partIndex) ? "generation budget" : "";
+      if (next && !why) {
+        try {
+          await closeGigaSession(giga);
+          await handOff(job, { plan: next, part: partIndex, retries: retries + 1, prev: cont?.prev ?? null, acc: total(), t0 });
+          m.status = "handed_off";
+          m.part_retry = true;
+          console.warn("[analyze-pages] part " + (partIndex + 1) + " of " + plan.length + " (pages " + (plan[partIndex].from + 1) + "–" + plan[partIndex].to + "): " + code +
+            " — retrying in a new call, plan " + planLabel(plan) + " → " + planLabel(next));
+          return;
+        } catch (h) {
+          console.error("[analyze-pages] part retry not handed off:", h instanceof StepError ? h.detail : String(h));
+        }
+      } else {
+        console.warn("[analyze-pages] part " + (partIndex + 1) + " of " + plan.length + ": " + code + " — no retry: " + why);
       }
     }
     // 16. ошибка: записываем failed, фотографии остаются для повтора
@@ -615,7 +656,7 @@ const HANDOFF_MS = 15_000;
  * продолжение действует только для этого состояния) и запускаем новый вызов функции с подписанным продолжением.
  * Если он не принят — StepError: note станет failed, резерв генерации вернётся (как при любой ошибке).
  */
-async function handOff(job: Job, next: Pick<Continuation, "part" | "retried" | "prev" | "acc">) {
+async function handOff(job: Job, next: Next) {
   const self = job.self;
   if (!self?.url || !self.adminKey) throw new StepError("CONTINUATION_FAILED", "no self config");
   const { data: marked, error: markError } = await job.admin
@@ -670,11 +711,13 @@ async function continueNote(req: Request, url: string, adminKey: string, cors: R
   }
   const c = await verifyContinuation(adminKey, body.continuation, body.sig);
   if (!c) return json(403, { error: "FORBIDDEN" }, cors);
-  // форма продолжения: только генерация по частям, часть в пределах, повтор первой части — только как повтор
-  const parts = Array.isArray(c.paths) ? splitPages(c.paths.length).length : 0;
+  // форма продолжения: только генерация по частям (больше SINGLE_MAX страниц), план покрывает все страницы подряд,
+  // часть в пределах плана, первая часть — только как повтор, повторов не больше MAX_PART_RETRIES, после первой — готовые части
+  const n = Array.isArray(c.paths) ? c.paths.length : 0;
   if (
-    parts < 2 || c.paths.length > MAX_PAGES || !Number.isInteger(c.part) || c.part < 0 || c.part >= parts || (c.part === 0 && !c.retried) ||
-    !c.acc || typeof c.acc !== "object" || (c.part > 0 && !c.prev)
+    n <= SINGLE_MAX || n > MAX_PAGES || !validPlan(c.plan, n) || !Number.isInteger(c.part) || c.part < 0 || c.part >= c.plan.length ||
+    !Number.isInteger(c.retries) || c.retries < 0 || c.retries > MAX_PART_RETRIES || (c.part === 0 && !c.retries) ||
+    typeof c.t0 !== "number" || !c.acc || typeof c.acc !== "object" || (c.part > 0 && !c.prev)
   ) return json(400, { error: "BAD_REQUEST" }, cors);
   const admin = createClient(url, adminKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: claimed, error } = await admin
@@ -697,7 +740,7 @@ async function continueNote(req: Request, url: string, adminKey: string, cors: R
   if (!c.paths.every((p) => typeof p === "string" && p.startsWith(prefix) && !p.includes(".."))) return json(403, { error: "FORBIDDEN_PATH" }, cors);
   const task = processNote({
     admin, storage: admin, userId: c.user_id, noteId: c.note_id, paths: c.paths,
-    cont: { part: c.part, retried: !!c.retried, prev: c.prev ?? null, acc: c.acc },
+    cont: { plan: c.plan, part: c.part, retries: c.retries, prev: c.prev ?? null, acc: c.acc, t0: c.t0 },
     self: { url, adminKey, publicKey: publicKey() },
   });
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(task);
