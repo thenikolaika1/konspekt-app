@@ -32,6 +32,8 @@ psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261024150000_pai
 psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261026120000_owner_panel.sql"), "utf8"));
 // v62: клиент панели вызывает функции v62 (Premium по умолчанию, p_custom, бюджет)
 psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261028120000_v62_paid_library.sql"), "utf8"));
+// v65: подарок «Только ИИ-генерации»
+psql(DB, fs.readFileSync(path.join(ROOT, "supabase/migrations/20261107150000_v65_gift_ai_only.sql"), "utf8"));
 psql(DB, `
 create function public.t_reg(p_code text, p_kn text) returns uuid language plpgsql as $$
 declare r jsonb; v uuid;
@@ -478,6 +480,80 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     check("U64. история: «🎁 Подарок» с днями, генерациями и «добавлено к подарку»", t.includes("🎁 Подарок") && t.includes("добавлено к подарку"), t.slice(0, 600));
     check("U64. на телефоне без горизонтальной прокрутки", await noHScroll(page));
 
+    // v65: 🤖 подарок «Только ИИ-генерации» — к действующему подарку KN-SAAAAG (40 дней, 5 генераций)
+    const sg = () => sqlv("select max(g.ai_quota) || ':' || max(g.ends_at - g.starts_at) || ':' || to_char(max(g.ends_at), 'YYYY-MM-DD HH24:MI:SS') from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAG') and g.plan = 'gift'");
+    const sgBefore = sg();
+    await owClick(page, '[data-ow-tab="students"]', 1200);
+    await page.fill("#owner-root #owSearch", "SAAAAG");
+    await page.waitForTimeout(900);
+    await owClick(page, '[data-ow-student="KN-SAAAAG"]', 1500);
+    check("U70. карточка ученика с подарком: кнопка «🤖 Подарить генерации»", (await owText(page)).includes("🤖 Подарить генерации"));
+    await owClick(page, '[data-ow-act="gift-ai"]', 600);
+    t = await owText(page);
+    check("U70. форма: выбран тип «Только ИИ-генерации», поля дней нет, ID подставлен, пояснение про срок",
+      (await page.$eval('#owner-root [data-ow-gift-type="ai"]', (n) => n.classList.contains("active"))) && !(await page.$("#owner-root #owGiftDays"))
+      && (await page.$eval("#owner-root #owKn", (n) => n.value + "|" + n.readOnly)) === "KN-SAAAAG|true"
+      && t.includes("Срок доступа не меняется") && t.includes("Количество генераций ИИ"), t.slice(0, 400));
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-ai-form.png") });
+    // пустое, 0, отрицательное, дробное — поле не проходит проверку формы (min 1, шаг 1), как у подарка «дни + ИИ»;
+    // если проверку браузера обойти — то же отклоняет код формы; сверх 100 — текст ошибки; на сервер ничего не уходит
+    const previews = () => sqlv("select count(*) from private.owner_requests where action = 'gift_ai'");
+    const pv0 = previews();
+    for (const v of ["", "0", "-1", "1.5"]) {
+      await page.fill("#owner-root #owGiftQuota", v);
+      const valid = await page.$eval("#owner-root #owGiftQuota", (n) => n.checkValidity());
+      await owClick(page, 'button[type="submit"]', 500);
+      check("U71. «" + v + "» — форма не отправляется (проверка поля), подтверждения нет", !valid && !(await owText(page)).includes("Подтверди подарок"));
+      await page.$eval("#owner-root form[data-ow-form]", (f) => (f.noValidate = true));
+      await owClick(page, 'button[type="submit"]', 500);
+      t = await owText(page);
+      check("U71. «" + v + "» без проверки браузера — ошибка формы «целое число от 1», подтверждения нет", t.includes("целое число от 1") && !t.includes("Подтверди подарок"), t.slice(0, 300));
+      await page.$eval("#owner-root form[data-ow-form]", (f) => (f.noValidate = false));
+    }
+    await page.fill("#owner-root #owGiftQuota", "101");
+    await owClick(page, 'button[type="submit"]', 500);
+    t = await owText(page);
+    check("U71. 101 — «Не больше 100 генераций за один раз», подтверждения нет", t.includes("Не больше 100") && !t.includes("Подтверди подарок"), t.slice(0, 300));
+    check("U71. неверные значения на сервер не ушли", previews() === pv0);
+    await page.fill("#owner-root #owGiftQuota", "5");
+    await owClick(page, 'button[type="submit"]', 1800);
+    t = await owText(page);
+    check("U72. подтверждение: +5, дни не добавляются, к подарку, доступно 5 → 10, срок «не меняется»",
+      t.includes("🤖 Генерации ИИ: +5") && t.includes("Дни доступа: не добавляются") && t.includes("подарку") && t.includes("5 генераций") && t.includes("10 генераций")
+      && t.includes("(не меняется)") && t.includes("Выдать подарок"), t.slice(0, 600));
+    check("U72. до подтверждения ничего не начислено", sg() === sgBefore, sg());
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-ai-confirm.png") });
+    await page.evaluate(() => { const b = document.querySelector('#owner-root [data-ow-act="gift-ai-commit"]'); b.click(); b.click(); });
+    await until(page, async () => (await owText(page)).includes("начислено"));
+    t = await owText(page);
+    check("U73. результат: «Ученику начислено 5 ИИ-генераций», лимит 5 → 10, «Доступ до … (не изменился)»",
+      t.includes("Ученику начислено 5 ИИ-генераций") && t.includes("5 → 10") && t.includes("(не изменился)"), t.slice(0, 500));
+    const [qA, dA, eA] = sg().split(":"), [, dB, eB] = sgBefore.split(":");
+    check("U73. двойное нажатие — начислено один раз (5 → 10), срок подарка тот же", qA === "10" && dA === dB && eA === eB, [sgBefore, sg()]);
+    check("U73. в журнале одна запись gift_ai", sqlv("select count(*) from private.access_log where action = 'gift_ai'") === "1");
+    check("U73. на телефоне без горизонтальной прокрутки", await noHScroll(page));
+    await page.screenshot({ path: path.join(SHOTS, "owner-gift-ai-result.png") });
+    await owClick(page, '[data-ow-act="to-student"]', 1500);
+    t = await owText(page);
+    check("U74. карточка: генераций 10, в истории «🤖 Подарок: ИИ-генерации» +5, лимит 5 → 10",
+      t.includes("из 10") && t.includes("🤖 Подарок: ИИ-генерации") && t.includes("+5 генераций") && t.includes("лимит 5 → 10"), t.slice(0, 800));
+    // переключение типа на общей форме подарка; без действующего доступа — понятный отказ
+    sqlv("select public.t_reg('GAIUI0000001', 'KN-SAAAGX')");
+    sqlv("update private.access_grants g set starts_at = starts_at - interval '8 days', ends_at = ends_at - interval '8 days' from auth.users u where u.id = g.user_id and u.email = private.kn_email('KN-SAAAGX')");
+    await owClick(page, '[data-ow-tab="home"]', 1500);
+    await owClick(page, '[data-ow-go="gift"]', 600);
+    await owClick(page, '[data-ow-gift-type="ai"]', 400);
+    check("U75. общая форма: переключатель «Только ИИ-генерации» убирает поле дней", !(await page.$("#owner-root #owGiftDays")));
+    await page.fill("#owner-root #owKn", "KN-SAAAGX");
+    await page.fill("#owner-root #owGiftQuota", "3");
+    await owClick(page, 'button[type="submit"]', 1500);
+    t = await owText(page);
+    check("U75. ученик без действующего доступа: «нет действующего доступа», подтверждения нет", t.includes("нет действующего доступа") && !t.includes("Подтверди подарок"), t.slice(0, 400));
+    await owClick(page, '[data-ow-gift-type="days"]', 400);
+    check("U75. обратно «Дни доступа + ИИ»: поле дней вернулось, ID сохранён", !!(await page.$("#owner-root #owGiftDays"))
+      && (await page.$eval("#owner-root #owKn", (n) => n.value)) === "KN-SAAAGX");
+    await owClick(page, "[data-ow-back]", 600);
+
     // 13. история
     await owClick(page, '[data-ow-tab="history"]', 1500);
     t = await owText(page);
@@ -577,8 +653,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
         for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(k + " " + new URL(r.url).pathname);
         return out;
       });
-      check("U42. ученик: сервис-воркер работает (кэш konspekt-v64), файлов панели в кэше нет",
-        keys.some((k) => k.startsWith("konspekt-v64 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
+      check("U42. ученик: сервис-воркер работает (кэш konspekt-v65), файлов панели в кэше нет",
+        keys.some((k) => k.startsWith("konspekt-v65 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
       await s1.ctx.close();
       const s2 = await open(OWNER, undefined, { sw: true });
       await s2.page.reload();

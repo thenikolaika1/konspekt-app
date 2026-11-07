@@ -8,7 +8,7 @@
  * public.get_library_paragraph) сюда не попадают и в кэш не кладутся. Активация новой версии удаляет кэши прежних,
  * в том числе с файлом js/library-catalog.js, где до v62 лежали тексты библиотеки.
  */
-const VERSION = "konspekt-v64";
+const VERSION = "konspekt-v65";
 
 self.addEventListener("install", () => self.skipWaiting());
 

@@ -528,10 +528,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=64";
+        css.href = "./owner.css?v=65";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=64";
+        js.src = "./js/owner.js?v=65";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
