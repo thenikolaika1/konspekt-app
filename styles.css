@@ -1467,7 +1467,10 @@ button.profile-row:focus-visible{outline:2px solid var(--blue);outline-offset:-2
 .lib-book-text b{font-size:18px;line-height:23px;font-weight:850;letter-spacing:-.3px;overflow-wrap:anywhere}
 .lib-kicker{font-size:11px;line-height:14px;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:var(--sj)}
 .lib-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.lib-chips span{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;line-height:15px;font-weight:700;white-space:nowrap}
+.lib-chips span{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;background:var(--sj-soft);color:var(--sj-ink);font-size:12px;line-height:15px;font-weight:700;white-space:nowrap;max-width:100%}
+/* v64: длинная подпись (издание) на узком экране переносится, а не вылезает за карточку */
+.lib-chips span{min-width:0}
+@media (max-width:360px){.lib-chips span{white-space:normal}}
 .lib-book-authors{font-size:13px;line-height:17px;color:var(--muted)}
 .lib-book .chev,.lib-par .chev{color:#a3aec0;display:grid;place-items:center}
 .lib-book .chev .ui-icon,.lib-par .chev .ui-icon{width:18px;height:18px}
