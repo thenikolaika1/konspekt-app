@@ -6,11 +6,14 @@
  * больше лимита вызова GigaChat (100 с) и бюджета функции (140 с при лимите Supabase 150 с). Так и падали прошлые
  * попытки на 7–8 страниц.
  *
- * Как: до SINGLE_MAX страниц — как раньше, одним запросом. Больше — две части (5 → 3+2, 6 → 3+3, 7 → 4+3, 8 → 4+4),
- * каждая в своём вызове функции со своим бюджетом времени. Первая часть идёт в вызове пользователя; её результат
- * передаётся во второй вызов в теле запроса, подписанного ключом сервера (HMAC-SHA256): подделать продолжение или
- * пропустить проверку доступа снаружи нельзя. Вторая часть получает оглавление первой (чтобы не повторяться и
- * продолжить пункт, разорванный между страницами), потом части объединяются в один конспект.
+ * Как: до SINGLE_MAX страниц — как раньше, одним запросом. Больше — части не больше PART_MAX фото
+ * (5 → 3+2, 6 → 3+3, 7 → 3+2+2, 8 → 3+3+2), каждая в своём вызове функции со своим бюджетом времени: 4 фото одним
+ * запросом GigaChat однажды не ответил и за 138 с (07.11.2026), 3 фото — 42–53 с. Первая часть идёт в вызове
+ * пользователя; результат готовых частей передаётся в следующий вызов в теле запроса, подписанного ключом сервера
+ * (HMAC-SHA256): подделать продолжение или пропустить проверку доступа снаружи нельзя. Следующая часть получает
+ * оглавление и термины готовых (чтобы не повторяться и продолжить пункт, разорванный между страницами) и сразу
+ * объединяется с ними. Часть, на которую модель не ответила (тайм-аут, сеть), один раз за генерацию повторяется
+ * в новом вызове функции — со своим полным бюджетом времени.
  *
  * Квота: резерв генерации делается один раз — при запуске (op = note_id), итог фиксирует триггер на notes.status,
  * как и раньше. Части — внутреннее устройство одной генерации: вторая часть start_text_generation_v2 не вызывает.
@@ -21,14 +24,25 @@ import { plain } from "./study-content.ts";
 
 /** до стольких страниц — один запрос (прежнее поведение) */
 export const SINGLE_MAX = 4;
+/** больше SINGLE_MAX страниц — части не больше стольких фото */
+export const PART_MAX = 3;
+/** ожидание ответа модели на одну часть (вызов провайдера целиком: вход, загрузка фото, ответ) */
+export const PART_CALL_MS = 90_000;
 /** подпись продолжения действует столько (вторая часть стартует сразу после первой) */
 export const CONTINUATION_TTL_MS = 10 * 60_000;
 
-/** Границы частей: [начало, конец) по индексам страниц. */
+/** Границы частей: [начало, конец) по индексам страниц. Части почти равные, большие — первыми. */
 export function splitPages(n: number): [number, number][] {
   if (n <= SINGLE_MAX) return [[0, n]];
-  const first = Math.ceil(n / 2);
-  return [[0, first], [first, n]];
+  const k = Math.ceil(n / PART_MAX);
+  const base = Math.floor(n / k), extra = n % k;
+  const out: [number, number][] = [];
+  for (let i = 0, from = 0; i < k; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    out.push([from, from + size]);
+    from += size;
+  }
+  return out;
 }
 
 /** Промпт части: какие это страницы всей темы и (для второй части) что уже есть в первой. */
@@ -37,21 +51,24 @@ export function partPrompt(base: string, part: number, parts: number, from: numb
     (part === 0
       ? "Сделай конспект только этих страниц. Продолжение темы обработается отдельно и будет добавлено после твоего конспекта; " +
         "\"conclusion\" и \"selfCheck\" — только по этим страницам.\n"
-      : "Первая часть темы (страницы 1–" + from + ") уже законспектирована — не повторяй её содержание.\n" +
+      : (part === 1 ? "Первая часть" : "Предыдущие части") + " темы (страницы 1–" + from + ") уже законспектирован" + (part === 1 ? "а" : "ы") +
+        " — не повторяй их содержание.\n" +
         (ctx?.title ? `Название темы: «${ctx.title}» — повтори его в "meta.title".\n` : "") +
-        (ctx?.headings.length ? "Разделы первой части: " + ctx.headings.map((h) => "«" + h + "»").join(", ") + ".\n" : "") +
+        (ctx?.headings.length ? "Разделы готовых частей: " + ctx.headings.map((h) => "«" + h + "»").join(", ") + ".\n" : "") +
         (ctx?.lastHeading
           ? `Если первая фотография продолжает пункт «${ctx.lastHeading}», начни с раздела с ТОЧНО таким же заголовком и пиши только продолжение; ` +
             "новые пункты учебника — новыми разделами.\n"
           : "") +
-        (ctx?.terms.length ? "Термины первой части (в glossary.terms их не повторяй): " + ctx.terms.join(", ") + ".\n" : "") +
-        "\"conclusion\" — итог ВСЕЙ темы (с учётом первой части) в 2–5 предложениях; \"selfCheck\" — только по этим страницам.\n");
+        (ctx?.terms.length ? "Термины готовых частей (в glossary.terms их не повторяй): " + ctx.terms.join(", ") + ".\n" : "") +
+        (part === parts - 1
+          ? "\"conclusion\" — итог ВСЕЙ темы (с учётом готовых частей) в 2–5 предложениях; \"selfCheck\" — только по этим страницам.\n"
+          : "Продолжение темы обработается отдельно; \"conclusion\" и \"selfCheck\" — только по этим страницам.\n"));
   return head + "\n" + base;
 }
 
 export type PartContext = { title: string; headings: string[]; lastHeading: string; terms: string[] };
 
-/** Что второй части нужно знать о первой (без самого текста конспекта). */
+/** Что следующей части нужно знать о готовых (без самого текста конспекта). */
 export function contextOf(a: StudyContent): PartContext {
   const headings = a.sections.map((s) => plain(s.heading)).filter(Boolean).slice(0, 30);
   return {
@@ -115,7 +132,7 @@ export function mergeParts(a: StudyContent, b: StudyContent): StudyContent {
       formulas: ids(uniqBy(g("formulas") as StudyContent["glossary"]["formulas"], (x) => key(x.expression)), "f"),
     },
     remember: uniqBy([...a.remember, ...b.remember], key).slice(0, 8),
-    // вторая часть писала итог всей темы (см. partPrompt); если его нет — итог первой части
+    // последняя часть пишет итог всей темы (см. partPrompt); если его нет — итог готовых частей
     conclusion: b.conclusion || a.conclusion,
     selfCheck: uniqBy([...a.selfCheck, ...b.selfCheck], (x) => key(x.q)).slice(0, 12),
     warnings: uniqBy([...a.warnings, ...b.warnings], key).slice(0, 10),
@@ -124,6 +141,9 @@ export function mergeParts(a: StudyContent, b: StudyContent): StudyContent {
 
 // ---------- подпись продолжения ----------
 
+/** Расход всех вызовов генерации (для одной строки ai_generations): токены, время, попытки, модель. */
+export type Usage = { input: number; output: number; ms: number; attempts: number; model: string; provider: string };
+
 export type Continuation = {
   note_id: string;
   user_id: string;
@@ -131,8 +151,14 @@ export type Continuation = {
   /** notes.updated_at, записанный при передаче: продолжение действует только для этого состояния note */
   handoff_at: string;
   exp: number;
-  /** результат первой части и её расход (для одной строки ai_generations на всю генерацию) */
-  part1: { content: StudyContent; input: number; output: number; model: string; provider: string; ms: number; attempts: number };
+  /** какую часть (с 0) обрабатывать */
+  part: number;
+  /** часть уже повторялась в этой генерации (повтор — не больше одного раза за генерацию) */
+  retried: boolean;
+  /** объединённый конспект готовых частей (null — готовых частей нет: повтор первой) */
+  prev: StudyContent | null;
+  /** расход всех предыдущих вызовов */
+  acc: Usage;
 };
 
 const enc = new TextEncoder();

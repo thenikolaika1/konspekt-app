@@ -9,7 +9,7 @@ export type Sim = {
   gens: Row[];
   /** резерв генерации по note: reserved → charged (ready) / refunded (failed) */
   ledger: Map<string, string>;
-  starts: { note: string; pages: number }[];
+  starts: { note: string; pages: number; lease: number }[];
   users: Map<string, string>; // token → user id
   maxPages: number;
   owners: Set<string>;
@@ -112,7 +112,7 @@ export function createClient(_url: string, _key: string, opts?: { global?: { hea
       }
       if (fn !== "start_text_generation_v2") return Promise.resolve({ data: null, error: { message: "unknown rpc" } });
       const note = s.notes.get(String(args.p_note_id));
-      s.starts.push({ note: String(args.p_note_id), pages: Number(args.p_page_count) });
+      s.starts.push({ note: String(args.p_note_id), pages: Number(args.p_page_count), lease: Number(args.p_lease_seconds) });
       if (!note) return Promise.resolve({ data: { result: "not_found" }, error: null });
       if (note.status === "ready") return Promise.resolve({ data: { result: "ready" }, error: null });
       if (note.status === "processing" && note.stage === "analyzing") return Promise.resolve({ data: { result: "already_processing" }, error: null });

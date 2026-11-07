@@ -20,8 +20,9 @@
   const NOTE_COLS = "id,status,stage,error_code,title,subject,preview,content,schema_version,created_at,updated_at";
   const POLL_MS = 2500;
   const WAIT_MS = 4 * 60_000;
-  // больше 4 страниц сервер обрабатывает двумя частями подряд (каждая — до 140 с): ждём дольше
-  const WAIT_LONG_MS = 6 * 60_000;
+  // больше 4 страниц сервер обрабатывает частями подряд (до трёх, каждая — свой вызов до 140 с, плюс один возможный
+  // повтор части): обычно 2–3 мин, в худшем случае около 9,5 мин — ждём дольше (сервер сам сообщит об ошибке раньше)
+  const WAIT_LONG_MS = 10 * 60_000;
 
   let client = null;
   let userPromise = null;

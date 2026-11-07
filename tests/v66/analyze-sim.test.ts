@@ -28,6 +28,14 @@ for (const k of ["log", "warn", "error"] as const) {
   const orig = console[k].bind(console);
   console[k] = (...a: unknown[]) => (logs.push(a.map(String).join(" ")), orig(...a));
 }
+// таймеры функции: в тестах тайм-аута «быстрые» (90 с → 50 мс); запрошенные задержки записываются (какой предел задан)
+const realSetTimeout = globalThis.setTimeout;
+const timers = { fast: false, asked: [] as number[] };
+// deno-lint-ignore no-explicit-any
+(globalThis as any).setTimeout = (fn: () => void, ms?: number, ...a: unknown[]) => {
+  timers.asked.push(Number(ms) || 0);
+  return realSetTimeout(fn, timers.fast ? Math.min(Number(ms) || 0, 50) : ms, ...a);
+};
 let micro = 0;
 const sim: Sim = {
   notes: new Map(), files: new Map(), gens: [], ledger: new Map(), starts: [], users: new Map([["tok-u1", "u1"], ["tok-u2", "u2"], ["tok-owner", "u-owner"]]),
@@ -53,6 +61,8 @@ const sc = {
   /** на сколько мс «длится» ответ модели (сдвиг часов функции) */
   chatMs: 0,
   systems: [] as string[],
+  /** номера вызовов chat, на которые модель не отвечает (висит до тайм-аута) */
+  hang: new Set<number>(),
 };
 const TITLE_WARNING = "Фото 1 — титульный лист учебника «Физика 8», автор Перышкин, текста темы нет";
 const shortRefusal = () => JSON.stringify({ error: "UNREADABLE_PAGES", warnings: [TITLE_WARNING] });
@@ -63,7 +73,7 @@ const longRefusal = (n: number) => JSON.stringify({
 const jsonRes = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const filler = "Ученики разбирают этот пункт учебника подробно, с определениями, примерами и выводами по каждому абзацу страницы. ";
 function contentFor(pages: number[], prompt: string) {
-  const second = /часть 2 из 2/.test(prompt);
+  const second = /часть [23] из [23]/.test(prompt); // не первая часть
   const text = pages.filter((p) => !sc.titles.has(p));
   const sections = text.map((p) => ({ p, i: pages.indexOf(p) })).map(({ p, i }) => ({
     heading: sc.continueHeading && second && i === 0 ? "Пункт " + (p - 1) : "Пункт " + p,
@@ -108,6 +118,13 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
     const k = sc.calls.length - 1;
     skew += sc.chatMs;
     if (k === sc.chatFailOn) return jsonRes(500, { message: "boom" });
+    if (sc.hang.has(k)) {
+      return new Promise<Response>((_, reject) => {
+        const sig = init.signal;
+        if (sig?.aborted) reject(new DOMException("aborted", "AbortError"));
+        sig?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    }
     if (sc.chatStatus.has(k)) return jsonRes(sc.chatStatus.get(k)!, { message: "refused" });
     const reply = (content: string, out: number) => jsonRes(200, {
       model: "GigaChat-2-Max:2.0", choices: [{ message: { content }, finish_reason: "stop" }],
@@ -165,10 +182,16 @@ const reset = () => {
   sc.chatStatus = new Map();
   sc.chatMs = 0;
   sc.systems = [];
+  sc.hang = new Set();
+  timers.fast = false;
+  timers.asked = [];
   logs.length = 0;
 };
 const note = (id: string) => sim.notes.get(id) as any;
 const plainText = (c: any) => JSON.stringify(c.sections);
+
+// размеры частей: 1–4 — один запрос; 5 → 3+2, 6 → 3+3, 7 → 3+2+2, 8 → 3+3+2
+const partSizes = (n: number) => (n <= 4 ? [n] : ({ 5: [3, 2], 6: [3, 3], 7: [3, 2, 2], 8: [3, 3, 2] } as Record<number, number[]>)[n]);
 
 // ---------- 1–8 страниц ----------
 for (let n = 1; n <= 8; n++) {
@@ -178,7 +201,7 @@ for (let n = 1; n <= 8; n++) {
   const r = await start(id, paths);
   const nn = note(id);
   const c = nn.content;
-  const expectedParts = n <= 4 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+  const expectedParts = partSizes(n);
   check(`[${n}] ответ 202, конспект готов (ready)`, r.status === 202 && nn.status === "ready", { r, status: nn.status, err: nn.error_code });
   check(`[${n}] запросов к модели: ${expectedParts.length} (страниц в каждом: ${expectedParts.join("+")}), не больше 4 фото за запрос`,
     JSON.stringify(sc.calls.map((x) => x.pages.length)) === JSON.stringify(expectedParts), sc.calls.map((x) => x.pages));
@@ -202,8 +225,12 @@ for (let n = 1; n <= 8; n++) {
     && g.output_tokens === 300 * n, g);
   check(`[${n}] фото удалены из хранилища после успеха`, ![...sim.files.keys()].some((k) => k.includes(id)));
   if (n > 4) {
-    check(`[${n}] вторая часть: промпт «часть 2 из 2», оглавление и термины первой части, итог всей темы`,
-      /часть 2 из 2/.test(sc.calls[1].prompt) && sc.calls[1].prompt.includes("«Пункт 1»") && sc.calls[1].prompt.includes("Термин 1")
+    const k = expectedParts.length, lastP = sc.calls[k - 1].prompt;
+    check(`[${n}] последняя часть: промпт «часть ${k} из ${k}», оглавление и термины готовых частей, итог всей темы` +
+      (k === 3 ? "; средняя часть — «часть 2 из 3» без итога всей темы" : ""),
+      new RegExp("часть " + k + " из " + k).test(lastP) && lastP.includes("«Пункт 1»") && lastP.includes("Термин 1")
+        && lastP.includes("Термин " + (expectedParts[0] + (k === 3 ? expectedParts[1] : 0)))
+        && (k < 3 || (/часть 2 из 3/.test(sc.calls[1].prompt) && !/итог ВСЕЙ темы/.test(sc.calls[1].prompt) && /Продолжение темы обработается отдельно/.test(sc.calls[1].prompt)))
         && c.conclusion === "Итог всей темы." && c.meta.title === "§ 5. Тема из восьми страниц", sc.calls[1].prompt.slice(0, 600));
   } else {
     check(`[${n}] как раньше: один запрос без текста про части`, sc.calls.length === 1 && !/часть \d из/.test(sc.calls[0].prompt));
@@ -232,8 +259,8 @@ reset();
 {
   const { id, paths } = makeNote(8, "u-owner");
   const r = await start(id, paths, "tok-owner");
-  check("[лимит базы 4, владелец] 8 страниц: разрешено только владельцу — готово, 2 части, одно списание, в лимит базы ушло 4",
-    r.status === 202 && note(id).status === "ready" && sc.calls.length === 2 && sim.ledger.get(id) === "charged"
+  check("[лимит базы 4, владелец] 8 страниц: разрешено только владельцу — готово, 3 части, одно списание, в лимит базы ушло 4",
+    r.status === 202 && note(id).status === "ready" && sc.calls.length === 3 && sim.ledger.get(id) === "charged"
       && sim.starts[sim.starts.length - 1].pages === 4 && note(id).content.meta.pages.length === 8, { r, st: note(id).status, calls: sc.calls.length });
 }
 reset();
@@ -259,10 +286,12 @@ sc.continueHeading = true;
   const { id, paths } = makeNote(8);
   await start(id, paths);
   const heads = note(id).content.sections.map((s: any) => s.heading);
-  const p4 = note(id).content.sections.find((s: any) => s.heading === "Пункт 4");
-  check("[8] пункт 4 продолжается на странице 5: один раздел «Пункт 4» с текстом страниц 4 и 5, дальше «Пункт 6…8»",
-    JSON.stringify(heads) === JSON.stringify(["Пункт 1", "Пункт 2", "Пункт 3", "Пункт 4", "Пункт 6", "Пункт 7", "Пункт 8"])
-      && JSON.stringify(p4.blocks).includes("Страница 4") && JSON.stringify(p4.blocks).includes("Страница 5"), heads);
+  const p4 = note(id).content.sections.find((s: any) => s.heading === "Пункт 3");
+  const p6 = note(id).content.sections.find((s: any) => s.heading === "Пункт 6");
+  check("[8 = 3+3+2] пункты, разорванные на стыках частей (стр. 3→4 и 6→7), — по одному разделу без дублей: «Пункт 3» со стр. 3 и 4, «Пункт 6» со стр. 6 и 7",
+    JSON.stringify(heads) === JSON.stringify(["Пункт 1", "Пункт 2", "Пункт 3", "Пункт 5", "Пункт 6", "Пункт 8"])
+      && JSON.stringify(p4.blocks).includes("Страница 3") && JSON.stringify(p4.blocks).includes("Страница 4")
+      && JSON.stringify(p6.blocks).includes("Страница 6") && JSON.stringify(p6.blocks).includes("Страница 7"), heads);
   const src = note(id).content.sections.flatMap((s: any) => s.blocks.map((b: any) => b.sourcePage));
   check("[8] номера страниц у блоков — в нумерации всей темы (0…7)", JSON.stringify(src) === JSON.stringify([0, 1, 2, 3, 4, 5, 6, 7]), src);
 }
@@ -280,14 +309,14 @@ const failed2 = makeNote(8);
     nn.status === "failed" && nn.error_code === "AI_ERROR" && sim.ledger.get(failed2.id) === "refunded"
       && failed2.paths.every((p) => sim.files.has(p)), { st: nn.status, err: nn.error_code, ledger: sim.ledger.get(failed2.id) });
   check("[8, ошибка второй части] одна строка ai_generations (failed) с токенами первой части", g.length === 1 && g[0].status === "failed"
-    && g[0].input_tokens === 2700 + 1930 * 4 && g[0].page_count === 8, g);
+    && g[0].input_tokens === 2700 + 1930 * 3 && g[0].page_count === 8, g);
 }
 reset();
 {
   const startsBefore = sim.starts.length;
   await start(failed2.id, failed2.paths);
-  check("[8, повтор после ошибки] снова обе части, ready, списано один раз (charged)", note(failed2.id).status === "ready"
-    && sim.ledger.get(failed2.id) === "charged" && sim.starts.length - startsBefore === 1 && sc.calls.length === 2);
+  check("[8, повтор после ошибки] снова все три части, ready, списано один раз (charged)", note(failed2.id).status === "ready"
+    && sim.ledger.get(failed2.id) === "charged" && sim.starts.length - startsBefore === 1 && sc.calls.length === 3);
 }
 reset();
 sc.chatFailOn = 0; // первая часть
@@ -372,7 +401,7 @@ reset();
   const second = await dup!;
   await settle();
   check("[продолжение] двойная доставка: вторая часть выполнена один раз, конспект готов, списано один раз (не возвращено)",
-    sc.calls.length === 2 && note(d.id).status === "ready" && sim.ledger.get(d.id) === "charged", { s: second.status, calls: sc.calls.length, st: note(d.id).status, l: sim.ledger.get(d.id) });
+    sc.calls.length === 3 && note(d.id).status === "ready" && sim.ledger.get(d.id) === "charged", { s: second.status, calls: sc.calls.length, st: note(d.id).status, l: sim.ledger.get(d.id) });
 }
 reset();
 {
@@ -421,7 +450,7 @@ for (let n = 1; n <= 8; n++) {
       { st: nn.status, err: nn.error_code, calls: sc.calls.length, ledger: sim.ledger.get(id) });
     continue;
   }
-  const parts = n <= 4 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+  const parts = partSizes(n);
   const c = nn.content;
   const heads = c?.sections.map((s: any) => s.heading) || [];
   check(`[титул, ${n} фото] готово без повторов: запросов ${parts.length} (${parts.join("+")}), титульный лист не вызвал отказ`,
@@ -460,14 +489,14 @@ for (const n of [3, 6]) {
 
 // 2. короткий отказ без титульного листа: 1–8 фото, отказ на первый запрос (части 1) и на первый запрос части 2
 for (let n = 1; n <= 8; n++) {
-  for (const at of n > 4 ? [0, 1] : [0]) {
+  for (const at of n > 6 ? [0, 1, 2] : n > 4 ? [0, 1] : [0]) {
     reset();
     sc.refuse = new Set([at]);
     const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
     const { id, paths } = makeNote(n);
     await start(id, paths);
     const nn = note(id);
-    const parts = n <= 4 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+    const parts = partSizes(n);
     const expected = [...parts.slice(0, at + 1), ...parts.slice(at)];
     const heads = nn.content?.sections.map((s: any) => s.heading) || [];
     check(`[короткий отказ, ${n} фото, ${n > 4 ? "часть " + (at + 1) : "один запрос"}] один повтор → готово, все страницы в конспекте, запросов ${expected.length}`,
@@ -505,7 +534,7 @@ for (const n of [3, 7]) {
     { st: nn.status, calls: sc.calls.length });
   const d = unreadableLogs();
   check(`[длинный отказ, ${n} фото] диагностика: все страницы unreadable, метка blurry, без текста предупреждений`,
-    d.length === 1 && d[0].includes('"pages":"' + Array(Math.min(n, 4) > 0 ? (n <= 4 ? n : Math.ceil(n / 2)) : 0).fill("unreadable").join(",") + '"') && /"reasons":\[[^\]]*"blurry"/.test(d[0]) && safeLog(), d);
+    d.length === 1 && d[0].includes('"pages":"' + Array(partSizes(n)[0]).fill("unreadable").join(",") + '"') && /"reasons":\[[^\]]*"blurry"/.test(d[0]) && safeLog(), d);
 }
 
 // 5. на повтор не хватает времени — повтора нет
@@ -549,6 +578,154 @@ for (const [status, code] of [[403, "AI_AUTH"], [429, "AI_RATE_LIMITED"], [400, 
   const nn = note(id);
   check("[отказ, затем 429] 2 запроса, failed AI_RATE_LIMITED, резерв возвращён, одна строка ai_generations",
     nn.status === "failed" && nn.error_code === "AI_RATE_LIMITED" && sc.calls.length === 2 && genOk(id, gensBefore, startsBefore, "failed"), { st: nn.status, err: nn.error_code, calls: sc.calls.length });
+}
+
+
+// ---------- v66.2: части не больше 3 фото, предел 90 с на часть, повтор части, диагностика ----------
+{
+  const { splitPages, PART_CALL_MS } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const ok = [1, 2, 3, 4, 5, 6, 7, 8].every((n) => {
+    const r = splitPages(n);
+    return JSON.stringify(r.map(([a, b]) => b - a)) === JSON.stringify(partSizes(n)) && r[0][0] === 0 && r[r.length - 1][1] === n
+      && r.every(([, b], i) => i === r.length - 1 || r[i + 1][0] === b);
+  });
+  check("[части] деление: 1–4 — один запрос; 5 → 3+2, 6 → 3+3, 7 → 3+2+2, 8 → 3+3+2; страницы подряд, без пропусков; предел части 90 с",
+    ok && PART_CALL_MS === 90_000, [1, 2, 3, 4, 5, 6, 7, 8].map((n) => splitPages(n)));
+  const { partRetryFits } = await import("../../supabase/functions/analyze-pages/index.ts");
+  check("[части] повтор внутри вызова — только если успеет: осталось 85 с после ответа 50 с → да; 100 с/45 с → да; 60 с/50 с → нет; 47 с после тайм-аута 90 с → нет",
+    partRetryFits(85_000, 50_000) && partRetryFits(100_000, 45_000) && !partRetryFits(60_000, 50_000) && !partRetryFits(47_000, 90_000));
+}
+const gensOf = (id: string) => sim.gens.filter((g) => g.note_id === id);
+const inTok = (sizes: number[]) => sizes.reduce((a, n) => a + 2700 + 1930 * n, 0);
+// резерв генерации: 1–4 страницы — как раньше (600 с), по частям — 1200 с
+reset();
+{
+  const a = makeNote(4), b = makeNote(8);
+  await start(a.id, a.paths);
+  const la = sim.starts[sim.starts.length - 1].lease;
+  await start(b.id, b.paths);
+  const lb = sim.starts[sim.starts.length - 1].lease;
+  check("[резерв] срок резерва генерации: 4 страницы — 600 с (как v65), 8 страниц — 1200 с (до трёх частей и повтор)", la === 600 && lb === 1200, { la, lb });
+}
+
+// тайм-аут части → повтор этой части в новом вызове функции (один раз за генерацию)
+for (const [n, hang, label] of [[8, [0], "часть 1"], [8, [1], "часть 2"], [8, [2], "часть 3"], [7, [2], "часть 3 из 3+2+2"], [6, [1], "часть 2 из 3+3"], [5, [0], "часть 1 из 3+2"]] as const) {
+  reset();
+  timers.fast = true;
+  sc.hang = new Set(hang);
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const sizes = partSizes(n);
+  const h = hang[0];
+  // вызовы chat по порядку частей; зависший вызов h — часть h+1, её повтор — сразу следом (вызов h+1)
+  const sentSizes = sc.calls.map((c) => c.pages.length);
+  const heads = nn.content?.sections.map((s: any) => s.heading) || [];
+  check(`[тайм-аут, ${n} фото, ${label}] модель не ответила → эта часть повторена в новом вызове → конспект готов, все страницы по порядку`,
+    nn.status === "ready" && sc.calls.length === sizes.length + 1 && JSON.stringify(sentSizes.filter((_, i) => i !== h)) === JSON.stringify(sizes)
+      && JSON.stringify(sc.calls[h].pages) === JSON.stringify(sc.calls[h + 1].pages)
+      && JSON.stringify(heads) === JSON.stringify(Array.from({ length: n }, (_, i) => "Пункт " + (i + 1))),
+    { st: nn.status, err: nn.error_code, calls: sc.calls.map((c) => c.pages), heads });
+  check(`[тайм-аут, ${n} фото, ${label}] одна генерация: один резерв, списана один раз, одна строка ai_generations (токены ответивших запросов)`,
+    sim.starts.length - startsBefore === 1 && sim.ledger.get(id) === "charged" && sim.gens.length - gensBefore === 1 && gensOf(id).length === 1
+      && gensOf(id)[0].status === "success" && gensOf(id)[0].input_tokens === inTok(sizes),
+    { ledger: sim.ledger.get(id), gens: gensOf(id) });
+  check(`[тайм-аут, ${n} фото, ${label}] ожидание ответа на часть ограничено 90 с; в лог — этап и время (вход, загрузка, ожидание), повтор части отмечен`,
+    timers.asked.includes(90_000) && logs.some((l) => /stage=chat timeout/.test(l) && /upload_ms=\d+/.test(l) && /chat_ms=\d+/.test(l))
+      && logs.some((l) => l.includes("metrics") && l.includes('"fail_stage":"chat"') && l.includes('"part_retry":true'))
+      && logs.some((l) => l.includes("retrying the part in a new call")) && !logs.some((l) => l.includes("data:image") || l.includes("PAGE:")),
+    logs.filter((l) => /timeout|metrics/.test(l)).slice(0, 4));
+}
+
+// второй тайм-аут в той же генерации — без повтора: ошибка, резерв возвращён
+for (const [n, hang, label] of [[8, [0, 1], "часть 1 дважды"], [8, [1, 3], "часть 2, затем часть 3"], [5, [1, 2], "часть 2 дважды"]] as const) {
+  reset();
+  timers.fast = true;
+  sc.hang = new Set(hang);
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const g = gensOf(id);
+  check(`[тайм-аут дважды, ${n} фото, ${label}] не больше одного повтора за генерацию: failed AI_TIMEOUT, резерв возвращён, фото сохранены, одна строка ai_generations`,
+    nn.status === "failed" && nn.error_code === "AI_TIMEOUT" && sim.ledger.get(id) === "refunded" && paths.every((p) => sim.files.has(p))
+      && g.length === 1 && g[0].status === "failed" && sc.calls.length === hang[1] + 1,
+    { st: nn.status, err: nn.error_code, l: sim.ledger.get(id), g, calls: sc.calls.map((c) => c.pages) });
+}
+
+// 1–4 фото — тайм-ауты как раньше: без предела 90 с и без повтора части
+reset();
+timers.fast = true;
+sc.hang = new Set([0]);
+{
+  const { id, paths } = makeNote(4);
+  await start(id, paths);
+  const nn = note(id);
+  check("[1–4 как v65] 4 фото, модель не ответила: предел 90 с не задан (ожидание — весь бюджет ~140 с), повтора нет, failed AI_TIMEOUT, резерв возвращён",
+    !timers.asked.includes(90_000) && timers.asked.some((ms) => ms > 130_000) && sc.calls.length === 1 && sc.continuationHits === 0
+      && nn.status === "failed" && nn.error_code === "AI_TIMEOUT" && sim.ledger.get(id) === "refunded" && gensOf(id).length === 1,
+    { asked: timers.asked, calls: sc.calls.length, st: nn.status });
+}
+reset();
+{
+  const { id, paths } = makeNote(3);
+  await start(id, paths);
+  check("[1–4 как v65] 3 фото без ошибок: один запрос, без текста про части, предел 90 с не задан, готово",
+    note(id).status === "ready" && sc.calls.length === 1 && !/часть \d из/.test(sc.calls[0].prompt) && !timers.asked.includes(90_000));
+}
+
+// ответ модели с ошибкой (не тайм-аут) во второй и третьей части — без повтора части
+for (const [n, failAt, label] of [[8, 1, "вторая часть"], [8, 2, "третья часть"], [7, 2, "третья часть (3+2+2)"]] as const) {
+  reset();
+  sc.chatFailOn = failAt;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const g = gensOf(id);
+  const sizes = partSizes(n);
+  check(`[ошибка, ${n} фото, ${label}] HTTP 500 — без повтора части: failed AI_ERROR, резерв возвращён, одна строка ai_generations с токенами готовых частей`,
+    nn.status === "failed" && nn.error_code === "AI_ERROR" && sim.ledger.get(id) === "refunded" && sc.calls.length === failAt + 1
+      && g.length === 1 && g[0].status === "failed" && g[0].input_tokens === inTok(sizes.slice(0, failAt)) && !nn.content,
+    { st: nn.status, err: nn.error_code, l: sim.ledger.get(id), g, calls: sc.calls.length });
+}
+
+// ответ на передачу потерян при трёх частях — итог согласован, одна строка ai_generations
+reset();
+{
+  sc.holdContinuation = async (req) => {
+    const r = await handler(req);
+    void r;
+    throw new TypeError("connection reset");
+  };
+  const { id, paths } = makeNote(8);
+  await start(id, paths);
+  const nn = note(id);
+  check("[8, ответ на передачу потерян] failed CONTINUATION_FAILED, резерв возвращён, конспект не записан, ровно одна строка ai_generations",
+    nn.status === "failed" && sim.ledger.get(id) === "refunded" && !nn.content && gensOf(id).length === 1, { st: nn.status, g: gensOf(id).length });
+}
+
+// подделанное продолжение: часть 1 без пометки «повтор», часть за пределами, нет готовых частей
+reset();
+{
+  const { signContinuation } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const { id, paths } = makeNote(8);
+  sim.notes.get(id)!.stage = "analyzing";
+  const base = { note_id: id, user_id: "u1", paths, handoff_at: String(sim.notes.get(id)!.updated_at), exp: Date.now() + 60_000,
+    acc: { input: 0, output: 0, ms: 0, attempts: 0, model: "", provider: "" } };
+  const bad = [
+    { ...base, part: 0, retried: false, prev: null },
+    { ...base, part: 3, retried: false, prev: { sections: [] } },
+    { ...base, part: 1, retried: false, prev: null },
+    { ...base, paths: paths.slice(0, 4), part: 1, retried: false, prev: { sections: [] } },
+  ];
+  const st: number[] = [];
+  for (const c of bad) {
+    const s2 = await signContinuation("svc-secret-test", c as never);
+    st.push((await post(JSON.stringify({ continuation: s2.payload, sig: s2.sig }))).status);
+  }
+  await settle();
+  check("[продолжение] даже с верной подписью неверная форма → 400: часть 1 без пометки «повтор», часть за пределами, без готовых частей, 1–4 страницы",
+    st.every((x) => x === 400) && sc.calls.length === 0, st);
 }
 
 console.log(`ИТОГО: ${pass} PASS, ${fail} FAIL (имитация Supabase и GigaChat; настоящий ИИ не вызывался)`);

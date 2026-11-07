@@ -41,8 +41,13 @@ export type Reply = {
   fallbacks: ProviderId[];
 };
 
+/** Время этапов неудачного вызова провайдера (для метрик): stage — этап, на котором произошла ошибка. */
+export type StageTimings = { oauthMs: number; uploadMs: number; chatMs: number; stage: string };
+
 /** Ошибка провайдера: code — код для notes.error_code, detail — безопасный текст для лога. */
 export class ProviderError extends Error {
+  /** время этапов до ошибки (только числа и название этапа) */
+  timings?: StageTimings;
   constructor(public code: string, public detail = "", public provider = "", public status = 0) {
     super(code);
   }
@@ -139,8 +144,9 @@ export function configuredProviders(): ProviderId[] {
 /**
  * Один запрос к модели с автоматическим переключением на резервный провайдер при ошибке провайдера.
  * prefer — провайдер, который надо попробовать первым (для повтора: тот же, что дал первый ответ).
+ * capMs — если задан, вызов одного провайдера не дольше этого (генерация по частям); без него — как раньше.
  */
-export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession): Promise<Reply> {
+export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession, capMs?: number): Promise<Reply> {
   const available = configuredProviders();
   const order = prefer && available.includes(prefer) ? [prefer, ...available.filter((p) => p !== prefer)] : available;
   if (!order.length) throw new ProviderError("SERVER_MISCONFIGURED", "no AI provider key configured");
@@ -154,7 +160,8 @@ export async function generate(messages: ChatMessage[], deadline: number, prefer
     // пока есть резервный провайдер, текущий не может занять всё оставшееся время:
     // после первого остаётся резерв на резервные, после промежуточного — на последний
     const reserve = i === 0 ? TIMEOUTS.fallbackReserveMs : TIMEOUTS.lastReserveMs;
-    const timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    let timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    if (capMs) timeout = Math.min(timeout, capMs);
     if (timeout < TIMEOUTS.minCallMs) {
       if (hasNext) {
         console.warn("[analyze-pages] skip provider=" + id + ": not enough time left (" + remaining + " ms)");
@@ -411,7 +418,18 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
   let pages = 0;
   let uploaded = 0;
   let stage = "oauth";
+  let stageStarted = started;
   let ok = false;
+  // время этапов до ошибки — в метрики (без текста и ключей)
+  const timingsAt = (): StageTimings => {
+    const now = Date.now() - stageStarted;
+    return {
+      oauthMs: stage === "oauth" ? now : timings.oauthMs,
+      uploadMs: stage === "upload" ? now : timings.uploadMs,
+      chatMs: stage === "chat" ? timings.chatMs || now : timings.chatMs,
+      stage,
+    };
+  };
 
   // запрос к API с токеном; при 401 запрос повторяется один раз с новым токеном. Токен сбрасывается, только
   // если он всё ещё текущий: параллельные загрузки, получившие 401 одновременно, делят один OAuth-запрос
@@ -484,7 +502,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     const urls = messages.flatMap((m) => (typeof m.content === "string" ? [] : m.content.flatMap((c) => (c.type === "image_url" ? [c.image_url.url] : []))));
     const missing = [...new Set(urls)].filter((u) => !s.files.has(u));
     stage = "upload";
-    t = Date.now();
+    t = stageStarted = Date.now();
     await runPool(missing.map((u) => () => upload(u, urls.indexOf(u) + 1)), GIGACHAT.uploadConcurrency);
     timings.uploadMs = Date.now() - t;
 
@@ -508,7 +526,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     }
 
     stage = "chat";
-    t = Date.now();
+    t = stageStarted = Date.now();
     const { res, body } = await api("/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -554,15 +572,21 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
       fallbacks: [],
     };
   } catch (e) {
-    if (e instanceof ProviderError) throw e;
+    const tm = timingsAt();
+    if (e instanceof ProviderError) {
+      e.timings ??= tm;
+      throw e;
+    }
     const aborted = ctrl.signal.aborted;
     const msg = String((e as Error)?.message || e).slice(0, 200);
     const tls = /certificate|UnknownIssuer|invalid peer|tls/i.test(msg);
     console.warn(
       "[analyze-pages] ai provider=gigachat model=" + p.model + " stage=" + stage + " " + (aborted ? "timeout" : tls ? "tls error" : "network error") +
-        " after " + (Date.now() - started) + " ms images=" + pages,
+        " after " + (Date.now() - started) + " ms images=" + pages + " oauth_ms=" + tm.oauthMs + " upload_ms=" + tm.uploadMs + " chat_ms=" + tm.chatMs,
     );
-    throw new ProviderError(aborted ? "AI_TIMEOUT" : "AI_NETWORK", aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg, "gigachat");
+    const err = new ProviderError(aborted ? "AI_TIMEOUT" : "AI_NETWORK", aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg, "gigachat");
+    err.timings = tm;
+    throw err;
   } finally {
     clearTimeout(timer);
     // ошибка GigaChat: его файлы больше не нужны — удаление в фоне, резервный провайдер стартует сразу
