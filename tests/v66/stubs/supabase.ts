@@ -12,6 +12,7 @@ export type Sim = {
   starts: { note: string; pages: number }[];
   users: Map<string, string>; // token → user id
   maxPages: number;
+  owners: Set<string>;
   access: string; // "ok" | результат отказа
   clock: () => string;
 };
@@ -92,7 +93,8 @@ class Query {
   }
 }
 
-export function createClient(_url: string, _key: string, _opts?: unknown) {
+export function createClient(_url: string, _key: string, opts?: { global?: { headers?: Record<string, string> } }) {
+  const asUser = (opts?.global?.headers?.Authorization || "").replace("Bearer ", "");
   return {
     auth: {
       getUser: (token: string) => {
@@ -103,6 +105,11 @@ export function createClient(_url: string, _key: string, _opts?: unknown) {
     from: (table: string) => new Query(table),
     rpc: (fn: string, args: Row) => {
       const s = sim();
+      // вызов от имени пользователя (его JWT): статус доступа, как get_my_access_v2
+      if (fn === "get_my_access_v2") {
+        const uid = s.users.get(asUser);
+        return Promise.resolve(uid ? { data: { status: s.owners.has(uid) ? "owner" : "trial" }, error: null } : { data: null, error: { message: "jwt" } });
+      }
       if (fn !== "start_text_generation_v2") return Promise.resolve({ data: null, error: { message: "unknown rpc" } });
       const note = s.notes.get(String(args.p_note_id));
       s.starts.push({ note: String(args.p_note_id), pages: Number(args.p_page_count) });

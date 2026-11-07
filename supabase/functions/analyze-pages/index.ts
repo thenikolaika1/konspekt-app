@@ -17,7 +17,7 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
 import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
-import { type Continuation, CONTINUATION_TTL_MS, contextOf, mergeParts, partPrompt, signContinuation, splitPages, verifyContinuation } from "./parts.ts";
+import { type Continuation, CONTINUATION_TTL_MS, contextOf, mergeParts, partPrompt, signContinuation, SINGLE_MAX, splitPages, verifyContinuation } from "./parts.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -168,13 +168,23 @@ Deno.serve(async (req) => {
   // start_text_generation (участники F&F, служебные аккаунты). Второй одновременный запрос по той же note получит
   // already_processing — второй платной генерации не будет; повтор той же note не занимает второй слот. Итог резерва
   // фиксирует триггер на notes.status: ready → списан, failed → возвращён. Без доступа или при исчерпанном лимите AI не запускается.
+  // ЭКСПЕРИМЕНТ v66 (пробные генерации владельца): больше SINGLE_MAX страниц пока разрешено только владельцу.
+  // Владелец определяется сервером по его же JWT (get_my_access_v2), клиенту не верим. Для всех остальных лимит базы
+  // (private.ai_limits.max_pages = 4) проверяется как раньше — по настоящему числу страниц. Убрать при выпуске, когда
+  // лимит базы станет 8 (тогда проверка ниже ни на что не влияет).
+  let pagesForLimit = paths.length;
+  if (OWNER_PAGE_TEST && paths.length > SINGLE_MAX && (await isOwner(url, token))) {
+    console.log("[analyze-pages] owner page test: " + paths.length + " pages");
+    pagesForLimit = SINGLE_MAX;
+  }
+
   const { data: start, error: startError } = await admin.rpc("start_text_generation_v2", {
     p_user_id: user.id,
     p_note_id: noteId,
     p_stale_seconds: STALE_MS / 1000,
     p_lease_seconds: LEASE_S,
     // лимит страниц (private.ai_limits.max_pages) проверяет база — по тому же списку, что обрабатывается ниже
-    p_page_count: paths.length,
+    p_page_count: pagesForLimit,
   });
   if (startError) {
     console.error("[analyze-pages] start failed:", startError.message);
@@ -219,6 +229,25 @@ Deno.serve(async (req) => {
 });
 
 // ---------- генерация ----------
+
+/** Эксперимент v66: пробные генерации 5–8 страниц — только у владельца (см. обработчик запроса). */
+const OWNER_PAGE_TEST = true;
+
+/** Владелец ли это — по его JWT, как его видит база (get_my_access_v2 → status owner). Ошибка — «нет». */
+async function isOwner(url: string, token: string): Promise<boolean> {
+  const anon = publicKey();
+  if (!anon) return false;
+  try {
+    const client = createClient(url, anon, {
+      global: { headers: { Authorization: "Bearer " + token } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await client.rpc("get_my_access_v2");
+    return !error && (data as { status?: string } | null)?.status === "owner";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Хватит ли оставшегося времени на полноценный повтор: провайдер повтора получит

@@ -20,8 +20,8 @@ Deno.env.delete("ZAI_API_KEY");
 Deno.env.delete("OPENROUTER_API_KEY");
 let micro = 0;
 const sim: Sim = {
-  notes: new Map(), files: new Map(), gens: [], ledger: new Map(), starts: [], users: new Map([["tok-u1", "u1"], ["tok-u2", "u2"]]),
-  maxPages: 8, access: "ok",
+  notes: new Map(), files: new Map(), gens: [], ledger: new Map(), starts: [], users: new Map([["tok-u1", "u1"], ["tok-u2", "u2"], ["tok-owner", "u-owner"]]),
+  maxPages: 8, access: "ok", owners: new Set(["u-owner"]),
   clock: () => new Date(Date.now()).toISOString().replace("Z", String(++micro % 1000).padStart(3, "0") + "+00:00"),
 };
 (globalThis as any).__SIM = sim;
@@ -183,6 +183,29 @@ sim.maxPages = 4; // как сейчас в production (private.ai_limits.max_pa
   const r = await start(id, paths);
   check("[лимит базы 4] 6 страниц при max_pages = 4: отказ TOO_MANY_PAGES, note failed, ИИ не вызывался, резерва нет",
     r.status === 400 && note(id).error_code === "TOO_MANY_PAGES" && sc.calls.length === 0 && !sim.ledger.has(id), r);
+}
+// пробные генерации владельца при лимите базы 4 (как сейчас в production)
+reset();
+{
+  const { id, paths } = makeNote(8, "u-owner");
+  const r = await start(id, paths, "tok-owner");
+  check("[лимит базы 4, владелец] 8 страниц: разрешено только владельцу — готово, 2 части, одно списание, в лимит базы ушло 4",
+    r.status === 202 && note(id).status === "ready" && sc.calls.length === 2 && sim.ledger.get(id) === "charged"
+      && sim.starts[sim.starts.length - 1].pages === 4 && note(id).content.meta.pages.length === 8, { r, st: note(id).status, calls: sc.calls.length });
+}
+reset();
+{
+  const { id, paths } = makeNote(8);
+  const r = await start(id, paths, "tok-u1");
+  check("[лимит базы 4, ученик] 8 страниц у ученика: по-прежнему TOO_MANY_PAGES, ИИ не вызывался", r.status === 400 && r.body.error === "TOO_MANY_PAGES"
+    && sc.calls.length === 0 && sim.starts[sim.starts.length - 1].pages === 8, r);
+}
+reset();
+{
+  const { id, paths } = makeNote(4, "u-owner");
+  const r = await start(id, paths, "tok-owner");
+  check("[лимит базы 4, владелец] 4 страницы — как раньше (в лимит ушло 4, один запрос)", r.status === 202 && note(id).status === "ready"
+    && sc.calls.length === 1 && sim.starts[sim.starts.length - 1].pages === 4);
 }
 sim.maxPages = 8;
 
