@@ -20,6 +20,8 @@
   const NOTE_COLS = "id,status,stage,error_code,title,subject,preview,content,schema_version,created_at,updated_at";
   const POLL_MS = 2500;
   const WAIT_MS = 4 * 60_000;
+  // больше 4 страниц сервер обрабатывает двумя частями подряд (каждая — до 140 с): ждём дольше
+  const WAIT_LONG_MS = 6 * 60_000;
 
   let client = null;
   let userPromise = null;
@@ -365,8 +367,8 @@
     });
   }
 
-  async function waitForNote(noteId, { isCancelled } = {}) {
-    const until = Date.now() + WAIT_MS;
+  async function waitForNote(noteId, { isCancelled, pageCount } = {}) {
+    const until = Date.now() + (!pageCount || pageCount > 4 ? WAIT_LONG_MS : WAIT_MS);
     while (Date.now() < until) {
       await sleep(POLL_MS);
       if (isCancelled && isCancelled()) throw new Error("CANCELLED");

@@ -281,7 +281,7 @@ html,body{width:100%;min-height:100%;overflow-x:hidden}body{background:linear-gr
 .page-shot{width:52px;height:72px;border-radius:8px}
 .page-thumb.selected .page-shot{border:2.5px solid var(--blue)}
 .page-remove{top:-6px;right:-6px}
-.page-strip{overflow:visible;flex-wrap:nowrap}
+.page-strip{overflow:visible;flex-wrap:wrap;row-gap:12px}
 .add-page{width:58px;height:72px;border:1px solid #e3e8ef;border-radius:10px;background:#f7f9fc;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--blue)}
 .add-page .ui-icon{width:26px;height:26px;stroke-width:1.8}
 .add-page span{font-size:11px;line-height:13px;color:var(--muted)}

@@ -111,7 +111,7 @@
       current = newJob(key);
       return cloudGenerate(pages, opts, true);
     }
-    const n = settle(await cloud.waitForNote(job.noteId, opts));
+    const n = settle(await cloud.waitForNote(job.noteId, { ...opts, pageCount: paths.length }));
     if (current === job) current = null;
     return n;
   }
@@ -135,7 +135,7 @@
     if (!paths.length) throw new Error("PAGES_MISSING");
     stage("analyze");
     await start(noteId, paths);
-    return settle(await cloud.waitForNote(noteId, opts));
+    return settle(await cloud.waitForNote(noteId, { ...opts, pageCount: paths.length }));
   }
 
   // ---------- публичный API ----------

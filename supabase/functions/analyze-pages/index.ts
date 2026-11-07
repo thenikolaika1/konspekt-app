@@ -17,6 +17,7 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
 import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
+import { type Continuation, CONTINUATION_TTL_MS, contextOf, mergeParts, partPrompt, signContinuation, splitPages, verifyContinuation } from "./parts.ts";
 
 const BUCKET = "temp-pages";
 const MAX_PAGES = 8;
@@ -114,6 +115,9 @@ Deno.serve(async (req) => {
     return json(500, { error: "SERVER_MISCONFIGURED" }, cors);
   }
 
+  // продолжение генерации по частям (вторая часть): вызывает только сама функция — запрос подписан ключом сервера
+  if (req.headers.get("x-kn-continuation") === "1") return continueNote(req, url, adminKey, cors);
+
   // 1–2. JWT пользователя обязателен; пользователя определяет Supabase Auth
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return json(401, { error: "UNAUTHORIZED" }, cors);
@@ -123,7 +127,7 @@ Deno.serve(async (req) => {
   if (userError || !user) return json(401, { error: "UNAUTHORIZED" }, cors);
 
   // 3. вход: note_id и пути фотографий в порядке страниц
-  let body: { note_id?: unknown; paths?: unknown };
+  let body: { note_id?: unknown; paths?: unknown; continuation?: unknown; sig?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -208,7 +212,7 @@ Deno.serve(async (req) => {
     })
     : admin;
 
-  const task = processNote({ admin, storage: storageClient, userId: user.id, noteId, paths });
+  const task = processNote({ admin, storage: storageClient, userId: user.id, noteId, paths, self: { url, adminKey, publicKey: anon } });
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(task);
   else await task;
   return json(202, { status: "processing", note_id: noteId }, cors);
@@ -238,6 +242,10 @@ type Job = {
   userId: string;
   noteId: string;
   paths: string[];
+  /** вторая часть генерации по частям: результат первой (из подписанного продолжения) */
+  part1?: Continuation["part1"];
+  /** для передачи второй части: адрес функции и ключи (только в первой части) */
+  self?: { url: string; adminKey: string; publicKey: string };
 };
 
 /** Как Promise.all(items.map(fn)), но не больше limit одновременно; порядок результатов сохраняется. */
@@ -262,6 +270,120 @@ type Candidate = { content: StudyContent; critical: { code: string; text: string
 const better = (a: Candidate, b: Candidate | null) =>
   !b || a.critical.length < b.critical.length || (a.critical.length === b.critical.length && a.issues.length <= b.issues.length);
 
+/**
+ * Запрос к модели по этим страницам: строгий JSON, проверка, повтор при критических проблемах (тот же провайдер),
+ * резервный провайдер — при ошибке провайдера. Возвращает лучший вариант без критических проблем, иначе StepError.
+ * Логика — прежняя (до v66 была внутри processNote); prompt — текст запроса (обычный или для части).
+ */
+// deno-lint-ignore no-explicit-any
+async function runModel(images: string[], prompt: string, deadline: number, giga: ReturnType<typeof newGigaSession>, usage: { input: number; output: number; model: string }, m: any): Promise<Candidate> {
+  // 7–10. все страницы одним запросом; строгий JSON. Повтор — только при критических проблемах
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+        { type: "text" as const, text: prompt },
+      ],
+    },
+  ];
+
+  // model — модель, которая дала этот вариант (в ai_generations пишется модель итогового конспекта)
+  let best: Candidate | null = null;
+  let last: ReturnType<typeof validateStudyContent> | null = null;
+  // повтор идёт к тому же провайдеру (GigaChat переиспользует загруженные страницы); резервный — только при ошибке провайдера
+  let used: ProviderId | undefined;
+  let lastMs = 0;
+  let t = Date.now();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0 && !retryFits(deadline - Date.now(), lastMs)) {
+      // полноценный повтор не успеет — заведомо обречённый запрос не начинаем
+      console.warn("[analyze-pages] retry skipped: not enough time (" + (deadline - Date.now()) + " ms left, last attempt " + lastMs + " ms)");
+      break;
+    }
+    m.attempts++;
+    if (attempt > 0) m.retry_used = true;
+    let reply;
+    const attemptStarted = Date.now();
+    try {
+      reply = await generate(messages, deadline, used, giga);
+    } catch (e) {
+      if (attempt > 0) m.retry_ms = Date.now() - attemptStarted;
+      // повтор не удался из-за провайдеров — остаётся уже полученный вариант
+      if (best && e instanceof ProviderError) {
+        console.warn("[analyze-pages] retry failed:", e.code, "— keeping first result");
+        break;
+      }
+      throw e;
+    }
+    lastMs = Date.now() - attemptStarted;
+    if (attempt > 0) m.retry_ms = lastMs;
+    used = reply.provider;
+    m.provider = reply.provider;
+    usage.model = reply.model;
+    usage.input += reply.inputTokens;
+    usage.output += reply.outputTokens;
+    m.oauth_ms += reply.timings.oauthMs;
+    m.upload_ms += reply.timings.uploadMs;
+    m.chat_ms += reply.timings.chatMs;
+    if (reply.fallbacks.length) m.fallback_used = true;
+
+    t = Date.now();
+    const parsed = parseModelJson(reply.text);
+    if (parsed.repaired) m.json_repaired++;
+    // тип и позиция ошибки JSON — без текста ответа (в нём текст учебника)
+    if (parsed.diag) {
+      console.warn(
+        "[analyze-pages] attempt " + (attempt + 1) + " json " + (parsed.repaired ? "repaired" : "invalid") + ": " +
+          JSON.stringify({ ...parsed.diag, truncated: reply.truncated }),
+      );
+    }
+    const result: ReturnType<typeof validateStudyContent> = parsed.value
+      ? validateStudyContent(parsed.value, images.length)
+      : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : parsed.diag?.kind || "not json" };
+    m.parse_ms += Date.now() - t;
+    last = result;
+    let problems: string[];
+    if (result.ok) {
+      // 11. критические проблемы → повтор; некритические (оформление, выделения, sourceOutline…) → только в лог
+      t = Date.now();
+      const candidate: Candidate = {
+        content: result.content,
+        critical: criticalIssues(result.content, images.length),
+        issues: qualityIssues(result.content, images.length),
+        model: reply.model,
+        provider: reply.provider,
+      };
+      m.quality_ms += Date.now() - t;
+      if (better(candidate, best)) best = candidate;
+      if (!candidate.critical.length) break;
+      problems = [...candidate.critical.map((i) => i.text), ...candidate.issues];
+    } else {
+      // страницы действительно не читаются — повтор не поможет
+      if (result.code === "UNREADABLE_PAGES" && !best) break;
+      problems = [
+        result.code === "AI_BAD_JSON"
+          ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
+          : "в ответе нет ни разделов, ни терминов",
+      ];
+    }
+    console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
+    messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
+    messages.push({ role: "user", content: retryPrompt(problems) });
+  }
+  if (!best) {
+    if (!last) throw new StepError("AI_TIMEOUT");
+    throw new StepError(last.ok ? "EMPTY_CONTENT" : last.code, last.ok ? "" : last.reason);
+  }
+  m.critical = best.critical.length;
+  m.minor = best.issues.length;
+  // результат остался критически плохим (повтор не успел или не помог) — не сохраняем его как конспект
+  if (best.critical.length) throw new StepError(criticalCode(best.critical), best.critical.map((i) => i.code).join(","));
+  if (best.issues.length) console.warn("[analyze-pages] accepted with issues:", best.issues.join(" | "));
+  return best;
+}
+
 async function processNote(job: Job) {
   const { admin, storage, noteId, userId, paths } = job;
   const started = Date.now();
@@ -270,7 +392,7 @@ async function processNote(job: Job) {
   const giga = newGigaSession();
   // безопасные метрики времени: только числа, имена провайдеров и коды — без ключей, токенов, изображений и текста
   const m = {
-    page_count: paths.length, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
+    page_count: paths.length, part: 0, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
     sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
     retry_used: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "",
     error_code: "",
@@ -280,7 +402,13 @@ async function processNote(job: Job) {
 
   try {
     // 6. фотографии из private bucket, в порядке страниц (до 4 одновременно)
-    const images = await mapLimit(paths, 4, async (path) => {
+    // по частям (больше SINGLE_MAX страниц): эта функция делает одну часть; первая часть передаёт результат второй
+    const ranges = splitPages(paths.length);
+    const partIndex = job.part1 ? 1 : 0;
+    const [from, to] = ranges[partIndex];
+    const partPaths = paths.slice(from, to);
+    m.part = ranges.length > 1 ? partIndex + 1 : 0;
+    const images = await mapLimit(partPaths, 4, async (path) => {
       const { data, error } = await storage.storage.from(BUCKET).download(path);
       if (error || !data) throw new StepError("STORAGE_READ_FAILED", error?.message || "no data");
       if (data.size > MAX_IMAGE_BYTES) throw new StepError("IMAGE_TOO_LARGE");
@@ -289,123 +417,41 @@ async function processNote(job: Job) {
     });
     m.storage_ms = Date.now() - t;
 
-    // 7–10. все страницы одним запросом; строгий JSON. Повтор — только при критических проблемах
-    const messages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: [
-          ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
-          { type: "text" as const, text: userPrompt(images.length) },
-        ],
-      },
-    ];
-
-    // model — модель, которая дала этот вариант (в ai_generations пишется модель итогового конспекта)
-    let best: Candidate | null = null;
-    let last: ReturnType<typeof validateStudyContent> | null = null;
-    // повтор идёт к тому же провайдеру (GigaChat переиспользует загруженные страницы); резервный — только при ошибке провайдера
-    let used: ProviderId | undefined;
-    let lastMs = 0;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0 && !retryFits(deadline - Date.now(), lastMs)) {
-        // полноценный повтор не успеет — заведомо обречённый запрос не начинаем
-        console.warn("[analyze-pages] retry skipped: not enough time (" + (deadline - Date.now()) + " ms left, last attempt " + lastMs + " ms)");
-        break;
-      }
-      aiCalled = true;
-      m.attempts++;
-      if (attempt > 0) m.retry_used = true;
-      let reply;
-      const attemptStarted = Date.now();
-      try {
-        reply = await generate(messages, deadline, used, giga);
-      } catch (e) {
-        if (attempt > 0) m.retry_ms = Date.now() - attemptStarted;
-        // повтор не удался из-за провайдеров — остаётся уже полученный вариант
-        if (best && e instanceof ProviderError) {
-          console.warn("[analyze-pages] retry failed:", e.code, "— keeping first result");
-          break;
-        }
-        throw e;
-      }
-      lastMs = Date.now() - attemptStarted;
-      if (attempt > 0) m.retry_ms = lastMs;
-      used = reply.provider;
-      m.provider = reply.provider;
-      usage.model = reply.model;
-      usage.input += reply.inputTokens;
-      usage.output += reply.outputTokens;
-      m.oauth_ms += reply.timings.oauthMs;
-      m.upload_ms += reply.timings.uploadMs;
-      m.chat_ms += reply.timings.chatMs;
-      if (reply.fallbacks.length) m.fallback_used = true;
-
-      t = Date.now();
-      const parsed = parseModelJson(reply.text);
-      if (parsed.repaired) m.json_repaired++;
-      // тип и позиция ошибки JSON — без текста ответа (в нём текст учебника)
-      if (parsed.diag) {
-        console.warn(
-          "[analyze-pages] attempt " + (attempt + 1) + " json " + (parsed.repaired ? "repaired" : "invalid") + ": " +
-            JSON.stringify({ ...parsed.diag, truncated: reply.truncated }),
-        );
-      }
-      const result: ReturnType<typeof validateStudyContent> = parsed.value
-        ? validateStudyContent(parsed.value, images.length)
-        : { ok: false, code: "AI_BAD_JSON", reason: reply.truncated ? "truncated" : parsed.diag?.kind || "not json" };
-      m.parse_ms += Date.now() - t;
-      last = result;
-      let problems: string[];
-      if (result.ok) {
-        // 11. критические проблемы → повтор; некритические (оформление, выделения, sourceOutline…) → только в лог
-        t = Date.now();
-        const candidate: Candidate = {
-          content: result.content,
-          critical: criticalIssues(result.content, images.length),
-          issues: qualityIssues(result.content, images.length),
-          model: reply.model,
-          provider: reply.provider,
-        };
-        m.quality_ms += Date.now() - t;
-        if (better(candidate, best)) best = candidate;
-        if (!candidate.critical.length) break;
-        problems = [...candidate.critical.map((i) => i.text), ...candidate.issues];
-      } else {
-        // страницы действительно не читаются — повтор не поможет
-        if (result.code === "UNREADABLE_PAGES" && !best) break;
-        problems = [
-          result.code === "AI_BAD_JSON"
-            ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
-            : "в ответе нет ни разделов, ни терминов",
-        ];
-      }
-      console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
-      messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
-      messages.push({ role: "user", content: retryPrompt(problems) });
-    }
-    if (!best) {
-      if (!last) throw new StepError("AI_TIMEOUT");
-      throw new StepError(last.ok ? "EMPTY_CONTENT" : last.code, last.ok ? "" : last.reason);
-    }
-    m.critical = best.critical.length;
-    m.minor = best.issues.length;
-    // результат остался критически плохим (повтор не успел или не помог) — не сохраняем его как конспект
-    if (best.critical.length) throw new StepError(criticalCode(best.critical), best.critical.map((i) => i.code).join(","));
-    if (best.issues.length) console.warn("[analyze-pages] accepted with issues:", best.issues.join(" | "));
+    const prompt = ranges.length > 1
+      ? partPrompt(userPrompt(images.length), partIndex, ranges.length, from, to, paths.length, job.part1 ? contextOf(job.part1.content) : undefined)
+      : userPrompt(images.length);
+    aiCalled = true;
+    const best = await runModel(images, prompt, deadline, giga, usage, m);
     usage.model = best.model;
     m.provider = best.provider;
 
+    if (ranges.length > 1 && partIndex === 0) {
+      // первая часть готова: файлы GigaChat больше не нужны, вторая часть — в новом вызове функции
+      await closeGigaSession(giga);
+      await handOff(job, best, usage, Date.now() - started, m.attempts);
+      m.status = "handed_off";
+      return;
+    }
+    const merged = job.part1 ? mergeParts(job.part1.content, best.content) : best.content;
+    if (job.part1) {
+      usage.input += job.part1.input;
+      usage.output += job.part1.output;
+      const mergedCritical = criticalIssues(merged, paths.length);
+      if (mergedCritical.length) throw new StepError(criticalCode(mergedCritical), "merged: " + mergedCritical.map((i) => i.code).join(","));
+    }
+
     // консервативная чистка: только удаление лишнего и явно повреждённого, без правки текста
     t = Date.now();
-    const { content, report } = sanitize(best.content);
+    const { content, report } = sanitize(merged);
     m.sanitize_ms = Date.now() - t;
     if (report.length) console.warn("[analyze-pages] sanitize:", report.join(" | "));
     if (!content.sections.length && !content.glossary.terms.length) throw new StepError("EMPTY_CONTENT", "empty after sanitize");
 
     // 15. успех: content, статус, данные для списков
     t = Date.now();
-    const { error: saveError } = await admin
+    // вторая часть сохраняет, только если генерация всё ещё идёт: если первая часть уже отметила ошибку (ответ на
+    // передачу потерялся) и резерв возвращён, готовый конспект её не перезаписывает — итог остаётся согласованным
+    let saveQuery = admin
       .from("notes")
       .update({
         status: "ready",
@@ -420,11 +466,14 @@ async function processNote(job: Job) {
       })
       .eq("id", noteId)
       .eq("user_id", userId);
+    if (job.part1) saveQuery = saveQuery.eq("status", "processing");
+    const { data: saved, error: saveError } = await saveQuery.select("id");
     m.save_ms = Date.now() - t;
     if (saveError) throw new StepError("SAVE_FAILED", saveError.message);
+    if (job.part1 && !(saved && saved.length)) throw new StepError("NOTE_CHANGED", "note is no longer processing");
     m.status = "ready";
 
-    await logGeneration(admin, job, "success", usage, Date.now() - started);
+    await logGeneration(admin, job, "success", usage, Date.now() - started + (job.part1?.ms || 0));
 
     // временные фотографии больше не нужны: вся папка note (включая дубли от повторных загрузок) и файлы GigaChat
     t = Date.now();
@@ -444,23 +493,118 @@ async function processNote(job: Job) {
     m.status = "failed";
     m.error_code = code;
     console.error("[analyze-pages] failed:", code, known ? e.detail : String(e));
-    const { error: failError } = await admin
+    let failQuery = admin
       .from("notes")
       .update({ status: "failed", stage: "failed", error_code: code, updated_at: new Date().toISOString() })
       .eq("id", noteId)
       .eq("user_id", userId);
+    // вторая часть не трогает note, которая уже не в работе (ошибка уже записана)
+    if (job.part1) failQuery = failQuery.eq("status", "processing");
+    const { error: failError } = await failQuery;
     if (failError) console.error("[analyze-pages] could not mark failed:", failError.message);
-    if (aiCalled) await logGeneration(admin, job, "failed", usage, Date.now() - started);
+    if (job.part1) (usage.input += job.part1.input), (usage.output += job.part1.output), (usage.model ||= job.part1.model);
+    if (aiCalled || job.part1) await logGeneration(admin, job, "failed", usage, Date.now() - started + (job.part1?.ms || 0));
   } finally {
     // файлы GigaChat удаляются в любом случае (после успеха — уже удалены выше, здесь ничего не делается)
     const leftover = await closeGigaSession(giga);
-    if (m.status !== "ready") m.cleanup_ms = leftover;
+    if (m.status !== "ready" && m.status !== "handed_off") m.cleanup_ms = leftover;
     m.model = usage.model;
     m.input_tokens = usage.input;
     m.output_tokens = usage.output;
     m.total_ms = Date.now() - started;
     console.log("[analyze-pages] metrics " + JSON.stringify(m));
   }
+}
+
+// ---------- генерация по частям: передача второй части ----------
+
+/** Сколько ждём ответа второго вызова функции на передачу (он сразу отвечает 202, работа идёт в фоне). */
+const HANDOFF_MS = 15_000;
+
+/**
+ * Первая часть готова: отмечаем note (тот же статус processing/analyzing, новое updated_at — продолжение действует
+ * только для этого состояния) и запускаем вторую часть отдельным вызовом функции с подписанным продолжением.
+ * Если вторая часть не принята — StepError: note станет failed, резерв генерации вернётся (как при любой ошибке).
+ */
+async function handOff(job: Job, best: Candidate, usage: { input: number; output: number; model: string }, ms: number, attempts: number) {
+  const self = job.self;
+  if (!self?.url || !self.adminKey) throw new StepError("CONTINUATION_FAILED", "no self config");
+  const { data: marked, error: markError } = await job.admin
+    .from("notes")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", job.noteId)
+    .eq("user_id", job.userId)
+    .eq("status", "processing")
+    .eq("stage", "analyzing")
+    .select("updated_at")
+    .maybeSingle();
+  if (markError || !marked) throw new StepError("CONTINUATION_FAILED", markError?.message || "note changed");
+  const c: Continuation = {
+    note_id: job.noteId, user_id: job.userId, paths: job.paths, handoff_at: String(marked.updated_at),
+    exp: Date.now() + CONTINUATION_TTL_MS,
+    part1: { content: best.content, input: usage.input, output: usage.output, model: best.model, provider: best.provider, ms, attempts },
+  };
+  const { payload, sig } = await signContinuation(self.adminKey, c);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), HANDOFF_MS);
+  try {
+    const res = await fetch(self.url.replace(/\/$/, "") + "/functions/v1/analyze-pages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json", "x-kn-continuation": "1",
+        ...(self.publicKey ? { apikey: self.publicKey, Authorization: "Bearer " + self.publicKey } : {}),
+      },
+      body: JSON.stringify({ continuation: payload, sig }),
+      signal: ctrl.signal,
+    });
+    await res.body?.cancel();
+    // 409 — это продолжение уже принято (повторная доставка того же запроса): вторая часть идёт
+    if (res.status !== 202 && res.status !== 409) throw new StepError("CONTINUATION_FAILED", "HTTP " + res.status);
+  } catch (e) {
+    if (e instanceof StepError) throw e;
+    throw new StepError("CONTINUATION_FAILED", String(e));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Вторая часть: только по подписанному продолжению (подпись ключом сервера, срок, note та же и в том же состоянии,
+ * что при передаче). Захват — условным обновлением updated_at: повтор того же продолжения не запустит вторую
+ * обработку. Доступ и резерв генерации проверены при запуске первой части; start_text_generation_v2 здесь не вызывается.
+ */
+async function continueNote(req: Request, url: string, adminKey: string, cors: Record<string, string>): Promise<Response> {
+  let body: { continuation?: unknown; sig?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return json(400, { error: "BAD_REQUEST" }, cors);
+  }
+  const c = await verifyContinuation(adminKey, body.continuation, body.sig);
+  if (!c) return json(403, { error: "FORBIDDEN" }, cors);
+  const admin = createClient(url, adminKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: claimed, error } = await admin
+    .from("notes")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", c.note_id)
+    .eq("user_id", c.user_id)
+    .eq("status", "processing")
+    .eq("stage", "analyzing")
+    .eq("updated_at", c.handoff_at)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.error("[analyze-pages] continuation claim failed:", error.message);
+    return json(500, { error: "INTERNAL" }, cors);
+  }
+  if (!claimed) return json(409, { error: "ALREADY_PROCESSING" }, cors);
+  // фото второй части читаем с ключом сервера: пути — из подписанного продолжения, каждый в папке этого пользователя и note
+  const prefix = c.user_id + "/" + c.note_id + "/";
+  if (!c.paths.every((p) => typeof p === "string" && p.startsWith(prefix) && !p.includes(".."))) return json(403, { error: "FORBIDDEN_PATH" }, cors);
+  const task = processNote({ admin, storage: admin, userId: c.user_id, noteId: c.note_id, paths: c.paths, part1: c.part1 });
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(task);
+  else await task;
+  return json(202, { status: "processing", note_id: c.note_id }, cors);
 }
 
 async function logGeneration(

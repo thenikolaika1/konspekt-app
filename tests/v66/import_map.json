@@ -1,0 +1,1 @@
+{ "imports": { "npm:@supabase/supabase-js@2.116.0": "./stubs/supabase.ts", "jsr:@std/encoding@1/base64": "./stubs/base64.ts" } }
