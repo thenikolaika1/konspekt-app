@@ -14,9 +14,9 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
-import { SYSTEM_PROMPT, retryPrompt, userPrompt } from "./prompt.ts";
+import { SYSTEM_PROMPT, retryPrompt, UNREADABLE_RETRY_PROBLEM, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
-import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, validateStudyContent } from "./study-content.ts";
+import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, unreadableDiag, validateStudyContent } from "./study-content.ts";
 import { type Continuation, CONTINUATION_TTL_MS, contextOf, mergeParts, partPrompt, signContinuation, SINGLE_MAX, splitPages, verifyContinuation } from "./parts.ts";
 
 const BUCKET = "temp-pages";
@@ -32,6 +32,9 @@ const BUDGET_MS = 140_000;
 const MIN_RETRY_MS = 45_000;
 // и не меньше, чем длилась предыдущая попытка, с запасом: GigaChat с тем же промптом отвечает примерно столько же
 const RETRY_SLACK = 1.2;
+// отказ «страницы не читаются» не длиннее этого (знаков ответа) считается коротким: такой ответ GigaChat давал на
+// читаемые страницы (07.11.2026: 3 фото, 23 токена за 2,8 с) — один повтор с уточнением, если хватает времени
+const SHORT_REFUSAL_CHARS = 600;
 // GigaChat (Freemium), qwen/qwen3.8-27b:free и GLM-4.6V-Flash бесплатны; при смене модели здесь указывается цена за 1M токенов
 const PRICE_PER_M = { input: 0, output: 0 };
 
@@ -389,8 +392,20 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
       if (!candidate.critical.length) break;
       problems = [...candidate.critical.map((i) => i.text), ...candidate.issues];
     } else {
-      // страницы действительно не читаются — повтор не поможет
-      if (result.code === "UNREADABLE_PAGES" && !best) break;
+      if (result.code === "UNREADABLE_PAGES" && !best) {
+        // безопасная диагностика: коды, числа и метки причин, без текста ответа и учебника
+        console.warn("[analyze-pages] attempt " + (attempt + 1) + " unreadable: " +
+          JSON.stringify({ ...unreadableDiag(parsed.value, reply.text.length), finish: reply.truncated ? "length" : "stop", output_tokens: reply.outputTokens, chat_ms: reply.timings.chatMs, images: images.length }));
+        // длинный подробный отказ или уже повтор — страницы действительно не читаются, ещё один запрос не поможет;
+        // короткий отказ на первой попытке — один повтор (время проверяется в начале следующей попытки: retryFits)
+        if (attempt > 0 || reply.text.length > SHORT_REFUSAL_CHARS) break;
+        m.unreadable_retry = true;
+        problems = [UNREADABLE_RETRY_PROBLEM];
+        console.warn("[analyze-pages] attempt", attempt + 1, "critical: short unreadable reply — retrying once");
+        messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
+        messages.push({ role: "user", content: retryPrompt(problems) });
+        continue;
+      }
       problems = [
         result.code === "AI_BAD_JSON"
           ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
@@ -423,7 +438,7 @@ async function processNote(job: Job) {
   const m = {
     page_count: paths.length, part: 0, storage_ms: 0, oauth_ms: 0, upload_ms: 0, chat_ms: 0, parse_ms: 0, quality_ms: 0,
     sanitize_ms: 0, retry_ms: 0, save_ms: 0, cleanup_ms: 0, total_ms: 0, attempts: 0, provider: "", model: "",
-    retry_used: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "",
+    retry_used: false, unreadable_retry: false, fallback_used: false, json_repaired: 0, critical: 0, minor: 0, input_tokens: 0, output_tokens: 0, status: "",
     error_code: "",
   };
   let aiCalled = false;

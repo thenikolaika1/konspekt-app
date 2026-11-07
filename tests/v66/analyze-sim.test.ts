@@ -18,6 +18,16 @@ const env: Record<string, string> = {
 for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
 Deno.env.delete("ZAI_API_KEY");
 Deno.env.delete("OPENROUTER_API_KEY");
+// часы функции: сдвиг имитирует долгий ответ модели (проверка «на повтор не хватает времени»)
+const realNow = Date.now;
+let skew = 0;
+Date.now = () => realNow.call(Date) + skew;
+// перехват лога функции (вывод сохраняется): проверяем, что диагностика безопасна
+const logs: string[] = [];
+for (const k of ["log", "warn", "error"] as const) {
+  const orig = console[k].bind(console);
+  console[k] = (...a: unknown[]) => (logs.push(a.map(String).join(" ")), orig(...a));
+}
 let micro = 0;
 const sim: Sim = {
   notes: new Map(), files: new Map(), gens: [], ledger: new Map(), starts: [], users: new Map([["tok-u1", "u1"], ["tok-u2", "u2"], ["tok-owner", "u-owner"]]),
@@ -36,23 +46,37 @@ const sc = {
   calls: [] as Call[], uploads: 0, fileToPage: new Map<string, number>(), continuationHits: 0,
   chatFailOn: -1, continueHeading: false, selfStatus: 0, deleted: 0,
   holdContinuation: null as null | ((r: Request) => Promise<Response>),
+  /** номера страниц-«титульных листов» (без текста темы) */
+  titles: new Set<number>(),
+  /** номера вызовов chat, на которые модель даёт короткий отказ / длинный отказ / HTTP-ошибку */
+  refuse: new Set<number>(), refuseLong: new Set<number>(), chatStatus: new Map<number, number>(),
+  /** на сколько мс «длится» ответ модели (сдвиг часов функции) */
+  chatMs: 0,
+  systems: [] as string[],
 };
+const TITLE_WARNING = "Фото 1 — титульный лист учебника «Физика 8», автор Перышкин, текста темы нет";
+const shortRefusal = () => JSON.stringify({ error: "UNREADABLE_PAGES", warnings: [TITLE_WARNING] });
+const longRefusal = (n: number) => JSON.stringify({
+  meta: { pages: Array.from({ length: n }, (_, i) => ({ index: i, readable: "unreadable" })) }, sections: [],
+  warnings: Array.from({ length: 6 }, (_, i) => "Страница " + (i + 1) + " сильно размыта и снята под углом, буквы сливаются, разобрать текст абзацев невозможно даже частично."),
+});
 const jsonRes = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const filler = "Ученики разбирают этот пункт учебника подробно, с определениями, примерами и выводами по каждому абзацу страницы. ";
 function contentFor(pages: number[], prompt: string) {
   const second = /часть 2 из 2/.test(prompt);
-  const sections = pages.map((p, i) => ({
+  const text = pages.filter((p) => !sc.titles.has(p));
+  const sections = text.map((p) => ({ p, i: pages.indexOf(p) })).map(({ p, i }) => ({
     heading: sc.continueHeading && second && i === 0 ? "Пункт " + (p - 1) : "Пункт " + p,
     blocks: [{ type: "PARAGRAPH", text: "**Страница " + p + "**: Термин " + p + " и Общий термин. " + filler + filler, sourcePage: i }],
   }));
   return {
-    meta: { title: second ? "Другое название" : "§ 5. Тема из восьми страниц", subject: "physics", pages: pages.map((_, i) => ({ index: i, readable: "ok" })), sourceOutline: sections.map((s) => s.heading) },
+    meta: { title: second ? "Другое название" : "§ 5. Тема из восьми страниц", subject: "physics", pages: pages.map((p, i) => ({ index: i, readable: sc.titles.has(p) ? "unreadable" : "ok" })), sourceOutline: sections.map((s) => s.heading) },
     lead: second ? "" : "Главное по теме.",
     sections,
-    glossary: { terms: [...pages.map((p) => ({ term: "Термин " + p, definition: "Определение термина со страницы " + p + "." })), { term: "Общий термин", definition: "Есть в обеих частях." }], dates: [], people: [], formulas: [] },
-    remember: pages.map((p) => "Факт со страницы " + p),
+    glossary: { terms: [...text.map((p) => ({ term: "Термин " + p, definition: "Определение термина со страницы " + p + "." })), { term: "Общий термин", definition: "Есть в обеих частях." }], dates: [], people: [], formulas: [] },
+    remember: text.map((p) => "Факт со страницы " + p),
     conclusion: /итог ВСЕЙ темы/.test(prompt) ? "Итог всей темы." : "Итог части.",
-    selfCheck: pages.map((p) => ({ q: "Вопрос по странице " + p + "?", a: "Ответ " + p + "." })),
+    selfCheck: text.map((p) => ({ q: "Вопрос по странице " + p + "?", a: "Ответ " + p + "." })),
     warnings: [],
   };
 }
@@ -78,12 +102,24 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
     const body = JSON.parse(String(init.body));
     const pages = body.messages.filter((m: any) => m.attachments).map((m: any) => sc.fileToPage.get(m.attachments[0])!);
     const prompt = body.messages.filter((m: any) => !m.attachments && m.role === "user").map((m: any) => m.content).join("\n");
+    const system = body.messages.find((m: any) => m.role === "system")?.content || "";
+    sc.systems.push(system);
     sc.calls.push({ pages, prompt });
-    if (sc.calls.length - 1 === sc.chatFailOn) return jsonRes(500, { message: "boom" });
-    return jsonRes(200, {
-      model: "GigaChat-2-Max:2.0", choices: [{ message: { content: JSON.stringify(contentFor(pages, prompt)) }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 2700 + 1930 * pages.length, completion_tokens: 300 * pages.length },
+    const k = sc.calls.length - 1;
+    skew += sc.chatMs;
+    if (k === sc.chatFailOn) return jsonRes(500, { message: "boom" });
+    if (sc.chatStatus.has(k)) return jsonRes(sc.chatStatus.get(k)!, { message: "refused" });
+    const reply = (content: string, out: number) => jsonRes(200, {
+      model: "GigaChat-2-Max:2.0", choices: [{ message: { content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 2700 + 1930 * pages.length, completion_tokens: out },
     });
+    if (sc.refuseLong.has(k)) return reply(longRefusal(pages.length), 400);
+    // модель: на одних титульных листах текста нет — отказ; титульный лист среди страниц с текстом — отказ при
+    // прежней инструкции, конспект по остальным при новой («НЕ причина для отказа»)
+    const titled = pages.some((p) => sc.titles.has(p));
+    const allTitles = pages.every((p) => sc.titles.has(p));
+    if (sc.refuse.has(k) || allTitles || (titled && !/НЕ причина для отказа/.test(system))) return reply(shortRefusal(), 23);
+    return reply(JSON.stringify(contentFor(pages, prompt)), 300 * pages.filter((p) => !sc.titles.has(p)).length);
   }
   return jsonRes(404, {});
 };
@@ -123,6 +159,13 @@ const reset = () => {
   sc.selfStatus = 0;
   sc.continuationHits = 0;
   sc.holdContinuation = null;
+  sc.titles = new Set();
+  sc.refuse = new Set();
+  sc.refuseLong = new Set();
+  sc.chatStatus = new Map();
+  sc.chatMs = 0;
+  sc.systems = [];
+  logs.length = 0;
 };
 const note = (id: string) => sim.notes.get(id) as any;
 const plainText = (c: any) => JSON.stringify(c.sections);
@@ -346,6 +389,167 @@ sim.access = "limit_reached";
   check("[доступ] лимит генераций исчерпан: 403 LIMIT_REACHED, ИИ не вызывался", r.status === 403 && r.body.error === "LIMIT_REACHED" && sc.calls.length === 0, r);
 }
 sim.access = "ok";
+
+
+// ---------- v66.1: отказ «страницы не читаются» (UNREADABLE_PAGES) ----------
+const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+const unreadableLogs = () => logs.filter((l) => l.includes("unreadable:"));
+const safeLog = () => !logs.some((l) => l.includes(TITLE_WARNING) || l.includes("Перышкин") || l.includes("размыта") || l.includes("Страница 1"));
+const genOk = (id: string, gensBefore: number, startsBefore: number, status: "success" | "failed") =>
+  sim.starts.length - startsBefore === 1 && sim.gens.length - gensBefore === 1 && sim.gens[sim.gens.length - 1].status === status
+    && sim.ledger.get(id) === (status === "success" ? "charged" : "refunded");
+
+reset();
+{
+  const { id, paths } = makeNote(1);
+  await start(id, paths);
+  check("[инструкция] модели ушёл новый текст: обложка/титульный лист — НЕ причина для отказа; отказ — только если текста нет ни на одной фотографии", /НЕ причина для отказа/.test(sc.systems[0]) && /НИ НА ОДНОЙ фотографии/.test(sc.systems[0]), sc.systems[0]?.slice(-700));
+}
+
+// 1. первая фотография — титульный лист, 1–8 фото
+for (let n = 1; n <= 8; n++) {
+  reset();
+  sc.titles = new Set([1]);
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(n);
+  const r = await start(id, paths);
+  const nn = note(id);
+  if (n === 1) {
+    // только титульный лист: текста нет нигде — честный отказ после одного повтора, генерация возвращена
+    check("[титул, 1 фото — только титульный лист] failed UNREADABLE_PAGES после одного повтора (2 запроса), резерв возвращён, одна строка ai_generations",
+      r.status === 202 && nn.status === "failed" && nn.error_code === "UNREADABLE_PAGES" && sc.calls.length === 2 && genOk(id, gensBefore, startsBefore, "failed"),
+      { st: nn.status, err: nn.error_code, calls: sc.calls.length, ledger: sim.ledger.get(id) });
+    continue;
+  }
+  const parts = n <= 4 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+  const c = nn.content;
+  const heads = c?.sections.map((s: any) => s.heading) || [];
+  check(`[титул, ${n} фото] готово без повторов: запросов ${parts.length} (${parts.join("+")}), титульный лист не вызвал отказ`,
+    nn.status === "ready" && JSON.stringify(sc.calls.map((x) => x.pages.length)) === JSON.stringify(parts), { st: nn.status, err: nn.error_code, calls: sc.calls.map((x) => x.pages) });
+  check(`[титул, ${n} фото] конспект по страницам 2…${n}; титульный лист отмечен unreadable (index 0), всего ${n} страниц`,
+    JSON.stringify(heads) === JSON.stringify(ids(n).slice(1).map((p) => "Пункт " + p)) && c.meta.pages.length === n
+      && c.meta.pages[0].readable === "unreadable" && c.meta.pages.slice(1).every((p: any) => p.readable === "ok"), { heads, pages: c?.meta.pages });
+  check(`[титул, ${n} фото] одна генерация: один резерв, списана один раз, одна строка ai_generations`, genOk(id, gensBefore, startsBefore, "success"),
+    { ledger: sim.ledger.get(id), gens: sim.gens.length - gensBefore });
+}
+
+// 1б. прежняя инструкция (как в v27): титульный лист в 1-й части → короткий отказ; теперь — один повтор и конспект
+for (const n of [3, 6]) {
+  reset();
+  sc.titles = new Set([1]);
+  sc.refuse = new Set([0]); // первый ответ — короткий отказ, как 07.11 (23 токена)
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length, uploadsBefore = sc.uploads;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const parts = n <= 4 ? [n, n] : [3, 3, 3];
+  check(`[как 07.11, ${n} фото] короткий отказ на первый запрос → один повтор с уточнением → готово (запросов ${parts.length})`,
+    nn.status === "ready" && JSON.stringify(sc.calls.map((x) => x.pages.length)) === JSON.stringify(parts)
+      && /не читаются, но это фотографии страниц учебника/.test(sc.calls[1].prompt), { st: nn.status, err: nn.error_code, calls: sc.calls.map((x) => x.pages) });
+  check(`[как 07.11, ${n} фото] при повторе фото заново не загружались в GigaChat (${n} загрузок)`, sc.uploads - uploadsBefore === n, sc.uploads - uploadsBefore);
+  const g = sim.gens[sim.gens.length - 1];
+  check(`[как 07.11, ${n} фото] одна генерация, списана один раз; токены в строке — сумма всех запросов (с отказом)`,
+    genOk(id, gensBefore, startsBefore, "success") && g.input_tokens === sc.calls.reduce((a, x) => a + 2700 + 1930 * x.pages.length, 0)
+      && g.output_tokens === 23 + 300 * (n - 1), g);
+  const d = unreadableLogs();
+  check(`[как 07.11, ${n} фото] в лог записана диагностика отказа: код, длина, метки причин (cover), без текста ответа`,
+    d.length === 1 && /"error":"UNREADABLE_PAGES"/.test(d[0]) && /"reasons":\["cover"/.test(d[0]) && /"output_tokens":23/.test(d[0]) && /"warnings":1/.test(d[0]), d);
+  check(`[как 07.11, ${n} фото] в логе нет текста ответа модели, имён и текста учебника`, safeLog(), logs.filter((l) => !safeLog() && l.includes("unreadable")));
+  check(`[как 07.11, ${n} фото] метрики: unreadable_retry = true`, logs.some((l) => l.includes("metrics") && l.includes('"unreadable_retry":true')));
+}
+
+// 2. короткий отказ без титульного листа: 1–8 фото, отказ на первый запрос (части 1) и на первый запрос части 2
+for (let n = 1; n <= 8; n++) {
+  for (const at of n > 4 ? [0, 1] : [0]) {
+    reset();
+    sc.refuse = new Set([at]);
+    const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+    const { id, paths } = makeNote(n);
+    await start(id, paths);
+    const nn = note(id);
+    const parts = n <= 4 ? [n] : [Math.ceil(n / 2), n - Math.ceil(n / 2)];
+    const expected = [...parts.slice(0, at + 1), ...parts.slice(at)];
+    const heads = nn.content?.sections.map((s: any) => s.heading) || [];
+    check(`[короткий отказ, ${n} фото, ${n > 4 ? "часть " + (at + 1) : "один запрос"}] один повтор → готово, все страницы в конспекте, запросов ${expected.length}`,
+      nn.status === "ready" && JSON.stringify(sc.calls.map((x) => x.pages.length)) === JSON.stringify(expected)
+        && JSON.stringify(heads) === JSON.stringify(ids(n).map((p) => "Пункт " + p)), { st: nn.status, err: nn.error_code, calls: sc.calls.map((x) => x.pages), heads });
+    check(`[короткий отказ, ${n} фото${n > 4 ? ", часть " + (at + 1) : ""}] одна генерация, списана один раз; лог безопасен`,
+      genOk(id, gensBefore, startsBefore, "success") && unreadableLogs().length === 1 && safeLog(), { ledger: sim.ledger.get(id), d: unreadableLogs() });
+  }
+}
+
+// 3. отказ дважды подряд — не больше одного повтора, генерация возвращена
+for (const n of [2, 4, 6, 8]) {
+  reset();
+  sc.refuse = new Set([0, 1]);
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  check(`[отказ дважды, ${n} фото] не больше одного повтора: 2 запроса, failed UNREADABLE_PAGES, вторая часть не запускалась, резерв возвращён`,
+    nn.status === "failed" && nn.error_code === "UNREADABLE_PAGES" && sc.calls.length === 2 && sc.continuationHits === 0 && genOk(id, gensBefore, startsBefore, "failed")
+      && [...sim.files.keys()].some((k) => k.includes(id)), { st: nn.status, err: nn.error_code, calls: sc.calls.length, ledger: sim.ledger.get(id) });
+  check(`[отказ дважды, ${n} фото] диагностика записана для обеих попыток`, unreadableLogs().length === 2 && safeLog(), unreadableLogs());
+}
+
+// 4. длинный подробный отказ (страницы действительно не читаются) — без повтора
+for (const n of [3, 7]) {
+  reset();
+  sc.refuseLong = new Set([0]);
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  check(`[длинный отказ, ${n} фото] без повтора: 1 запрос, failed UNREADABLE_PAGES, резерв возвращён`,
+    nn.status === "failed" && nn.error_code === "UNREADABLE_PAGES" && sc.calls.length === 1 && genOk(id, gensBefore, startsBefore, "failed"),
+    { st: nn.status, calls: sc.calls.length });
+  const d = unreadableLogs();
+  check(`[длинный отказ, ${n} фото] диагностика: все страницы unreadable, метка blurry, без текста предупреждений`,
+    d.length === 1 && d[0].includes('"pages":"' + Array(Math.min(n, 4) > 0 ? (n <= 4 ? n : Math.ceil(n / 2)) : 0).fill("unreadable").join(",") + '"') && /"reasons":\[[^\]]*"blurry"/.test(d[0]) && safeLog(), d);
+}
+
+// 5. на повтор не хватает времени — повтора нет
+for (const n of [4, 8]) {
+  reset();
+  sc.refuse = new Set([0]);
+  sc.chatMs = 100_000; // ответ «длился» 100 с: из 140 с осталось меньше, чем нужно на полноценный повтор
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  check(`[мало времени, ${n} фото] короткий отказ, но повтор не успеет → без повтора: 1 запрос, failed, резерв возвращён`,
+    nn.status === "failed" && nn.error_code === "UNREADABLE_PAGES" && sc.calls.length === 1 && genOk(id, gensBefore, startsBefore, "failed")
+      && logs.some((l) => l.includes("retry skipped: not enough time")), { st: nn.status, calls: sc.calls.length });
+}
+skew = 0;
+
+// 6. настоящие ошибки провайдера (авторизация, квота, ограничения) — повтора нет
+for (const [status, code] of [[403, "AI_AUTH"], [429, "AI_RATE_LIMITED"], [400, "AI_BAD_REQUEST"]] as const) {
+  for (const n of [3, 6]) {
+    reset();
+    sc.chatStatus = new Map([[0, status]]);
+    const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+    const { id, paths } = makeNote(n);
+    await start(id, paths);
+    const nn = note(id);
+    check(`[HTTP ${status}, ${n} фото] без повтора: 1 запрос к модели, failed ${code}, вторая часть не запускалась, резерв возвращён`,
+      nn.status === "failed" && nn.error_code === code && sc.calls.length === 1 && sc.continuationHits === 0 && genOk(id, gensBefore, startsBefore, "failed")
+        && unreadableLogs().length === 0, { st: nn.status, err: nn.error_code, calls: sc.calls.length, ledger: sim.ledger.get(id) });
+  }
+}
+
+// 7. повтор после отказа сам упал с ошибкой провайдера — генерация возвращена, третьего запроса нет
+{
+  reset();
+  sc.refuse = new Set([0]);
+  sc.chatStatus = new Map([[1, 429]]);
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
+  const { id, paths } = makeNote(4);
+  await start(id, paths);
+  const nn = note(id);
+  check("[отказ, затем 429] 2 запроса, failed AI_RATE_LIMITED, резерв возвращён, одна строка ai_generations",
+    nn.status === "failed" && nn.error_code === "AI_RATE_LIMITED" && sc.calls.length === 2 && genOk(id, gensBefore, startsBefore, "failed"), { st: nn.status, err: nn.error_code, calls: sc.calls.length });
+}
 
 console.log(`ИТОГО: ${pass} PASS, ${fail} FAIL (имитация Supabase и GigaChat; настоящий ИИ не вызывался)`);
 Deno.exit(fail ? 1 : 0);

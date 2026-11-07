@@ -430,6 +430,52 @@ export function extractJson(text: string): Json | null {
   return parseModelJson(text).value;
 }
 
+/**
+ * Безопасная диагностика отказа «страницы не читаются» (UNREADABLE_PAGES) для лога: только коды, числа и метки причин.
+ * Текст ответа модели, предупреждения (в них может быть текст учебника) и персональные данные в лог не попадают —
+ * из предупреждений берутся лишь метки по ключевым словам (обложка, размытость, нет текста…).
+ */
+export type UnreadableDiag = {
+  error: string;
+  reply_chars: number;
+  pages: string;
+  sections: number;
+  terms: number;
+  warnings: number;
+  warning_chars: number;
+  reasons: string[];
+};
+
+const REASON_TAGS: [string, RegExp][] = [
+  ["cover", /обложк|титул|выходн|cover|title/i],
+  ["toc", /оглавлен|содержани/i],
+  ["blurry", /размыт|нечётк|нечетк|расфокус|смаз|blur/i],
+  ["dark", /темн|тёмн|засвет|блик|освещ/i],
+  ["cut", /обрез|край|не полност|частичн/i],
+  ["small", /мелк|разрешени|маленьк/i],
+  ["no_text", /нет (учебного )?текст|без текст|отсутству|не содерж|только (рисун|изображ|иллюстрац)|пуст/i],
+  ["not_textbook", /не (является )?учебник|не учебн/i],
+];
+
+export function unreadableDiag(value: Json, replyChars: number): UnreadableDiag {
+  const r = obj(value);
+  const m = obj(r.meta);
+  const warnings = arr(r.warnings).filter((w): w is string => typeof w === "string");
+  const reasons = REASON_TAGS.filter(([, re]) => warnings.some((w) => re.test(w))).map(([tag]) => tag);
+  if (warnings.length && !reasons.length) reasons.push("other");
+  return {
+    // код — только заглавные латинские буквы и «_», не больше 40 знаков
+    error: typeof r.error === "string" ? r.error.replace(/[^A-Z_]/g, "").slice(0, 40) : "",
+    reply_chars: replyChars,
+    pages: arr(m.pages).map((p) => (READABLE.includes(obj(p).readable as never) ? String(obj(p).readable) : "?")).join(","),
+    sections: arr(r.sections).length,
+    terms: arr(obj(r.glossary).terms).length,
+    warnings: warnings.length,
+    warning_chars: warnings.reduce((n, w) => n + w.length, 0),
+    reasons,
+  };
+}
+
 /** Подсказка модели для повтора по типу ошибки JSON (без текста её ответа). */
 export function jsonRetryHint(diag: JsonDiag | null): string {
   switch (diag?.kind) {
