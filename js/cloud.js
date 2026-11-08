@@ -20,6 +20,10 @@
   const NOTE_COLS = "id,status,stage,error_code,title,subject,preview,content,schema_version,created_at,updated_at";
   const POLL_MS = 2500;
   const WAIT_MS = 4 * 60_000;
+  // больше 4 страниц сервер обрабатывает частями подряд (каждая — свой вызов функции, плюс до двух повторов частей):
+  // обычно 2–3 мин. Сервер не начинает часть, которая не уложится в 10 мин от запуска, и записывает итог не позже
+  // ~10 мин 45 с (GEN_BUDGET_MS в analyze-pages/parts.ts) — клиент ждёт дольше, 12 мин, чтобы не сдаться раньше сервера
+  const WAIT_LONG_MS = 12 * 60_000;
 
   let client = null;
   let userPromise = null;
@@ -365,8 +369,8 @@
     });
   }
 
-  async function waitForNote(noteId, { isCancelled } = {}) {
-    const until = Date.now() + WAIT_MS;
+  async function waitForNote(noteId, { isCancelled, pageCount } = {}) {
+    const until = Date.now() + (!pageCount || pageCount > 4 ? WAIT_LONG_MS : WAIT_MS);
     while (Date.now() < until) {
       await sleep(POLL_MS);
       if (isCancelled && isCancelled()) throw new Error("CANCELLED");

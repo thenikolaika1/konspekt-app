@@ -37,12 +37,29 @@ export type Reply = {
   outputTokens: number;
   /** время этапов внутри провайдера, мс (для GigaChat — OAuth, загрузка файлов, chat) */
   timings: { oauthMs: number; uploadMs: number; chatMs: number };
+  /** потоковый ответ GigaChat (генерация по частям): время до первого токена, генерация, объём — только числа */
+  stream?: StreamStats;
   /** провайдеры, которые упали перед этим ответом (сработал fallback) */
   fallbacks: ProviderId[];
 };
 
+/** Время этапов неудачного вызова провайдера (для метрик): stage — этап, на котором произошла ошибка. */
+export type StageTimings = { oauthMs: number; uploadMs: number; chatMs: number; stage: string; stream?: StreamStats };
+
+/**
+ * Безопасные метрики потокового ответа (stream: true): только числа и код причины, без текста ответа.
+ * ttftMs — от отправки запроса chat до первого непустого фрагмента текста (-1 — не дождались);
+ * genMs — от первого фрагмента до конца или обрыва; chunks/chars — сколько фрагментов и знаков пришло;
+ * tokens — completion_tokens из usage, если GigaChat их прислал (-1 — не прислал, например при обрыве);
+ * end — причина окончания: finish_reason модели (stop, length, blacklist, error) или timeout / network / eof
+ * (поток закрылся без конца ответа) / bad_chunk (фрагмент не разобрался).
+ */
+export type StreamStats = { ttftMs: number; genMs: number; chunks: number; chars: number; tokens: number; end: string };
+
 /** Ошибка провайдера: code — код для notes.error_code, detail — безопасный текст для лога. */
 export class ProviderError extends Error {
+  /** время этапов до ошибки (только числа и название этапа) */
+  timings?: StageTimings;
   constructor(public code: string, public detail = "", public provider = "", public status = 0) {
     super(code);
   }
@@ -139,8 +156,10 @@ export function configuredProviders(): ProviderId[] {
 /**
  * Один запрос к модели с автоматическим переключением на резервный провайдер при ошибке провайдера.
  * prefer — провайдер, который надо попробовать первым (для повтора: тот же, что дал первый ответ).
+ * capMs — если задан, вызов одного провайдера не дольше этого (генерация по частям); без него — как раньше.
+ * stream — GigaChat отвечает потоком (stream: true) ради метрик ожидания; без него — как раньше, одним ответом.
  */
-export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession): Promise<Reply> {
+export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession, capMs?: number, stream = false): Promise<Reply> {
   const available = configuredProviders();
   const order = prefer && available.includes(prefer) ? [prefer, ...available.filter((p) => p !== prefer)] : available;
   if (!order.length) throw new ProviderError("SERVER_MISCONFIGURED", "no AI provider key configured");
@@ -154,7 +173,8 @@ export async function generate(messages: ChatMessage[], deadline: number, prefer
     // пока есть резервный провайдер, текущий не может занять всё оставшееся время:
     // после первого остаётся резерв на резервные, после промежуточного — на последний
     const reserve = i === 0 ? TIMEOUTS.fallbackReserveMs : TIMEOUTS.lastReserveMs;
-    const timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    let timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    if (capMs) timeout = Math.min(timeout, capMs);
     if (timeout < TIMEOUTS.minCallMs) {
       if (hasNext) {
         console.warn("[analyze-pages] skip provider=" + id + ": not enough time left (" + remaining + " ms)");
@@ -163,7 +183,7 @@ export async function generate(messages: ChatMessage[], deadline: number, prefer
       throw lastError || new ProviderError("AI_TIMEOUT", "no time left", id);
     }
     try {
-      const reply = await (id === "gigachat" ? callGigaChat(messages, timeout, giga) : callProvider(PROVIDERS[id], messages, timeout));
+      const reply = await (id === "gigachat" ? callGigaChat(messages, timeout, giga, stream) : callProvider(PROVIDERS[id], messages, timeout));
       return { ...reply, fallbacks: failed };
     } catch (e) {
       const err = e instanceof ProviderError ? e : new ProviderError("AI_ERROR", String(e), id);
@@ -401,7 +421,7 @@ async function runPool(tasks: (() => Promise<void>)[], limit: number) {
  * timeout покрывает всё, кроме удаления файлов (у него свой короткий лимит).
  * Без session (прямой вызов) файлы удаляются сразу после запроса, как раньше.
  */
-async function callGigaChat(messages: ChatMessage[], timeout: number, session?: GigaSession): Promise<Reply> {
+async function callGigaChat(messages: ChatMessage[], timeout: number, session?: GigaSession, stream = false): Promise<Reply> {
   const p = PROVIDERS.gigachat;
   const s = session || newGigaSession();
   const started = Date.now();
@@ -411,14 +431,32 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
   let pages = 0;
   let uploaded = 0;
   let stage = "oauth";
+  let stageStarted = started;
   let ok = false;
+  // время этапов до ошибки — в метрики (без текста и ключей)
+  // метрики потока: заполняются по мере ответа, при обрыве остаются тем, что успело прийти
+  let st: StreamStats | undefined;
+  let firstAt = 0;
+  let inStream = false;
+  const timingsAt = (): StageTimings => {
+    const now = Date.now() - stageStarted;
+    return {
+      oauthMs: stage === "oauth" ? now : timings.oauthMs,
+      uploadMs: stage === "upload" ? now : timings.uploadMs,
+      chatMs: stage === "chat" ? timings.chatMs || now : timings.chatMs,
+      stage,
+      ...(st ? { stream: closeStream(st, firstAt) } : {}),
+    };
+  };
 
   // запрос к API с токеном; при 401 запрос повторяется один раз с новым токеном. Токен сбрасывается, только
   // если он всё ещё текущий: параллельные загрузки, получившие 401 одновременно, делят один OAuth-запрос
-  const api = async (path: string, init: RequestInit, signal: AbortSignal = ctrl.signal): Promise<{ res: Response; body: string }> => {
+  // accept = text/event-stream: успешный потоковый ответ возвращается непрочитанным (body пустой), его читает readStream
+  const api = async (path: string, init: RequestInit, signal: AbortSignal = ctrl.signal, accept = "application/json"): Promise<{ res: Response; body: string }> => {
     for (let retried = false;; retried = true) {
       const token = await gigaAccessToken(signal);
-      const res = await gigaFetch(GIGACHAT.apiUrl + path, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: "Bearer " + token, Accept: "application/json" } }, signal);
+      const res = await gigaFetch(GIGACHAT.apiUrl + path, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: "Bearer " + token, Accept: accept } }, signal);
+      if (res.ok && accept === EVENT_STREAM && isEventStream(res)) return { res, body: "" };
       const body = await res.text();
       if (res.status === 401 && !retried) {
         if (gigaToken?.value === token) gigaToken = null;
@@ -484,7 +522,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     const urls = messages.flatMap((m) => (typeof m.content === "string" ? [] : m.content.flatMap((c) => (c.type === "image_url" ? [c.image_url.url] : []))));
     const missing = [...new Set(urls)].filter((u) => !s.files.has(u));
     stage = "upload";
-    t = Date.now();
+    t = stageStarted = Date.now();
     await runPool(missing.map((u) => () => upload(u, urls.indexOf(u) + 1)), GIGACHAT.uploadConcurrency);
     timings.uploadMs = Date.now() - t;
 
@@ -508,22 +546,35 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     }
 
     stage = "chat";
-    t = Date.now();
+    t = stageStarted = Date.now();
+    if (stream) st = { ttftMs: -1, genMs: 0, chunks: 0, chars: 0, tokens: -1, end: "" };
     const { res, body } = await api("/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: p.model, messages: out, temperature: 0.2, max_tokens: 12000, stream: false }),
-    });
-    timings.chatMs = Date.now() - t;
-    const ms = Date.now() - started;
-    if (!res.ok) throw fail(res.status, body);
+      body: JSON.stringify({ model: p.model, messages: out, temperature: 0.2, max_tokens: 12000, stream }),
+    }, ctrl.signal, stream ? EVENT_STREAM : "application/json");
+    if (!res.ok) {
+      timings.chatMs = Date.now() - t;
+      throw fail(res.status, body);
+    }
 
     let data;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      data = null;
+    if (st && isEventStream(res)) {
+      // поток: текст собирается из фрагментов; дальше — та же проверка, что у обычного ответа
+      inStream = true;
+      data = await readStream(res, st, t, (at) => (firstAt = at));
+      inStream = false;
+    } else {
+      // сервер ответил обычным JSON (в том числе на stream: true) — разбираем как раньше
+      if (st) st.end = "not_streamed";
+      try {
+        data = JSON.parse(body);
+      } catch {
+        data = null;
+      }
     }
+    timings.chatMs = Date.now() - t;
+    const ms = Date.now() - started;
     const choice = data?.choices?.[0];
     if (!choice) {
       console.warn("[analyze-pages] ai provider=gigachat model=" + p.model + " status=200 body-error ms=" + ms + " images=" + pages);
@@ -537,7 +588,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     console.log(
       "[analyze-pages] ai provider=gigachat model=" + p.model + (fullModel !== p.model ? " → " + fullModel : "") + " status=200 ms=" + ms +
         " images=" + pages + " finish=" + finish + " oauth_ms=" + timings.oauthMs + " upload_ms=" + timings.uploadMs + " uploaded=" + uploaded +
-        " reused=" + (pages - uploaded) + " chat_ms=" + timings.chatMs,
+        " reused=" + (pages - uploaded) + " chat_ms=" + timings.chatMs + (st ? streamLog(closeStream(st, firstAt)) : ""),
     );
     if (finish === "blacklist") throw new ProviderError("AI_REFUSED", "", "gigachat", 200);
     if (finish === "error") throw new ProviderError("AI_ERROR", "finish_reason=error", "gigachat", 200);
@@ -551,18 +602,32 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
       inputTokens: Number(data.usage?.prompt_tokens) || 0,
       outputTokens: Number(data.usage?.completion_tokens) || 0,
       timings,
+      ...(st ? { stream: closeStream(st, firstAt) } : {}),
       fallbacks: [],
     };
   } catch (e) {
-    if (e instanceof ProviderError) throw e;
+    const tm = timingsAt();
+    if (e instanceof ProviderError) {
+      if (tm.stream && !tm.stream.end) tm.stream.end = "error";
+      // ошибка внутри потока (обрыв без конца ответа, неразборчивый фрагмент, событие ошибки) — метрики потока в лог
+      if (tm.stream && inStream) {
+        console.warn("[analyze-pages] ai provider=gigachat model=" + p.model + " stage=chat stream failed: " + e.code + " after " + (Date.now() - started) +
+          " ms images=" + pages + streamLog(tm.stream));
+      }
+      e.timings ??= tm;
+      throw e;
+    }
     const aborted = ctrl.signal.aborted;
+    if (tm.stream && !tm.stream.end) tm.stream.end = aborted ? "timeout" : "network";
     const msg = String((e as Error)?.message || e).slice(0, 200);
     const tls = /certificate|UnknownIssuer|invalid peer|tls/i.test(msg);
     console.warn(
       "[analyze-pages] ai provider=gigachat model=" + p.model + " stage=" + stage + " " + (aborted ? "timeout" : tls ? "tls error" : "network error") +
-        " after " + (Date.now() - started) + " ms images=" + pages,
+        " after " + (Date.now() - started) + " ms images=" + pages + " oauth_ms=" + tm.oauthMs + " upload_ms=" + tm.uploadMs + " chat_ms=" + tm.chatMs + (tm.stream ? streamLog(tm.stream) : ""),
     );
-    throw new ProviderError(aborted ? "AI_TIMEOUT" : "AI_NETWORK", aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg, "gigachat");
+    const err = new ProviderError(aborted ? "AI_TIMEOUT" : "AI_NETWORK", aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg, "gigachat");
+    err.timings = tm;
+    throw err;
   } finally {
     clearTimeout(timer);
     // ошибка GigaChat: его файлы больше не нужны — удаление в фоне, резервный провайдер стартует сразу
@@ -570,6 +635,95 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     // прямой вызов без сессии — удалить сразу, как раньше
     if (!session) await closeGigaSession(s);
   }
+}
+
+const EVENT_STREAM = "text/event-stream";
+const isEventStream = (res: Response) => (res.headers.get("content-type") || "").toLowerCase().includes(EVENT_STREAM);
+
+/** Метрики потока на текущий момент (длительность генерации — от первого фрагмента до сейчас, если поток не закончен). */
+function closeStream(st: StreamStats, firstAt: number): StreamStats {
+  return { ...st, genMs: st.end && st.genMs ? st.genMs : firstAt ? Date.now() - firstAt : 0 };
+}
+
+const streamLog = (s: StreamStats) =>
+  " ttft_ms=" + s.ttftMs + " gen_ms=" + s.genMs + " chunks=" + s.chunks + " chars=" + s.chars + " tokens=" + s.tokens + " end=" + (s.end || "?");
+
+/**
+ * Читает потоковый ответ GigaChat (Server-Sent Events: строки «data: {json}», в конце «data: [DONE]») и собирает его
+ * в вид обычного ответа: { model, choices: [{ message: { content }, finish_reason }], usage }. Попутно заполняет
+ * метрики st (только числа). Обрыв по тайм-ауту или сети — исключение из reader.read() (обрабатывает callGigaChat);
+ * поток закрылся без конца ответа — AI_NETWORK; неразборчивый фрагмент или ошибка в потоке — AI_ERROR.
+ */
+async function readStream(res: Response, st: StreamStats, chatStarted: number, onFirst: (at: number) => void) {
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let finish = "";
+  let model = "";
+  let usage: Record<string, unknown> | undefined;
+  let done = false;
+  let firstAt = 0;
+  const line = (raw: string) => {
+    const l = raw.replace(/\r$/, "");
+    if (!l.startsWith("data:")) return; // пустые строки, комментарии «:», event:/id: — пропускаем
+    const v = l.slice(5).trim();
+    if (!v) return;
+    if (v === "[DONE]") return void (done = true);
+    let obj;
+    try {
+      obj = JSON.parse(v);
+    } catch {
+      st.end = "bad_chunk";
+      throw new ProviderError("AI_ERROR", "stream: bad chunk", "gigachat", 200);
+    }
+    const ch = obj?.choices?.[0];
+    if (!ch) {
+      if (obj?.usage) usage = obj.usage;
+      if (obj?.error || obj?.message) {
+        st.end = "error";
+        throw new ProviderError("AI_ERROR", "stream: error event", "gigachat", Number(obj?.status) || 200);
+      }
+      return;
+    }
+    if (obj.model) model = String(obj.model);
+    if (obj.usage) usage = obj.usage;
+    const piece = typeof ch.delta?.content === "string" ? ch.delta.content : "";
+    if (piece) {
+      if (!firstAt) {
+        firstAt = Date.now();
+        st.ttftMs = firstAt - chatStarted;
+        onFirst(firstAt);
+      }
+      text += piece;
+      st.chunks++;
+      st.chars += piece.length;
+    }
+    if (ch.finish_reason) finish = String(ch.finish_reason);
+  };
+  try {
+    while (!done) {
+      const { value, done: eof } = await reader.read();
+      if (eof) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while (!done && (i = buf.indexOf("\n")) >= 0) {
+        line(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+      }
+    }
+    if (!done && buf) line(buf);
+  } finally {
+    if (done) await reader.cancel().catch(() => {});
+  }
+  if (usage) st.tokens = Number((usage as { completion_tokens?: unknown }).completion_tokens) || 0;
+  st.genMs = firstAt ? Date.now() - firstAt : 0;
+  if (!done && !finish) {
+    st.end = "eof";
+    throw new ProviderError("AI_NETWORK", "stream ended before the answer was complete", "gigachat", 200);
+  }
+  st.end = finish || "stop";
+  return { model, choices: [{ message: { content: text }, finish_reason: finish || "stop" }], usage: usage || {} };
 }
 
 /** Удаление загруженных страниц из хранилища GigaChat (после ошибки GigaChat или в конце генерации). */

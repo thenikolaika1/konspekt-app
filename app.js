@@ -13,8 +13,10 @@
     cam = document.querySelector("#cameraInput"),
     gallery = document.querySelector("#galleryInput");
 
-  // Friends & Family: не больше 4 страниц (сервер проверяет тот же лимит — private.ai_limits.max_pages)
-  const MAX_PAGES = 4;
+  // эксперимент v66: до 8 страниц (сервер проверяет тот же лимит — private.ai_limits.max_pages; больше 4 страниц
+  // analyze-pages обрабатывает двумя частями — см. supabase/functions/analyze-pages/parts.ts)
+  const MAX_PAGES = 8;
+  const pagesLimitText = "Можно загрузить не более " + MAX_PAGES + " фотографий";
   const STEPS = ["Изучаем страницы", "Выделяем главное", "Структурируем материал", "Создаём конспект"];
   const BM_ICONS = ["book", "leaf", "atom", "flask", "globe", "folder"];
   const BM_COLORS = ["#f7eadc", "#e7f4e9", "#e7f1fd", "#f0eafa", "#f9e8ed", "#edf0f3"];
@@ -528,10 +530,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=65";
+        css.href = "./owner.css?v=66";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=65";
+        js.src = "./js/owner.js?v=66";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -951,8 +953,9 @@
         .join("") +
       '<div class="page-shot loading"></div>'.repeat(S.pagesLoading) +
       (canAdd ? '<button class="add-page" data-camera aria-label="Добавить страницу">' + icon("plus") + "<span>Ещё<br>страница</span></button>" : "") +
-      '</div><div class="meta pages-count">Страницы · ' + n +
-      (S.pagesMessage ? '</div><div class="meta camera-message">' + esc(S.pagesMessage) : "") +
+      '</div><div class="meta pages-count">Страницы · ' + n + " из " + MAX_PAGES +
+      // при 8 страницах камера и галерея выключены — объясняем почему
+      (S.pagesMessage || n >= MAX_PAGES ? '</div><div class="meta camera-message">' + esc(S.pagesMessage || pagesLimitText) : "") +
       '</div><div class="camera-actions"><div class="gallery-wrap"><button class="gallery" data-gallery aria-label="Галерея"' + (canAdd ? "" : " disabled") + ">" +
       icon("gallery") +
       '</button><span>Галерея</span></div><button class="shutter" data-camera aria-label="Сфотографировать"' + (canAdd ? "" : " disabled") +
@@ -1187,6 +1190,8 @@
     UPLOAD_FAILED: ["Не удалось загрузить фотографии.", "Попробуй ещё раз."],
     UNREADABLE_PAGES: ["Не получилось прочитать текст на фотографиях.", "Сфотографируй страницы целиком, ровно и при хорошем свете."],
     AI_TIMEOUT: ["ИИ отвечал слишком долго.", "Попробуй ещё раз или отправь меньше страниц."],
+    // ответ ИИ не удалось разобрать как конспект (повреждённый JSON) — генерация не списана, фото сохранены
+    AI_BAD_JSON: ["ИИ не смог корректно сформировать конспект.", "Попробуй ещё раз."],
     AI_RATE_LIMITED: ["Сервис ИИ сейчас перегружен.", "Подожди минуту и попробуй ещё раз."],
     RATE_LIMITED: ["Слишком много конспектов за короткое время.", "Попробуй немного позже."],
     STILL_PROCESSING: ["Конспект ещё создаётся.", "Он появится в «Недавних», когда будет готов."],
@@ -1786,7 +1791,7 @@
     if (replaceIndex !== null) files = files.slice(0, 1);
     else {
       const free = MAX_PAGES - S.pages.length - S.pagesLoading;
-      if (files.length > free) S.pagesMessage = "Можно добавить не больше " + MAX_PAGES + " страниц";
+      if (files.length > free) S.pagesMessage = pagesLimitText;
       files = files.slice(0, Math.max(0, free));
     }
     S.pagesLoading += files.length;

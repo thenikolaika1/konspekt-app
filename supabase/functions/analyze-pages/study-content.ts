@@ -336,6 +336,29 @@ function trailingCommaPos(t: string): number {
   return -1;
 }
 
+/**
+ * Позиция первой подозрительной запятой вне строк: после другой запятой, после { или [ или сразу после двоеточия
+ * (поле без значения), иначе -1. Нужна, когда V8 не называет позицию («Unexpected token ','»).
+ */
+function badCommaPos(t: string): number {
+  let inStr = false;
+  let esc = false;
+  let last = "";
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "," && (last === "," || last === "{" || last === "[" || last === ":")) return i;
+    if (!/\s/.test(c)) last = c;
+  }
+  return -1;
+}
+
 /** null — JSON корректен; иначе тип ошибки. Сообщение JSON.parse не логируется: в нём бывает фрагмент текста. */
 export function jsonDiag(t: string): JsonDiag | null {
   try {
@@ -345,13 +368,20 @@ export function jsonDiag(t: string): JsonDiag | null {
     const msg = String((e as Error)?.message || "");
     const m = /position (\d+)/.exec(msg);
     // V8 не всегда называет позицию («Unexpected token ']'») — тогда ищем висячую запятую сами
-    const pos = m ? Number(m[1]) : msg.includes("end of JSON") ? t.length : trailingCommaPos(t);
+    const fallback = () => {
+      const a = trailingCommaPos(t), b = badCommaPos(t);
+      return a < 0 ? b : b < 0 ? a : Math.min(a, b);
+    };
+    const pos = m ? Number(m[1]) : msg.includes("end of JSON") ? t.length : fallback();
     const at = pos >= 0 ? charClass(t[pos]) : "UNKNOWN";
     let prev = pos - 1;
     while (prev >= 0 && /\s/.test(t[prev])) prev--;
     const kind = /control character/i.test(msg) ? "control_char_in_string"
       : pos >= t.length || at === "EOF" ? "unexpected_end"
       : (at === "PUNCT:}" || at === "PUNCT:]") && t[prev] === "," ? "trailing_comma"
+      : at === "PUNCT:," && t[prev] === "," ? "double_comma"
+      : at === "PUNCT:," && (t[prev] === "[" || t[prev] === "{") ? "leading_comma"
+      : at === "PUNCT:," && t[prev] === ":" ? "missing_value"
       : at === "TYPO_QUOTE" ? "typographic_quote"
       : /Expected ',' or|after property value|after array element/i.test(msg) ? "missing_comma_or_unescaped_quote"
       : "unexpected_token";
@@ -362,13 +392,18 @@ export function jsonDiag(t: string): JsonDiag | null {
 /**
  * Безопасный ремонт синтаксиса, только когда строгий разбор не удался:
  * сырые перевод строки и табуляция внутри строковых значений → \n и \t (текст не меняется, меняется только запись),
- * прочие управляющие символы внутри строк убираются, висячая запятая перед } или ] (вне строк) удаляется.
- * Кавычки и содержимое строк не трогаются: неэкранированные кавычки не угадываются.
+ * прочие управляющие символы внутри строк убираются. Лишние запятые ВНЕ строк удаляются: висячая перед } или ],
+ * вторая и следующие подряд («,,», в том числе через пробелы) и запятая сразу после { или [ (v66.4). Удаление такой
+ * запятой не меняет ни одного значения: элементы и поля остаются те же и в том же порядке.
+ * Не исправляется (остаётся ошибкой): кавычки и содержимое строк (неэкранированные кавычки не угадываются), поле без
+ * значения («"a": ,»), пропущенная запятая, незакрытые скобки.
  */
 export function repairJsonSyntax(t: string): string {
   let out = "";
   let inStr = false;
   let esc = false;
+  // последний значимый (не пробельный) символ, уже записанный в out вне строк: по нему видно лишнюю запятую
+  let lastSig = "";
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
     if (inStr) {
@@ -389,11 +424,14 @@ export function repairJsonSyntax(t: string): string {
     }
     if (c === '"') inStr = true;
     else if (c === ",") {
+      // запятая сразу после другой запятой, «{» или «[» — лишняя
+      if (lastSig === "," || lastSig === "{" || lastSig === "[") continue;
       let j = i + 1;
-      while (j < t.length && /\s/.test(t[j])) j++;
+      while (j < t.length && (/\s/.test(t[j]) || t[j] === ",")) j++;
       if (t[j] === "}" || t[j] === "]") continue;
     }
     out += c;
+    if (!/\s/.test(c)) lastSig = c === '"' ? '"' : c;
   }
   return out;
 }
@@ -403,31 +441,89 @@ export function repairJsonSyntax(t: string): string {
  * ограждения ```json и текст вокруг объекта. Сначала строгий JSON.parse; если не вышло — безопасный ремонт
  * синтаксиса (repairJsonSyntax). value = null — JSON не разобрать; diag — почему не разобрался строгий вариант.
  */
-export function parseModelJson(text: string): { value: Json | null; repaired: boolean; diag: JsonDiag | null } {
+export function parseModelJson(text: string): { value: Json | null; repaired: boolean; diag: JsonDiag | null; source: string } {
   let t = String(text || "")
     .replace(/<\|begin_of_box\|>|<\|end_of_box\|>/g, "")
     .replace(/```(?:json)?/gi, "")
     .trim();
   const a = t.indexOf("{");
   const b = t.lastIndexOf("}");
-  if (a < 0 || b <= a) return { value: null, repaired: false, diag: { kind: "no_object", pos: -1, len: t.length, at: "EOF" } };
+  if (a < 0 || b <= a) return { value: null, repaired: false, diag: { kind: "no_object", pos: -1, len: t.length, at: "EOF" }, source: t };
   t = t.slice(a, b + 1);
   try {
-    return { value: JSON.parse(t), repaired: false, diag: null };
+    return { value: JSON.parse(t), repaired: false, diag: null, source: t };
   } catch {
     // ниже — ремонт синтаксиса
   }
   const diag = jsonDiag(t);
   try {
-    return { value: JSON.parse(repairJsonSyntax(t)), repaired: true, diag };
+    return { value: JSON.parse(repairJsonSyntax(t)), repaired: true, diag, source: t };
   } catch {
-    return { value: null, repaired: false, diag };
+    return { value: null, repaired: false, diag, source: t };
   }
+}
+
+/**
+ * Фрагмент ответа модели вокруг ошибки JSON — ТОЛЬКО для повторного запроса к той же модели (это её собственный
+ * текст), в лог не пишется: в нём может быть текст учебника. «⟪!⟫» отмечает место ошибки. Пустая строка — места нет.
+ */
+export function jsonErrorContext(source: string, diag: JsonDiag | null, radius = 60): string {
+  if (!diag || diag.pos < 0 || !source) return "";
+  const pos = Math.min(diag.pos, source.length);
+  const from = Math.max(0, pos - radius), to = Math.min(source.length, pos + radius);
+  const one = (s: string) => s.replace(/\s+/g, " ");
+  return (from > 0 ? "…" : "") + one(source.slice(from, pos)) + "⟪!⟫" + one(source.slice(pos, to)) + (to < source.length ? "…" : "");
 }
 
 /** JSON-объект из ответа модели или null (см. parseModelJson). */
 export function extractJson(text: string): Json | null {
   return parseModelJson(text).value;
+}
+
+/**
+ * Безопасная диагностика отказа «страницы не читаются» (UNREADABLE_PAGES) для лога: только коды, числа и метки причин.
+ * Текст ответа модели, предупреждения (в них может быть текст учебника) и персональные данные в лог не попадают —
+ * из предупреждений берутся лишь метки по ключевым словам (обложка, размытость, нет текста…).
+ */
+export type UnreadableDiag = {
+  error: string;
+  reply_chars: number;
+  pages: string;
+  sections: number;
+  terms: number;
+  warnings: number;
+  warning_chars: number;
+  reasons: string[];
+};
+
+const REASON_TAGS: [string, RegExp][] = [
+  ["cover", /обложк|титул|выходн|cover|title/i],
+  ["toc", /оглавлен|содержани/i],
+  ["blurry", /размыт|нечётк|нечетк|расфокус|смаз|blur/i],
+  ["dark", /темн|тёмн|засвет|блик|освещ/i],
+  ["cut", /обрез|край|не полност|частичн/i],
+  ["small", /мелк|разрешени|маленьк/i],
+  ["no_text", /нет (учебного )?текст|без текст|отсутству|не содерж|только (рисун|изображ|иллюстрац)|пуст/i],
+  ["not_textbook", /не (является )?учебник|не учебн/i],
+];
+
+export function unreadableDiag(value: Json, replyChars: number): UnreadableDiag {
+  const r = obj(value);
+  const m = obj(r.meta);
+  const warnings = arr(r.warnings).filter((w): w is string => typeof w === "string");
+  const reasons = REASON_TAGS.filter(([, re]) => warnings.some((w) => re.test(w))).map(([tag]) => tag);
+  if (warnings.length && !reasons.length) reasons.push("other");
+  return {
+    // код — только заглавные латинские буквы и «_», не больше 40 знаков
+    error: typeof r.error === "string" ? r.error.replace(/[^A-Z_]/g, "").slice(0, 40) : "",
+    reply_chars: replyChars,
+    pages: arr(m.pages).map((p) => (READABLE.includes(obj(p).readable as never) ? String(obj(p).readable) : "?")).join(","),
+    sections: arr(r.sections).length,
+    terms: arr(obj(r.glossary).terms).length,
+    warnings: warnings.length,
+    warning_chars: warnings.reduce((n, w) => n + w.length, 0),
+    reasons,
+  };
 }
 
 /** Подсказка модели для повтора по типу ошибки JSON (без текста её ответа). */
@@ -437,6 +533,12 @@ export function jsonRetryHint(diag: JsonDiag | null): string {
       return "внутри строковых значений есть перевод строки или табуляция — внутри значений пиши только \\n";
     case "trailing_comma":
       return "перед } или ] стоит лишняя запятая";
+    case "double_comma":
+      return "две запятые подряд — между элементами ровно одна запятая";
+    case "leading_comma":
+      return "запятая сразу после { или [ — первая запятая лишняя";
+    case "missing_value":
+      return "после двоеточия нет значения — у каждого поля должно быть значение (пустой текст — \"\", пустой список — [])";
     case "typographic_quote":
     case "missing_comma_or_unescaped_quote":
       return "внутри текста стоит прямая кавычка \" — внутри значений используй только «ёлочки» или экранируй кавычку как \\\"";
