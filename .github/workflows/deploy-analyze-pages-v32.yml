@@ -1,0 +1,156 @@
+# Однократное развёртывание Edge Function analyze-pages v32 (код v66.5, коммит 1dee11e) — с разрешения владельца, 08.11.2026.
+# Запускается только при push этого файла в служебную ветку deploy/analyze-pages-v32.
+# Повторный запуск не развернёт ничего: шаг 3 требует, чтобы в production была ровно v31 с известными контрольными суммами.
+# До деплоя: проверка исходного коммита и 6 файлов (sha256), проверка production = v31 (sha256), копия v31 в artifact.
+# После деплоя: версия 32, verify_jwt = false, sha256 всех 6 файлов. При несоответствии — откат на копию v31.
+# Секрет SUPABASE_ACCESS_TOKEN в лог не выводится. Миграции, база, клиент, другие функции не затрагиваются.
+name: Deploy analyze-pages v32 (one-shot)
+
+on:
+  push:
+    branches: [deploy/analyze-pages-v32]
+    paths: [.github/workflows/deploy-analyze-pages-v32.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-analyze-pages-v32
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ohdeykbkgimvwstkwuuf
+      SLUG: analyze-pages
+      SOURCE_SHA: 1dee11e89f9a9b3230ad77f1ad34ddc096bfea20
+      FILES: "ca.ts index.ts parts.ts prompt.ts providers.ts study-content.ts "
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
+        with:
+          version: 2.119.0
+
+      - name: 0. Tooling and secret present (value is not printed)
+        run: |
+          test "$(supabase --version)" = "2.119.0"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          cat > /tmp/v31.sha256 <<'SUMS'
+          6950ef014fbde7eabf518c69c7fe943d5e4e796c28fdcf6157ad68c5a73dac97  ca.ts
+          e003516de00c958e4ac460a6a3aea0b310709993d50d2e1697e0ea3120c28a7e  index.ts
+          b36b7f99997ba48cabdc8884561a11b34f7e78443011a2c7c1c2e1e5d0e93e38  parts.ts
+          ac649f4cf7d9dc707c7c7ce4db83490fae9f78119a01065ced3c0476c1eb3d04  prompt.ts
+          643df90c850e5cd3dbb3dff8a39d1e0966f3939f729aa162063ef3db7a6ac846  providers.ts
+          424d50d9e25ff32008c0c858c6881e39a6c545dfe6e93d57823b271f24aa7ab1  study-content.ts
+          SUMS
+          cat > /tmp/v32.sha256 <<'SUMS'
+          6950ef014fbde7eabf518c69c7fe943d5e4e796c28fdcf6157ad68c5a73dac97  ca.ts
+          4b1b2d0176600ea568bf0dc5e284cdccb8c228ab9ca115e922384f9b94bd3099  index.ts
+          b36b7f99997ba48cabdc8884561a11b34f7e78443011a2c7c1c2e1e5d0e93e38  parts.ts
+          ac649f4cf7d9dc707c7c7ce4db83490fae9f78119a01065ced3c0476c1eb3d04  prompt.ts
+          643df90c850e5cd3dbb3dff8a39d1e0966f3939f729aa162063ef3db7a6ac846  providers.ts
+          424d50d9e25ff32008c0c858c6881e39a6c545dfe6e93d57823b271f24aa7ab1  study-content.ts
+          SUMS
+          sed -i 's/^ *//' /tmp/v31.sha256 /tmp/v32.sha256
+
+      - name: 1. Source commit is exactly 1dee11e plus this workflow file
+        run: |
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          test "$(git diff --name-only "$SOURCE_SHA" HEAD)" = ".github/workflows/deploy-analyze-pages-v32.yml"
+
+      - name: 2. Source function — exactly 6 files, sha256 = commit 1dee11e
+        working-directory: supabase/functions/analyze-pages
+        run: |
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/v32.sha256
+
+      - name: 3. Production before deploy — ACTIVE, version 31, verify_jwt false
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-before.json
+          python3 - <<'PY'
+          import json
+          m = json.load(open('/tmp/meta-before.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == 31, f"expected production v31, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+
+      - name: 4. Download production and verify it is the checked v31 (sha256)
+        run: |
+          mkdir -p /tmp/dl-before/supabase/functions
+          cd /tmp/dl-before
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          mkdir -p /tmp/backup-v31
+          cp -a "supabase/functions/$SLUG/." /tmp/backup-v31/
+          cd /tmp/backup-v31
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/v31.sha256
+
+      - name: 5. Save v31 backup as artifact
+        id: backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyze-pages-v31-backup
+          path: |
+            /tmp/backup-v31/
+            /tmp/meta-before.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 5b. Backup artifact registered
+        run: |
+          test -n "${{ steps.backup.outputs.artifact-id }}"
+          echo "v31 backup artifact id: ${{ steps.backup.outputs.artifact-id }}"
+
+      - name: 6. Deploy v32 (6 files from 1dee11e, unchanged)
+        id: deploy
+        run: supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+
+      - name: 7. Verify production after deploy — version 32, verify_jwt false, sha256 of all 6 files
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-after.json
+          python3 - <<'PY'
+          import json
+          m = json.load(open('/tmp/meta-after.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == 32, f"expected v32, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+          mkdir -p /tmp/dl-after/supabase/functions
+          cd /tmp/dl-after
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/v32.sha256
+          echo "DEPLOY OK: production analyze-pages v32 = 1dee11e"
+
+      - name: 8. Rollback to v31 backup (only if the deploy step ran and something failed after it)
+        if: failure() && (steps.deploy.outcome == 'success' || steps.deploy.outcome == 'failure')
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-rb.json
+          v="$(python3 -c "import json; print(json.load(open('/tmp/meta-rb.json'))['version'])")"
+          echo "production version before rollback: $v"
+          if [ "$v" = "31" ]; then echo "production unchanged (v31) — rollback not needed"; exit 0; fi
+          mkdir -p "/tmp/rb/supabase/functions/$SLUG"
+          cp -a /tmp/backup-v31/. "/tmp/rb/supabase/functions/$SLUG/"
+          cd /tmp/rb
+          supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+          mkdir -p /tmp/dl-rb/supabase/functions
+          cd /tmp/dl-rb
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/v31.sha256
+          echo "ROLLBACK OK: production analyze-pages = v31 source (new version number)"
