@@ -603,7 +603,11 @@ async function processNote(job: Job) {
     // (PART_RETRY_CALL_MS), часть из 2–3 фото при тайм-ауте — поделённой пополам (retryPlan). Не больше
     // MAX_PART_RETRIES повторов за генерацию и только если повтор уложится в общий бюджет. Готовые части передаются
     // как есть. Ошибки авторизации, лимитов и ответы с ошибкой не повторяются.
-    if (split && e instanceof ProviderError && (code === "AI_TIMEOUT" || code === "AI_NETWORK")) {
+    // v66.5: неразборчивый JSON (AI_BAD_JSON), оставшийся после попыток внутри вызова (в том числе когда на повтор не
+    // хватило времени: v31, 08.11.2026 — ответ на 2 фото за 99 с, осталось 40 с), — тот же набор фото в новом вызове,
+    // без деления; те же пределы (MAX_PART_RETRIES, общий бюджет).
+    const badJson = e instanceof StepError && code === "AI_BAD_JSON";
+    if (split && (badJson || (e instanceof ProviderError && (code === "AI_TIMEOUT" || code === "AI_NETWORK")))) {
       const next = retries < MAX_PART_RETRIES ? retryPlan(plan, partIndex, code) : null;
       const why = retries >= MAX_PART_RETRIES ? "retry limit " + MAX_PART_RETRIES : !next ? "one page already had the longest wait"
         : !fitsGeneration(Date.now() - t0, next, partIndex) ? "generation budget" : "";

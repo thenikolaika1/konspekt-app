@@ -897,17 +897,79 @@ for (const [n, label] of [[8, "8 фото, часть 1"], [4, "4 фото (об
       && logs.some((l) => /"kind":"missing_value"/.test(l)),
     logs.filter((l) => /json|critical/.test(l)).slice(0, 3));
 }
-reset();
-{
-  sc.badJson = new Map([[0, "missing"], [1, "missing"]]);
+// ---------- v66.5: неразборчивый JSON в части — тот же набор фото в новом вызове функции ----------
+type BadCase = { label: string; bad: number[]; hang?: number[]; chatMs?: number; expect: number[][]; ok: boolean; plan?: string; why?: RegExp; hits?: number };
+const badCases: BadCase[] = [
+  { label: "часть 1 дважды неразборчива в вызове → повтор тех же 3 фото в новом вызове (3+3+2 → 3*+3+2), затем части 2 и 3",
+    bad: [0, 1], expect: [[1, 2, 3], [1, 2, 3], [1, 2, 3], [4, 5, 6], [7, 8]], ok: true, plan: "3+3+2 → 3*+3+2" },
+  { label: "как в v31: ответ «длится» 100 с, на повтор внутри вызова времени нет → повтор части в новом вызове",
+    bad: [0], chatMs: 100_000, expect: [[1, 2, 3], [1, 2, 3], [4, 5, 6], [7, 8]], ok: true, plan: "3+3+2 → 3*+3+2" },
+  { label: "тайм-аут части 1 (→ 2+1), затем 2 фото дважды неразборчивы → повтор тех же 2 фото без деления (2-й повтор), готово",
+    hang: [0], bad: [1, 2], expect: [[1, 2, 3], [1, 2], [1, 2], [1, 2], [3], [4, 5, 6], [7, 8]], ok: true, plan: "2*+1*+3+2 → 2*+1*+3+2" },
+  { label: "повторы исчерпаны: два тайм-аута (3 → 2+1 → 1+1), затем неразборчивый JSON — без повтора (предел 2)",
+    hang: [0, 1], bad: [2, 3], expect: [[1, 2, 3], [1, 2], [1], [1]], ok: false, why: /AI_BAD_JSON — no retry: retry limit 2/, hits: 2 },
+  { label: "время исчерпано: запросы по 170 с, часть 3 неразборчива на 510-й с — повтор не уложится в 10 мин, не начинается",
+    bad: [2], chatMs: 170_000, expect: [[1, 2, 3], [4, 5, 6], [7, 8]], ok: false, why: /AI_BAD_JSON — no retry: generation budget/, hits: 2 },
+];
+for (const cs of badCases) {
+  reset();
+  timers.fast = true;
+  sc.badJson = new Map(cs.bad.map((k) => [k, "missing"] as [number, "missing"]));
+  sc.hang = new Set(cs.hang || []);
+  sc.chatMs = cs.chatMs || 0;
+  const gensBefore = sim.gens.length, startsBefore = sim.starts.length;
   const { id, paths } = makeNote(8);
   await start(id, paths);
   const nn = note(id);
-  check("[JSON, 8 фото] неисправимый JSON дважды — failed AI_BAD_JSON без повтора части (это не тайм-аут), резерв возвращён, фото сохранены, одна строка ai_generations",
+  const g = gensOf(id);
+  const t = `[JSON → новый вызов, ${cs.label}]`;
+  check(`${t} запросы к модели: ровно такие страницы и в таком порядке`,
+    JSON.stringify(callPages()) === JSON.stringify(cs.expect.map((x) => JSON.stringify(x))), sc.calls.map((c) => c.pages));
+  const answered = sc.calls.filter((_, i) => !(cs.hang || []).includes(i));
+  if (cs.ok) {
+    const heads = nn.content?.sections.map((s: any) => s.heading) || [];
+    const c = nn.content;
+    check(`${t} готово: готовые части сохранены, каждая страница один раз и по порядку, итог всей темы`,
+      nn.status === "ready" && JSON.stringify(heads) === JSON.stringify(pagesOf(0, 8).map((p) => "Пункт " + p))
+        && c.meta.pages.length === 8 && c.meta.pages.every((p: any, i: number) => p.index === i)
+        && pagesOf(0, 8).every((p) => (plainText(c).match(new RegExp("Страница " + p + "\\*", "g")) || []).length === 1) && c.conclusion === "Итог всей темы.",
+      { st: nn.status, err: nn.error_code, heads });
+    check(`${t} одна генерация: один резерв, списан один раз, одна строка ai_generations; токены всех ответивших запросов (и неразборчивых)`,
+      sim.starts.length - startsBefore === 1 && sim.ledger.get(id) === "charged" && sim.gens.length - gensBefore === 1 && g.length === 1
+        && g[0].status === "success" && g[0].input_tokens === inTok(answered.map((x) => x.pages.length)),
+      { l: sim.ledger.get(id), g });
+    check(`${t} в лог — план до и после повтора; повтор ждёт 120 с; фрагмент ответа в лог не попал`,
+      logs.some((l) => l.includes("AI_BAD_JSON — retrying in a new call, plan " + cs.plan)) && timers.asked.includes(120_000)
+        && !logs.filter((l) => l.startsWith("[analyze-pages]")).some((l) => l.includes("⟪!⟫") || l.includes("Ученики разбирают") || l.includes("Страница 1")),
+      logs.filter((l) => /retrying|json/.test(l)).slice(0, 4));
+  } else {
+    check(`${t} failed AI_BAD_JSON, причина в логе; резерв возвращён один раз, фото сохранены, одна строка ai_generations, конспект не записан`,
+      nn.status === "failed" && nn.error_code === "AI_BAD_JSON" && sim.ledger.get(id) === "refunded" && paths.every((p) => sim.files.has(p))
+        && sim.starts.length - startsBefore === 1 && g.length === 1 && g[0].status === "failed" && !nn.content && logs.some((l) => cs.why!.test(l))
+        && sc.continuationHits === cs.hits && !logs.some((l) => /not handed off/.test(l)),
+      { st: nn.status, err: nn.error_code, hits: sc.continuationHits, l: sim.ledger.get(id), g: g.length, logs: logs.filter((l) => /no retry|retrying/.test(l)) });
+  }
+}
+{
+  const { retryPlan, planFor } = await import("../../supabase/functions/analyze-pages/parts.ts");
+  const plan = planFor(8), r = retryPlan(plan, 0, "AI_BAD_JSON")!, rr = retryPlan(r, 0, "AI_BAD_JSON")!;
+  check("[план, AI_BAD_JSON] тот же набор фото без деления: 3+3+2 → 3*+3+2; повтор уже долгой части — тот же план; другие части не меняются",
+    planLabel(r) === "3*+3+2" && planLabel(rr) === "3*+3+2" && planLabel(retryPlan(plan, 2, "AI_BAD_JSON")!) === "3+3+2*"
+      && r[0].from === 0 && r[0].to === 3 && r[1].from === 3 && r[2].to === 8);
+}
+// 1–4 фото — как раньше: неисправимый JSON дважды → failed AI_BAD_JSON, без передачи в новый вызов
+reset();
+{
+  sc.badJson = new Map([[0, "missing"], [1, "missing"]]);
+  const { id, paths } = makeNote(4);
+  await start(id, paths);
+  const nn = note(id);
+  check("[1–4 как раньше] 4 фото, неисправимый JSON дважды — failed AI_BAD_JSON, повтора в новом вызове нет, резерв возвращён, фото сохранены, одна строка ai_generations",
     nn.status === "failed" && nn.error_code === "AI_BAD_JSON" && sc.calls.length === 2 && sc.continuationHits === 0 && sim.ledger.get(id) === "refunded"
-      && paths.every((p) => sim.files.has(p)) && gensOf(id).length === 1 && gensOf(id)[0].status === "failed",
+      && paths.every((p) => sim.files.has(p)) && gensOf(id).length === 1 && gensOf(id)[0].status === "failed" && !logs.some((l) => /retrying in a new call/.test(l)),
     { st: nn.status, err: nn.error_code, calls: sc.calls.length });
 }
+sc.chatMs = 0;
 
 // подделанное продолжение с верной подписью: неверная форма → 400; неверные готовые части или исчерпанный бюджет → failed без ИИ
 reset();
