@@ -144,6 +144,24 @@ const TRIAL = { status: "trial", kind: "trial", starts_at: "2026-11-05T00:00:00+
     check(`[${name}] нет ошибок JS`, errors.length === 0, errors);
     await ctx.close();
   }
+  // v66.4: сервер вернул failed AI_BAD_JSON — понятное сообщение вместо «Что-то пошло не так», фото сохранены
+  {
+    const { ctx, page, errors } = await open({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      window.K.cloud.waitForNote = async () => ({ id: "note-1", status: "failed", stage: "failed", error_code: "AI_BAD_JSON" });
+    });
+    await page.click('[data-go="camera"]');
+    await page.waitForTimeout(500);
+    await add(page, 1, 8);
+    await page.click("[data-process]");
+    await page.waitForFunction(() => /Не удалось создать конспект/.test(document.body.innerText), null, { timeout: 15000 });
+    const t = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
+    check("[390, AI_BAD_JSON] экран ошибки: «ИИ не смог корректно сформировать конспект. Твои фотографии сохранены.», подсказка «Попробуй ещё раз.», без «Что-то пошло не так»",
+      t.includes("ИИ не смог корректно сформировать конспект. Твои фотографии сохранены.") && t.includes("Попробуй ещё раз.") && !t.includes("Что-то пошло не так")
+        && !!(await page.$("[data-retry]")), t.slice(0, 400));
+    check("[390, AI_BAD_JSON] нет ошибок JS", errors.length === 0, errors);
+    await ctx.close();
+  }
   await browser.close();
   srv.close();
   console.log(`ИТОГО: ${pass} PASS, ${fail} FAIL (интерфейс с заглушкой сервера; ИИ не вызывался)`);

@@ -75,6 +75,8 @@ const sc = {
   streamReq: [] as boolean[],
   /** «время» до первого токена (сдвиг часов функции перед первым фрагментом) */
   firstTokenMs: 0,
+  /** v66.4: вызовы chat, где модель портит JSON: double — две запятые подряд, missing — поле без значения */
+  badJson: new Map<number, "double" | "missing">(),
 };
 const TITLE_WARNING = "Фото 1 — титульный лист учебника «Физика 8», автор Перышкин, текста темы нет";
 const shortRefusal = () => JSON.stringify({ error: "UNREADABLE_PAGES", warnings: [TITLE_WARNING] });
@@ -184,7 +186,10 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
     const titled = pages.some((p) => sc.titles.has(p));
     const allTitles = pages.every((p) => sc.titles.has(p));
     if (sc.refuse.has(k) || allTitles || (titled && !/НЕ причина для отказа/.test(system))) return reply(shortRefusal(), 23);
-    return reply(JSON.stringify(contentFor(pages, prompt)), 300 * pages.filter((p) => !sc.titles.has(p)).length);
+    let json = JSON.stringify(contentFor(pages, prompt));
+    if (sc.badJson.get(k) === "double") json = json.replace(',"sections":', ',,"sections":');
+    if (sc.badJson.get(k) === "missing") json = json.replace('"warnings":[]', '"warnings":,"z":[]');
+    return reply(json, 300 * pages.filter((p) => !sc.titles.has(p)).length);
   }
   return jsonRes(404, {});
 };
@@ -238,6 +243,7 @@ const reset = () => {
   sc.noStream = false;
   sc.streamReq = [];
   sc.firstTokenMs = 0;
+  sc.badJson = new Map();
   timers.fast = false;
   timers.asked = [];
   logs.length = 0;
@@ -857,6 +863,50 @@ reset();
   const nn = note(id);
   check("[8, ответ на передачу потерян] failed CONTINUATION_FAILED, резерв возвращён, конспект не записан, ровно одна строка ai_generations",
     nn.status === "failed" && sim.ledger.get(id) === "refunded" && !nn.content && gensOf(id).length === 1, { st: nn.status, g: gensOf(id).length });
+}
+
+// ---------- v66.4: повреждённый JSON — ограниченный ремонт и повтор с местом ошибки ----------
+for (const [n, at, label] of [[8, 1, "8 фото, часть 2 (поток)"], [3, 0, "3 фото (обычный путь 1–4)"], [5, 0, "5 фото, часть 1"]] as const) {
+  reset();
+  sc.badJson = new Map([[at, "double"]]);
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const heads = nn.content?.sections.map((s: any) => s.heading) || [];
+  check(`[JSON, ${label}] две запятые подряд — исправлено без повтора: готово, запросов ${partSizes(n).length}, все разделы и страницы на месте, в лог — тип ошибки`,
+    nn.status === "ready" && sc.calls.length === partSizes(n).length && JSON.stringify(heads) === JSON.stringify(Array.from({ length: n }, (_, i) => "Пункт " + (i + 1)))
+      && nn.content.meta.pages.length === n && sim.ledger.get(id) === "charged" && gensOf(id).length === 1
+      && logs.some((l) => /json repaired/.test(l) && /"kind":"double_comma"/.test(l)) && logs.some((l) => /"json_repaired":1/.test(l)),
+    { st: nn.status, err: nn.error_code, calls: sc.calls.length, heads });
+}
+for (const [n, label] of [[8, "8 фото, часть 1"], [4, "4 фото (обычный путь)"]] as const) {
+  reset();
+  sc.badJson = new Map([[0, "missing"]]);
+  const { id, paths } = makeNote(n);
+  await start(id, paths);
+  const nn = note(id);
+  const retryPromptText = sc.calls[1]?.prompt || "";
+  check(`[JSON, ${label}] поле без значения — не угадывается: повтор с местом ошибки (⟪!⟫), «Не копируй прошлый ответ», подсказкой «нет значения»; второй ответ — готово`,
+    nn.status === "ready" && sc.calls.length === partSizes(n).length + 1 && JSON.stringify(sc.calls[0].pages) === JSON.stringify(sc.calls[1].pages)
+      && /Место ошибки JSON в твоём прошлом ответе/.test(retryPromptText) && /"warnings":⟪!⟫,"z":\[\]/.test(retryPromptText)
+      && /Не копируй прошлый ответ/.test(retryPromptText) && /после двоеточия нет значения/.test(retryPromptText)
+      && sim.ledger.get(id) === "charged" && gensOf(id).length === 1,
+    { st: nn.status, err: nn.error_code, calls: sc.calls.length, p: retryPromptText.slice(0, 300) });
+  check(`[JSON, ${label}] фрагмент ответа (текст учебника) в лог не попал: в логе только тип и позиция ошибки`,
+    !logs.filter((l) => l.startsWith("[analyze-pages]")).some((l) => l.includes("⟪!⟫") || l.includes("Ученики разбирают") || l.includes("Место ошибки"))
+      && logs.some((l) => /"kind":"missing_value"/.test(l)),
+    logs.filter((l) => /json|critical/.test(l)).slice(0, 3));
+}
+reset();
+{
+  sc.badJson = new Map([[0, "missing"], [1, "missing"]]);
+  const { id, paths } = makeNote(8);
+  await start(id, paths);
+  const nn = note(id);
+  check("[JSON, 8 фото] неисправимый JSON дважды — failed AI_BAD_JSON без повтора части (это не тайм-аут), резерв возвращён, фото сохранены, одна строка ai_generations",
+    nn.status === "failed" && nn.error_code === "AI_BAD_JSON" && sc.calls.length === 2 && sc.continuationHits === 0 && sim.ledger.get(id) === "refunded"
+      && paths.every((p) => sim.files.has(p)) && gensOf(id).length === 1 && gensOf(id)[0].status === "failed",
+    { st: nn.status, err: nn.error_code, calls: sc.calls.length });
 }
 
 // подделанное продолжение с верной подписью: неверная форма → 400; неверные готовые части или исчерпанный бюджет → failed без ИИ

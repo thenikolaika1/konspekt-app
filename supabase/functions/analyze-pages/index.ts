@@ -16,7 +16,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.1
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { SYSTEM_PROMPT, retryPrompt, UNREADABLE_RETRY_PROBLEM, userPrompt } from "./prompt.ts";
 import { type ChatMessage, closeGigaSession, configuredProviders, generate, newGigaSession, ProviderError, type ProviderId, TIMEOUTS } from "./providers.ts";
-import { criticalIssues, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, unreadableDiag, validateStudyContent } from "./study-content.ts";
+import { criticalIssues, jsonErrorContext, jsonRetryHint, parseModelJson, previewOf, qualityIssues, sanitize, SCHEMA_VERSION, type StudyContent, unreadableDiag, validateStudyContent } from "./study-content.ts";
 import { type Continuation, CONTINUATION_TTL_MS, contextOf, fitsGeneration, MAX_PART_RETRIES, mergeParts, PART_CALL_MS, partCapMs, partPrompt, planFor, planLabel, retryPlan, signContinuation, SINGLE_MAX, type Usage, validPlan, verifyContinuation } from "./parts.ts";
 import type { StreamStats } from "./providers.ts";
 
@@ -403,6 +403,8 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
     m.parse_ms += Date.now() - t;
     last = result;
     let problems: string[];
+    // фрагмент вокруг ошибки JSON — только в повторный запрос к модели (не в лог: там может быть текст учебника)
+    let jsonContext = "";
     if (result.ok) {
       // 11. критические проблемы → повтор; некритические (оформление, выделения, sourceOutline…) → только в лог
       t = Date.now();
@@ -437,10 +439,11 @@ async function runModel(images: string[], prompt: string, deadline: number, giga
           ? "ответ не является корректным JSON по схеме: " + (reply.truncated ? "ответ оборван — пиши компактнее" : jsonRetryHint(parsed.diag))
           : "в ответе нет ни разделов, ни терминов",
       ];
+      if (result.code === "AI_BAD_JSON" && !reply.truncated) jsonContext = jsonErrorContext(parsed.source, parsed.diag);
     }
     console.warn("[analyze-pages] attempt", attempt + 1, "critical:", problems.join(" | "));
     messages.push({ role: "assistant", content: reply.text.slice(0, 4000) });
-    messages.push({ role: "user", content: retryPrompt(problems) });
+    messages.push({ role: "user", content: retryPrompt(problems, jsonContext) });
   }
   if (!best) {
     if (!last) throw new StepError("AI_TIMEOUT");
