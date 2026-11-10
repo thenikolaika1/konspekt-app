@@ -1845,11 +1845,11 @@ a.primary.wide{color:#fff}
 .kn-exp body::after{content:"эксперимент v34";position:fixed;left:8px;bottom:calc(6px + env(safe-area-inset-bottom));z-index:99;padding:2px 7px;border-radius:7px;background:#0a6b3f;color:#fff;font:600 10px/16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;opacity:.75;pointer-events:none}
 
 /* v34.4: защита текста конспекта (js/protect.js). Внешний вид конспекта не меняется: выключено только выделение,
-   долгое нажатие (iOS/Android) и печать; поверх текста — бледный водяной знак с кодом ученика. Поля ввода не затронуты. */
+   долгое нажатие (iOS/Android) и печать; внизу видимой части — небольшой полупрозрачный код ученика. Поля ввода не затронуты. */
 .cn-doc.kn-protected{position:relative;isolation:isolate;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .cn-doc.kn-protected input,.cn-doc.kn-protected textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
 .cn-doc.kn-protected img{-webkit-user-drag:none}
-.kn-wm{position:absolute;inset:0;z-index:3;pointer-events:none;background-repeat:repeat;background-size:220px 150px}
+.kn-wm{position:sticky;bottom:calc(10px + env(safe-area-inset-bottom));height:0;z-index:3;pointer-events:none;display:flex;justify-content:center}.kn-wm span{transform:translateY(-100%);font:700 11px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;letter-spacing:.08em;color:rgba(13,23,71,.3);white-space:nowrap}
 @media print{.cn-doc.kn-protected{display:none!important}.note-view:has(.kn-protected)::after{content:"Конспект доступен только в приложении Konspekt by NK";display:block;padding:40px 20px;font:600 16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#0d1747}}
 
 /* Classic Note v38 — визуально ближе к PWA «Физика 8» / «История 8».
@@ -1945,9 +1945,9 @@ html,body{background:#f4f6f9;color:var(--tb-ink)}
   <ol>
     <li><b>Долгое нажатие.</b> Подержите палец на тексте первого конспекта. Ожидается: текст не выделяется, меню «Скопировать» не появляется.</li>
     <li><b>Контроль.</b> То же во втором конспекте: текст выделяется и меню появляется. Так видно, что проверка настоящая.</li>
-    <li><b>Водяной знак.</b> На первом конспекте бледно повторяется код <span class="tb-code">KN-2D467D08</span>. Он не должен мешать чтению. Сделайте скриншот: код должен быть на снимке.</li>
+    <li><b>Водяной знак.</b> Внизу видимой части первого конспекта — один небольшой полупрозрачный код <span class="tb-code">KN-2D467D08</span>. Он не должен мешать чтению. Сделайте скриншот: код должен быть на снимке.</li>
     <li><b>Буфер обмена.</b> Скопируйте что-нибудь из второго конспекта и вставьте в поле ниже. Затем попробуйте то же с первым: вставиться должен прежний текст, а текст защищённого конспекта — нет.</li>
-    <li><b>Поиск.</b> В поле поиска первого конспекта напечатайте слово, выделите его и скопируйте — в поле ввода всё работает как обычно.</li>
+    <li><b>Поиск.</b> В поле поиска любого конспекта напечатайте «энергия»: совпадения подсветятся жёлтым, справа — «1 из N». Кнопка «Найти» или «Ввод» на клавиатуре переходит к следующему. Текст в самом поле поиска выделяется и копируется как обычно.</li>
   </ol>
   <div class="tb-box">
     <label for="tb-paste">Сюда вставьте то, что скопировалось</label>
@@ -1957,9 +1957,9 @@ html,body{background:#f4f6f9;color:var(--tb-ink)}
   </div>
 </section>
 <div class="tb-label"><b>Как у ученика</b><span class="stud">защищён</span></div>
-<div class="tb-scr" id="tb-student"><div class="app note-view nt-physics"><div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" type="button" aria-label="Назад" disabled=""><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H4M10 6l-6 6 6 6"></path></svg></button></div></div><div class="cn-search"><label class="cn-search-box"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input class="cn-search-input" id="tb-search" type="search" autocomplete="off" placeholder="Поиск: Внутренняя энергия…" aria-label="Поиск по конспекту"></label></div></div><div class="cn-doc kn-protected"><div class="kn-wm" aria-hidden="true" data-wm="KN-2D467D08" style="background-image:url(&quot;data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22220%22%20height%3D%22150%22%20viewBox%3D%220%200%20220%20150%22%3E%3Ctext%20x%3D%22110%22%20y%3D%2280%22%20text-anchor%3D%22middle%22%20transform%3D%22rotate(-24%20110%2075)%22%20fill%3D%22%230d1747%22%20fill-opacity%3D%220.075%22%20font-family%3D%22-apple-system%2CBlinkMacSystemFont%2CSegoe%20UI%2CRoboto%2CArial%2Csans-serif%22%20font-size%3D%2215%22%20font-weight%3D%22700%22%20letter-spacing%3D%221%22%3EKN-2D467D08%3C%2Ftext%3E%3C%2Fsvg%3E&quot;)"></div><header class="cn-intro"><div class="cn-kicker">Физика</div><h1 class="note-title">Внутренняя энергия</h1><p class="cn-lead">Внутренняя энергия и способы её изменения</p><div class="note-meta">Тепловые явления<span class="sep">·</span>Работа и теплопередача</div></header><article class="cn-body"><section class="cn-sec"><h2 class="cn-h2">1. Что такое внутренняя энергия</h2><div class="cn-box main tone-imp"><div class="cn-box-label">Важно · главная мысль</div><p>Все тела состоят из частиц, которые непрерывно движутся и&nbsp;взаимодействуют друг с&nbsp;другом.</p></div><p><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц, из которых состоит тело.</p><p>Внутренняя энергия зависит от <strong>температуры</strong> тела и&nbsp;его агрегатного состояния. Она не зависит от механического движения тела и&nbsp;его положения относительно других тел.</p></section><section class="cn-sec"><h2 class="cn-h2">2. Способы изменения внутренней энергии</h2><ul class="cn-list"><li><strong>совершение работы</strong> — например, при трении или ударе тело нагревается;</li><li><strong>теплопередача</strong> — передача энергии от более нагретого тела к&nbsp;менее нагретому без совершения работы.</li></ul><h3 class="cn-h3">Причина → следствие</h3><p class="cn-lbl">Причины:</p><ul class="cn-list"><li>над телом совершают работу</li><li>телу передают количество теплоты</li></ul><p class="cn-lbl">Следствия:</p><ul class="cn-list"><li>внутренняя энергия тела увеличивается</li><li>температура тела повышается</li></ul><div class="cn-box example tone-plain"><div class="cn-box-label">Пример</div><p>Если быстро потереть ладони, они нагреются: совершается работа, и&nbsp;внутренняя энергия рук увеличивается.</p></div></section><section class="cn-sec"><h2 class="cn-h2">3. Виды теплопередачи</h2><div class="table-wrap"><table class="note-table stack"><thead><tr><th>Вид</th><th>Как происходит</th><th>Пример</th></tr></thead><tbody><tr><td>Теплопроводность</td><td data-label="Как происходит">энергия передаётся от более нагретых частей тела к&nbsp;менее нагретым</td><td data-label="Пример">нагревается ложка в&nbsp;горячем чае</td></tr><tr><td>Конвекция</td><td data-label="Как происходит">энергию переносят потоки жидкости или газа</td><td data-label="Пример">воздух в&nbsp;комнате нагревается от батареи</td></tr><tr><td>Излучение</td><td data-label="Как происходит">энергия передаётся излучением, даже в&nbsp;вакууме</td><td data-label="Пример">Солнце нагревает Землю</td></tr></tbody></table></div></section><section class="cn-sec"><h2 class="cn-h2">4. Количество теплоты</h2><div class="cn-box formulas tone-head"><div class="cn-box-label">Формула</div><div class="formula">Q = cm(t₂ − t₁)</div><p>Количество теплоты, необходимое для нагревания тела или выделяемое им при охлаждении.</p><ul class="cn-vars"><li><span class="formula-inline">Q</span> — количество теплоты, Дж</li><li><span class="formula-inline">c</span> — удельная теплоёмкость вещества, Дж/(кг·°C)</li><li><span class="formula-inline">m</span> — масса тела, кг</li><li><span class="formula-inline">t₁, t₂</span> — начальная и конечная температура, °C</li></ul></div></section><section class="cn-card terms"><h2 class="cn-card-title">Термины</h2><p class="cn-gl"><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц тела.</p><p class="cn-gl"><span class="kw-def">Теплопередача</span> — изменение внутренней энергии без совершения работы над телом или самим телом.</p></section><div class="cn-box important key-points tone-imp"><div class="cn-box-label">Важно</div><p>Внутреннюю энергию можно изменить двумя способами: совершением работы и&nbsp;теплопередачей.</p></div><div class="cn-box conclusion tone-alt"><div class="cn-box-label">Вывод</div><p><strong>Внутренняя энергия</strong> — энергия движения и&nbsp;взаимодействия частиц тела → она растёт при <strong>совершении работы</strong> над телом или при <strong>теплопередаче</strong> к&nbsp;нему.</p></div><section class="cn-part qa-part"><h2 class="cn-h2alt">Вопросы и ответы</h2><div class="qa"><div class="qa-q">1. От чего зависит внутренняя энергия тела?</div><div class="qa-a"><span class="qa-label">Ответ:</span> От движения и&nbsp;взаимодействия его частиц — от температуры и&nbsp;агрегатного состояния.</div></div><div class="qa"><div class="qa-q">2. Приведите пример изменения внутренней энергии совершением работы.</div><div class="qa-a"><span class="qa-label">Ответ:</span> Ладони нагреваются при трении.</div></div></section></article></div></div></div>
+<div class="tb-scr" id="tb-student"><div class="app note-view nt-physics"><div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" type="button" aria-label="Назад" disabled=""><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H4M10 6l-6 6 6 6"></path></svg></button></div></div><div class="cn-search"><label class="cn-search-box"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="Поиск: Внутренняя энергия…" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div><div class="cn-doc kn-protected" id="noteDoc"><header class="cn-intro"><div class="cn-kicker">Физика</div><h1 class="note-title">Внутренняя энергия</h1><p class="cn-lead">Внутренняя энергия и способы её изменения</p><div class="note-meta">Тепловые явления<span class="sep">·</span>Работа и теплопередача</div></header><article class="cn-body"><section class="cn-sec"><h2 class="cn-h2">1. Что такое внутренняя энергия</h2><div class="cn-box main tone-imp"><div class="cn-box-label">Важно · главная мысль</div><p>Все тела состоят из частиц, которые непрерывно движутся и&nbsp;взаимодействуют друг с&nbsp;другом.</p></div><p><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц, из которых состоит тело.</p><p>Внутренняя энергия зависит от <strong>температуры</strong> тела и&nbsp;его агрегатного состояния. Она не зависит от механического движения тела и&nbsp;его положения относительно других тел.</p></section><section class="cn-sec"><h2 class="cn-h2">2. Способы изменения внутренней энергии</h2><ul class="cn-list"><li><strong>совершение работы</strong> — например, при трении или ударе тело нагревается;</li><li><strong>теплопередача</strong> — передача энергии от более нагретого тела к&nbsp;менее нагретому без совершения работы.</li></ul><h3 class="cn-h3">Причина → следствие</h3><p class="cn-lbl">Причины:</p><ul class="cn-list"><li>над телом совершают работу</li><li>телу передают количество теплоты</li></ul><p class="cn-lbl">Следствия:</p><ul class="cn-list"><li>внутренняя энергия тела увеличивается</li><li>температура тела повышается</li></ul><div class="cn-box example tone-plain"><div class="cn-box-label">Пример</div><p>Если быстро потереть ладони, они нагреются: совершается работа, и&nbsp;внутренняя энергия рук увеличивается.</p></div></section><section class="cn-sec"><h2 class="cn-h2">3. Виды теплопередачи</h2><div class="table-wrap"><table class="note-table stack"><thead><tr><th>Вид</th><th>Как происходит</th><th>Пример</th></tr></thead><tbody><tr><td>Теплопроводность</td><td data-label="Как происходит">энергия передаётся от более нагретых частей тела к&nbsp;менее нагретым</td><td data-label="Пример">нагревается ложка в&nbsp;горячем чае</td></tr><tr><td>Конвекция</td><td data-label="Как происходит">энергию переносят потоки жидкости или газа</td><td data-label="Пример">воздух в&nbsp;комнате нагревается от батареи</td></tr><tr><td>Излучение</td><td data-label="Как происходит">энергия передаётся излучением, даже в&nbsp;вакууме</td><td data-label="Пример">Солнце нагревает Землю</td></tr></tbody></table></div></section><section class="cn-sec"><h2 class="cn-h2">4. Количество теплоты</h2><div class="cn-box formulas tone-head"><div class="cn-box-label">Формула</div><div class="formula">Q = cm(t₂ − t₁)</div><p>Количество теплоты, необходимое для нагревания тела или выделяемое им при охлаждении.</p><ul class="cn-vars"><li><span class="formula-inline">Q</span> — количество теплоты, Дж</li><li><span class="formula-inline">c</span> — удельная теплоёмкость вещества, Дж/(кг·°C)</li><li><span class="formula-inline">m</span> — масса тела, кг</li><li><span class="formula-inline">t₁, t₂</span> — начальная и конечная температура, °C</li></ul></div></section><section class="cn-card terms"><h2 class="cn-card-title">Термины</h2><p class="cn-gl"><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц тела.</p><p class="cn-gl"><span class="kw-def">Теплопередача</span> — изменение внутренней энергии без совершения работы над телом или самим телом.</p></section><div class="cn-box important key-points tone-imp"><div class="cn-box-label">Важно</div><p>Внутреннюю энергию можно изменить двумя способами: совершением работы и&nbsp;теплопередачей.</p></div><div class="cn-box conclusion tone-alt"><div class="cn-box-label">Вывод</div><p><strong>Внутренняя энергия</strong> — энергия движения и&nbsp;взаимодействия частиц тела → она растёт при <strong>совершении работы</strong> над телом или при <strong>теплопередаче</strong> к&nbsp;нему.</p></div><section class="cn-part qa-part"><h2 class="cn-h2alt">Вопросы и ответы</h2><div class="qa"><div class="qa-q">1. От чего зависит внутренняя энергия тела?</div><div class="qa-a"><span class="qa-label">Ответ:</span> От движения и&nbsp;взаимодействия его частиц — от температуры и&nbsp;агрегатного состояния.</div></div><div class="qa"><div class="qa-q">2. Приведите пример изменения внутренней энергии совершением работы.</div><div class="qa-a"><span class="qa-label">Ответ:</span> Ладони нагреваются при трении.</div></div></section></article><div class="kn-wm" aria-hidden="true" data-wm="KN-2D467D08"><span>KN-2D467D08</span></div></div></div></div>
 <div class="tb-label"><b>Как у владельца</b><span class="own">без защиты</span></div>
-<div class="tb-scr" id="tb-owner"><div class="app note-view nt-physics"><div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" type="button" aria-label="Назад" disabled=""><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H4M10 6l-6 6 6 6"></path></svg></button></div></div></div><div class="cn-doc"><header class="cn-intro"><div class="cn-kicker">Физика</div><h1 class="note-title">Внутренняя энергия</h1><p class="cn-lead">Внутренняя энергия и способы её изменения</p><div class="note-meta">Тепловые явления<span class="sep">·</span>Работа и теплопередача</div></header><article class="cn-body"><section class="cn-sec"><h2 class="cn-h2">1. Что такое внутренняя энергия</h2><div class="cn-box main tone-imp"><div class="cn-box-label">Важно · главная мысль</div><p>Все тела состоят из частиц, которые непрерывно движутся и&nbsp;взаимодействуют друг с&nbsp;другом.</p></div><p><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц, из которых состоит тело.</p><p>Внутренняя энергия зависит от <strong>температуры</strong> тела и&nbsp;его агрегатного состояния. Она не зависит от механического движения тела и&nbsp;его положения относительно других тел.</p></section><section class="cn-sec"><h2 class="cn-h2">2. Способы изменения внутренней энергии</h2><ul class="cn-list"><li><strong>совершение работы</strong> — например, при трении или ударе тело нагревается;</li><li><strong>теплопередача</strong> — передача энергии от более нагретого тела к&nbsp;менее нагретому без совершения работы.</li></ul><h3 class="cn-h3">Причина → следствие</h3><p class="cn-lbl">Причины:</p><ul class="cn-list"><li>над телом совершают работу</li><li>телу передают количество теплоты</li></ul><p class="cn-lbl">Следствия:</p><ul class="cn-list"><li>внутренняя энергия тела увеличивается</li><li>температура тела повышается</li></ul><div class="cn-box example tone-plain"><div class="cn-box-label">Пример</div><p>Если быстро потереть ладони, они нагреются: совершается работа, и&nbsp;внутренняя энергия рук увеличивается.</p></div></section><section class="cn-sec"><h2 class="cn-h2">3. Виды теплопередачи</h2><div class="table-wrap"><table class="note-table stack"><thead><tr><th>Вид</th><th>Как происходит</th><th>Пример</th></tr></thead><tbody><tr><td>Теплопроводность</td><td data-label="Как происходит">энергия передаётся от более нагретых частей тела к&nbsp;менее нагретым</td><td data-label="Пример">нагревается ложка в&nbsp;горячем чае</td></tr><tr><td>Конвекция</td><td data-label="Как происходит">энергию переносят потоки жидкости или газа</td><td data-label="Пример">воздух в&nbsp;комнате нагревается от батареи</td></tr><tr><td>Излучение</td><td data-label="Как происходит">энергия передаётся излучением, даже в&nbsp;вакууме</td><td data-label="Пример">Солнце нагревает Землю</td></tr></tbody></table></div></section><section class="cn-sec"><h2 class="cn-h2">4. Количество теплоты</h2><div class="cn-box formulas tone-head"><div class="cn-box-label">Формула</div><div class="formula">Q = cm(t₂ − t₁)</div><p>Количество теплоты, необходимое для нагревания тела или выделяемое им при охлаждении.</p><ul class="cn-vars"><li><span class="formula-inline">Q</span> — количество теплоты, Дж</li><li><span class="formula-inline">c</span> — удельная теплоёмкость вещества, Дж/(кг·°C)</li><li><span class="formula-inline">m</span> — масса тела, кг</li><li><span class="formula-inline">t₁, t₂</span> — начальная и конечная температура, °C</li></ul></div></section><section class="cn-card terms"><h2 class="cn-card-title">Термины</h2><p class="cn-gl"><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц тела.</p><p class="cn-gl"><span class="kw-def">Теплопередача</span> — изменение внутренней энергии без совершения работы над телом или самим телом.</p></section><div class="cn-box important key-points tone-imp"><div class="cn-box-label">Важно</div><p>Внутреннюю энергию можно изменить двумя способами: совершением работы и&nbsp;теплопередачей.</p></div><div class="cn-box conclusion tone-alt"><div class="cn-box-label">Вывод</div><p><strong>Внутренняя энергия</strong> — энергия движения и&nbsp;взаимодействия частиц тела → она растёт при <strong>совершении работы</strong> над телом или при <strong>теплопередаче</strong> к&nbsp;нему.</p></div><section class="cn-part qa-part"><h2 class="cn-h2alt">Вопросы и ответы</h2><div class="qa"><div class="qa-q">1. От чего зависит внутренняя энергия тела?</div><div class="qa-a"><span class="qa-label">Ответ:</span> От движения и&nbsp;взаимодействия его частиц — от температуры и&nbsp;агрегатного состояния.</div></div><div class="qa"><div class="qa-q">2. Приведите пример изменения внутренней энергии совершением работы.</div><div class="qa-a"><span class="qa-label">Ответ:</span> Ладони нагреваются при трении.</div></div></section></article></div></div></div>
+<div class="tb-scr" id="tb-owner"><div class="app note-view nt-physics"><div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" type="button" aria-label="Назад" disabled=""><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H4M10 6l-6 6 6 6"></path></svg></button></div></div><div class="cn-search"><label class="cn-search-box"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="Поиск: Внутренняя энергия…" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div><div class="cn-doc" id="noteDoc"><header class="cn-intro"><div class="cn-kicker">Физика</div><h1 class="note-title">Внутренняя энергия</h1><p class="cn-lead">Внутренняя энергия и способы её изменения</p><div class="note-meta">Тепловые явления<span class="sep">·</span>Работа и теплопередача</div></header><article class="cn-body"><section class="cn-sec"><h2 class="cn-h2">1. Что такое внутренняя энергия</h2><div class="cn-box main tone-imp"><div class="cn-box-label">Важно · главная мысль</div><p>Все тела состоят из частиц, которые непрерывно движутся и&nbsp;взаимодействуют друг с&nbsp;другом.</p></div><p><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц, из которых состоит тело.</p><p>Внутренняя энергия зависит от <strong>температуры</strong> тела и&nbsp;его агрегатного состояния. Она не зависит от механического движения тела и&nbsp;его положения относительно других тел.</p></section><section class="cn-sec"><h2 class="cn-h2">2. Способы изменения внутренней энергии</h2><ul class="cn-list"><li><strong>совершение работы</strong> — например, при трении или ударе тело нагревается;</li><li><strong>теплопередача</strong> — передача энергии от более нагретого тела к&nbsp;менее нагретому без совершения работы.</li></ul><h3 class="cn-h3">Причина → следствие</h3><p class="cn-lbl">Причины:</p><ul class="cn-list"><li>над телом совершают работу</li><li>телу передают количество теплоты</li></ul><p class="cn-lbl">Следствия:</p><ul class="cn-list"><li>внутренняя энергия тела увеличивается</li><li>температура тела повышается</li></ul><div class="cn-box example tone-plain"><div class="cn-box-label">Пример</div><p>Если быстро потереть ладони, они нагреются: совершается работа, и&nbsp;внутренняя энергия рук увеличивается.</p></div></section><section class="cn-sec"><h2 class="cn-h2">3. Виды теплопередачи</h2><div class="table-wrap"><table class="note-table stack"><thead><tr><th>Вид</th><th>Как происходит</th><th>Пример</th></tr></thead><tbody><tr><td>Теплопроводность</td><td data-label="Как происходит">энергия передаётся от более нагретых частей тела к&nbsp;менее нагретым</td><td data-label="Пример">нагревается ложка в&nbsp;горячем чае</td></tr><tr><td>Конвекция</td><td data-label="Как происходит">энергию переносят потоки жидкости или газа</td><td data-label="Пример">воздух в&nbsp;комнате нагревается от батареи</td></tr><tr><td>Излучение</td><td data-label="Как происходит">энергия передаётся излучением, даже в&nbsp;вакууме</td><td data-label="Пример">Солнце нагревает Землю</td></tr></tbody></table></div></section><section class="cn-sec"><h2 class="cn-h2">4. Количество теплоты</h2><div class="cn-box formulas tone-head"><div class="cn-box-label">Формула</div><div class="formula">Q = cm(t₂ − t₁)</div><p>Количество теплоты, необходимое для нагревания тела или выделяемое им при охлаждении.</p><ul class="cn-vars"><li><span class="formula-inline">Q</span> — количество теплоты, Дж</li><li><span class="formula-inline">c</span> — удельная теплоёмкость вещества, Дж/(кг·°C)</li><li><span class="formula-inline">m</span> — масса тела, кг</li><li><span class="formula-inline">t₁, t₂</span> — начальная и конечная температура, °C</li></ul></div></section><section class="cn-card terms"><h2 class="cn-card-title">Термины</h2><p class="cn-gl"><span class="kw-def">Внутренняя энергия</span> — энергия движения и&nbsp;взаимодействия частиц тела.</p><p class="cn-gl"><span class="kw-def">Теплопередача</span> — изменение внутренней энергии без совершения работы над телом или самим телом.</p></section><div class="cn-box important key-points tone-imp"><div class="cn-box-label">Важно</div><p>Внутреннюю энергию можно изменить двумя способами: совершением работы и&nbsp;теплопередачей.</p></div><div class="cn-box conclusion tone-alt"><div class="cn-box-label">Вывод</div><p><strong>Внутренняя энергия</strong> — энергия движения и&nbsp;взаимодействия частиц тела → она растёт при <strong>совершении работы</strong> над телом или при <strong>теплопередаче</strong> к&nbsp;нему.</p></div><section class="cn-part qa-part"><h2 class="cn-h2alt">Вопросы и ответы</h2><div class="qa"><div class="qa-q">1. От чего зависит внутренняя энергия тела?</div><div class="qa-a"><span class="qa-label">Ответ:</span> От движения и&nbsp;взаимодействия его частиц — от температуры и&nbsp;агрегатного состояния.</div></div><div class="qa"><div class="qa-q">2. Приведите пример изменения внутренней энергии совершением работы.</div><div class="qa-a"><span class="qa-label">Ответ:</span> Ладони нагреваются при трении.</div></div></section></article></div></div></div>
 <script>
 /*
  * StudyContent v1 — универсальное структурированное представление учебного материала.
@@ -2973,7 +2973,7 @@ html,body{background:#f4f6f9;color:var(--tb-ink)}
  *  - если выделение всё же захватило текст конспекта (например, «выделить всё» на другом экране браузера), в буфер
  *    обмена вместо текста кладётся пустая строка;
  *  - печать экрана конспекта выдаёт пустой лист (CSS @media print);
- *  - поверх текста — бледный водяной знак с коротким кодом ученика (псевдоним, не email и не ID входа).
+ *  - внизу видимой части конспекта — небольшой полупрозрачный код ученика (псевдоним, не email и не ID входа).
  *
  * Чего это НЕ делает и сделать не может: запретить скриншот, съёмку экрана телефоном, распознавание текста
  * со скриншота, чтение уже загруженной страницы через инструменты разработчика. Защита усложняет простое
@@ -3040,25 +3040,14 @@ html,body{background:#f4f6f9;color:var(--tb-ink)}
     return codeCache.get(uid);
   }
 
-  // ---------- водяной знак: плитка SVG с кодом, повторяется по всей высоте конспекта ----------
-  const tileCache = new Map();
-  function tile(c) {
-    if (!tileCache.has(c)) {
-      // цвет — основной тёмно-синий приложения (--navy #0d1747) с низкой непрозрачностью; повёрнут, чтобы не сливаться со строками
-      const svg =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="150" viewBox="0 0 220 150">' +
-        '<text x="110" y="80" text-anchor="middle" transform="rotate(-24 110 75)" fill="#0d1747" fill-opacity="0.075" ' +
-        'font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="1">' +
-        c + "</text></svg>";
-      tileCache.set(c, 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '")');
-    }
-    return tileCache.get(c);
-  }
-  /** разметка водяного знака для вставки внутрь .cn-doc (только код; экранным дикторам не виден) */
+  // ---------- водяной знак: один небольшой код внизу видимой части конспекта ----------
+  // Ставится последним элементом .cn-doc; CSS (position: sticky; bottom) держит его у нижнего края экрана, пока
+  // конспект на экране. Нулевая высота — места в разметке не занимает; pointer-events: none — нажатия проходят насквозь.
+  /** разметка водяного знака для вставки в конец .cn-doc (экранным дикторам не виден) */
   function watermark(uid) {
     const c = code(uid);
     if (!c) return "";
-    return '<div class="kn-wm" aria-hidden="true" data-wm="' + c + '" style="background-image:' + tile(c).replace(/"/g, "&quot;") + '"></div>';
+    return '<div class="kn-wm" aria-hidden="true" data-wm="' + c + '"><span>' + c + "</span></div>";
   }
 
   // ---------- перехват копирования ----------
@@ -3136,9 +3125,105 @@ html,body{background:#f4f6f9;color:var(--tb-ink)}
     return '<div class="app note-view nt-' + esc(content.meta.subject) + '">' +
       '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" type="button" aria-label="Назад" disabled>' + icon(BACK) +
       '</button></div></div>' +
-      (isStudent ? '<div class="cn-search"><label class="cn-search-box">' + icon(SEARCH) +
-        '<input class="cn-search-input" id="tb-search" type="search" autocomplete="off" placeholder="' + esc(v.searchHint) + '" aria-label="Поиск по конспекту"></label></div>' : "") +
-      '</div><div class="cn-doc' + (isStudent ? " kn-protected" : "") + '">' + (isStudent ? K.protect.watermark(UID) : "") + v.head + v.body + "</div></div>";
+      '<div class="cn-search"><label class="cn-search-box">' + icon(SEARCH) +
+      '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(v.searchHint) +
+      '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div>' +
+      '</div><div class="cn-doc' + (isStudent ? " kn-protected" : "") + '" id="noteDoc">' + v.head + v.body + (isStudent ? K.protect.watermark(UID) : "") + "</div></div>";
+  }
+  // поиск — функции findInNote / nextNoteHit из app.js v34.4 без изменений; root — свой экран
+  function toggleRef(ref, open) {
+    if (!ref) return;
+    const show = open ?? !ref.classList.contains("open");
+    ref.classList.toggle("open", show);
+    ref.querySelector("[data-ref]")?.setAttribute("aria-expanded", String(show));
+  }
+  function makeSearch(root) {
+  const NOTE_FIND = { hits: [], index: -1 };
+
+  function clearNoteMarks(doc) {
+    doc.querySelectorAll("mark.cn-hit").forEach((m) => {
+      const parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function findInNote(query) {
+    const doc = root.querySelector("#noteDoc");
+    const count = root.querySelector("#inNoteCount");
+    if (!doc) return;
+    clearNoteMarks(doc);
+    NOTE_FIND.hits = [];
+    NOTE_FIND.index = -1;
+    // v34.4: рендерер ставит неразрывный пробел после однобуквенных слов («в стекле»), а в запросе — обычный пробел;
+    // ё и е ученики пишут вперемешку. Замены той же длины — позиции совпадений в тексте не сдвигаются.
+    const norm = (s) => s.toLowerCase().replace(/\u00a0/g, " ").replace(/ё/g, "е");
+    const q = norm(query.trim().replace(/\s+/g, " "));
+    if (q.length < 2) {
+      if (count) count.textContent = "";
+      return;
+    }
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (norm(walker.currentNode.nodeValue).includes(q)) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const text = node.nodeValue;
+      const lower = norm(text);
+      const frag = document.createDocumentFragment();
+      let from = 0;
+      for (let at = lower.indexOf(q); at !== -1; at = lower.indexOf(q, from)) {
+        frag.appendChild(document.createTextNode(text.slice(from, at)));
+        const m = document.createElement("mark");
+        m.className = "cn-hit";
+        m.textContent = text.slice(at, at + q.length);
+        frag.appendChild(m);
+        NOTE_FIND.hits.push(m);
+        from = at + q.length;
+      }
+      frag.appendChild(document.createTextNode(text.slice(from)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    if (count) count.textContent = NOTE_FIND.hits.length ? "" : "Нет совпадений";
+    nextNoteHit();
+  }
+
+  function nextNoteHit() {
+    const hits = NOTE_FIND.hits;
+    const count = root.querySelector("#inNoteCount");
+    if (!hits.length) return;
+    hits[NOTE_FIND.index]?.classList.remove("current");
+    NOTE_FIND.index = (NOTE_FIND.index + 1) % hits.length;
+    const m = hits[NOTE_FIND.index];
+    m.classList.add("current");
+    // совпадение в свёрнутом справочном блоке — раскрываем его, иначе подсветка не видна
+    const ref = m.closest(".cn-ref");
+    if (ref && !ref.classList.contains("open")) {
+      // без анимации: позиция совпадения нужна сразу, после раскрытия
+      ref.classList.add("instant");
+      toggleRef(ref, true);
+      void ref.offsetHeight;
+      requestAnimationFrame(() => ref.classList.remove("instant"));
+    }
+    if (count) count.textContent = NOTE_FIND.index + 1 + " из " + hits.length;
+    const bar = root.querySelector(".cn-search");
+    const y = m.getBoundingClientRect().top + window.scrollY - (bar ? bar.offsetHeight : 0) - 70;
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  }
+
+
+    return { findInNote, nextNoteHit };
+  }
+  for (const id of ["tb-student", "tb-owner"]) {
+    const root = document.getElementById(id);
+    const s = makeSearch(root);
+    const input = root.querySelector("#inNoteSearch");
+    input.addEventListener("input", () => s.findInNote(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        s.nextNoteHit();
+      }
+    });
   }
   // сворачиваемые справочные блоки — как toggleRef в app.js
   document.addEventListener("click", (e) => {
