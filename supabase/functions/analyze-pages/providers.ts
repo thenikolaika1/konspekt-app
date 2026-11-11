@@ -37,12 +37,38 @@ export type Reply = {
   outputTokens: number;
   /** время этапов внутри провайдера, мс (для GigaChat — OAuth, загрузка файлов, chat) */
   timings: { oauthMs: number; uploadMs: number; chatMs: number };
+  /** потоковый ответ GigaChat (генерация по частям): время до первого токена, генерация, объём — только числа */
+  stream?: StreamStats;
   /** провайдеры, которые упали перед этим ответом (сработал fallback) */
   fallbacks: ProviderId[];
 };
 
+/** Время этапов неудачного вызова провайдера (для метрик): stage — этап, на котором произошла ошибка. */
+export type StageTimings = { oauthMs: number; uploadMs: number; chatMs: number; stage: string; stream?: StreamStats };
+
+/**
+ * Безопасные метрики потокового ответа (stream: true): только числа и код причины, без текста ответа.
+ * ttftMs — от отправки запроса chat до первого непустого фрагмента текста (-1 — не дождались);
+ * genMs — от первого фрагмента до конца или обрыва; chunks/chars — сколько фрагментов и знаков пришло;
+ * tokens — completion_tokens из usage, если GigaChat их прислал (-1 — не прислал, например при обрыве);
+ * end — причина окончания: finish_reason модели (stop, length, blacklist, error) или timeout / network / eof
+ * (поток закрылся без конца ответа) / bad_chunk (фрагмент не разобрался) / stall_ttft, stall_pause (оборвал сторож).
+ * v66.7, тоже только числа (сбор данных о «разгоне» и медленных ответах, ничего не обрывают):
+ * maxGapMs — самая длинная пауза между фрагментами (при обрыве — с учётом паузы до обрыва); perPage — знаков на фото;
+ * rep — доля повторяющихся 40-знаковых кусков в последних 3000 знаках ответа (0 — повторов нет, около 1 — одно и то же);
+ * slowAt — через сколько мс генерации сработало бы правило «не успеет» (−1 — не сработало; ответ не обрывает).
+ */
+export type StreamStats = {
+  ttftMs: number; genMs: number; chunks: number; chars: number; tokens: number; end: string;
+  maxGapMs?: number; perPage?: number; rep?: number; slowAt?: number;
+};
+
 /** Ошибка провайдера: code — код для notes.error_code, detail — безопасный текст для лога. */
 export class ProviderError extends Error {
+  /** время этапов до ошибки (только числа и название этапа) */
+  timings?: StageTimings;
+  /** v66.7: ответ оборвал сторож потока (stall_ttft / stall_pause), а не общий тайм-аут; code при этом AI_TIMEOUT */
+  stall?: StallReason;
   constructor(public code: string, public detail = "", public provider = "", public status = 0) {
     super(code);
   }
@@ -139,8 +165,10 @@ export function configuredProviders(): ProviderId[] {
 /**
  * Один запрос к модели с автоматическим переключением на резервный провайдер при ошибке провайдера.
  * prefer — провайдер, который надо попробовать первым (для повтора: тот же, что дал первый ответ).
+ * capMs — если задан, вызов одного провайдера не дольше этого (генерация по частям); без него — как раньше.
+ * stream — GigaChat отвечает потоком (stream: true) ради метрик ожидания; без него — как раньше, одним ответом.
  */
-export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession): Promise<Reply> {
+export async function generate(messages: ChatMessage[], deadline: number, prefer?: ProviderId, giga?: GigaSession, capMs?: number, stream = false): Promise<Reply> {
   const available = configuredProviders();
   const order = prefer && available.includes(prefer) ? [prefer, ...available.filter((p) => p !== prefer)] : available;
   if (!order.length) throw new ProviderError("SERVER_MISCONFIGURED", "no AI provider key configured");
@@ -154,7 +182,8 @@ export async function generate(messages: ChatMessage[], deadline: number, prefer
     // пока есть резервный провайдер, текущий не может занять всё оставшееся время:
     // после первого остаётся резерв на резервные, после промежуточного — на последний
     const reserve = i === 0 ? TIMEOUTS.fallbackReserveMs : TIMEOUTS.lastReserveMs;
-    const timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    let timeout = hasNext ? Math.min(TIMEOUTS.primaryMaxMs, remaining - reserve) : remaining;
+    if (capMs) timeout = Math.min(timeout, capMs);
     if (timeout < TIMEOUTS.minCallMs) {
       if (hasNext) {
         console.warn("[analyze-pages] skip provider=" + id + ": not enough time left (" + remaining + " ms)");
@@ -163,7 +192,7 @@ export async function generate(messages: ChatMessage[], deadline: number, prefer
       throw lastError || new ProviderError("AI_TIMEOUT", "no time left", id);
     }
     try {
-      const reply = await (id === "gigachat" ? callGigaChat(messages, timeout, giga) : callProvider(PROVIDERS[id], messages, timeout));
+      const reply = await (id === "gigachat" ? callGigaChat(messages, timeout, giga, stream) : callProvider(PROVIDERS[id], messages, timeout));
       return { ...reply, fallbacks: failed };
     } catch (e) {
       const err = e instanceof ProviderError ? e : new ProviderError("AI_ERROR", String(e), id);
@@ -401,7 +430,7 @@ async function runPool(tasks: (() => Promise<void>)[], limit: number) {
  * timeout покрывает всё, кроме удаления файлов (у него свой короткий лимит).
  * Без session (прямой вызов) файлы удаляются сразу после запроса, как раньше.
  */
-async function callGigaChat(messages: ChatMessage[], timeout: number, session?: GigaSession): Promise<Reply> {
+async function callGigaChat(messages: ChatMessage[], timeout: number, session?: GigaSession, stream = false): Promise<Reply> {
   const p = PROVIDERS.gigachat;
   const s = session || newGigaSession();
   const started = Date.now();
@@ -411,14 +440,36 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
   let pages = 0;
   let uploaded = 0;
   let stage = "oauth";
+  let stageStarted = started;
   let ok = false;
+  // время этапов до ошибки — в метрики (без текста и ключей)
+  // метрики потока: заполняются по мере ответа, при обрыве остаются тем, что успело прийти
+  let st: StreamStats | undefined;
+  let firstAt = 0;
+  let inStream = false;
+  // v66.7: сторож потока (только stream: true — генерация по частям) и причина, если ответ оборвал он
+  let watch: StallWatch | undefined;
+  let stallTimer: ReturnType<typeof setInterval> | undefined;
+  let stallReason: StallReason | "" = "";
+  const timingsAt = (): StageTimings => {
+    const now = Date.now() - stageStarted;
+    return {
+      oauthMs: stage === "oauth" ? now : timings.oauthMs,
+      uploadMs: stage === "upload" ? now : timings.uploadMs,
+      chatMs: stage === "chat" ? timings.chatMs || now : timings.chatMs,
+      stage,
+      ...(st ? { stream: closeStream(st, firstAt) } : {}),
+    };
+  };
 
   // запрос к API с токеном; при 401 запрос повторяется один раз с новым токеном. Токен сбрасывается, только
   // если он всё ещё текущий: параллельные загрузки, получившие 401 одновременно, делят один OAuth-запрос
-  const api = async (path: string, init: RequestInit, signal: AbortSignal = ctrl.signal): Promise<{ res: Response; body: string }> => {
+  // accept = text/event-stream: успешный потоковый ответ возвращается непрочитанным (body пустой), его читает readStream
+  const api = async (path: string, init: RequestInit, signal: AbortSignal = ctrl.signal, accept = "application/json"): Promise<{ res: Response; body: string }> => {
     for (let retried = false;; retried = true) {
       const token = await gigaAccessToken(signal);
-      const res = await gigaFetch(GIGACHAT.apiUrl + path, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: "Bearer " + token, Accept: "application/json" } }, signal);
+      const res = await gigaFetch(GIGACHAT.apiUrl + path, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: "Bearer " + token, Accept: accept } }, signal);
+      if (res.ok && accept === EVENT_STREAM && isEventStream(res)) return { res, body: "" };
       const body = await res.text();
       if (res.status === 401 && !retried) {
         if (gigaToken?.value === token) gigaToken = null;
@@ -484,7 +535,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     const urls = messages.flatMap((m) => (typeof m.content === "string" ? [] : m.content.flatMap((c) => (c.type === "image_url" ? [c.image_url.url] : []))));
     const missing = [...new Set(urls)].filter((u) => !s.files.has(u));
     stage = "upload";
-    t = Date.now();
+    t = stageStarted = Date.now();
     await runPool(missing.map((u) => () => upload(u, urls.indexOf(u) + 1)), GIGACHAT.uploadConcurrency);
     timings.uploadMs = Date.now() - t;
 
@@ -508,22 +559,47 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     }
 
     stage = "chat";
-    t = Date.now();
+    t = stageStarted = Date.now();
+    if (stream) st = { ttftMs: -1, genMs: 0, chunks: 0, chars: 0, tokens: -1, end: "" };
     const { res, body } = await api("/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: p.model, messages: out, temperature: 0.2, max_tokens: 12000, stream: false }),
-    });
-    timings.chatMs = Date.now() - t;
-    const ms = Date.now() - started;
-    if (!res.ok) throw fail(res.status, body);
+      body: JSON.stringify({ model: p.model, messages: out, temperature: 0.2, max_tokens: 12000, stream }),
+    }, ctrl.signal, stream ? EVENT_STREAM : "application/json");
+    if (!res.ok) {
+      timings.chatMs = Date.now() - t;
+      throw fail(res.status, body);
+    }
 
     let data;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      data = null;
+    if (st && isEventStream(res)) {
+      // поток: текст собирается из фрагментов; дальше — та же проверка, что у обычного ответа
+      inStream = true;
+      // v66.7: сторож раз в секунду проверяет поток; зависший ответ обрывается (ctrl.abort) раньше общего тайм-аута
+      const w = (watch = new StallWatch(t, started + timeout, pages));
+      stallTimer = setInterval(() => {
+        if (ctrl.signal.aborted) return;
+        const reason = w.check(Date.now());
+        if (reason) {
+          stallReason = reason;
+          ctrl.abort();
+        }
+      }, STALL.checkMs);
+      data = await readStream(res, st, t, (at) => (firstAt = at), w);
+      clearInterval(stallTimer);
+      w.fill(st, Date.now());
+      inStream = false;
+    } else {
+      // сервер ответил обычным JSON (в том числе на stream: true) — разбираем как раньше
+      if (st) st.end = "not_streamed";
+      try {
+        data = JSON.parse(body);
+      } catch {
+        data = null;
+      }
     }
+    timings.chatMs = Date.now() - t;
+    const ms = Date.now() - started;
     const choice = data?.choices?.[0];
     if (!choice) {
       console.warn("[analyze-pages] ai provider=gigachat model=" + p.model + " status=200 body-error ms=" + ms + " images=" + pages);
@@ -537,7 +613,7 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
     console.log(
       "[analyze-pages] ai provider=gigachat model=" + p.model + (fullModel !== p.model ? " → " + fullModel : "") + " status=200 ms=" + ms +
         " images=" + pages + " finish=" + finish + " oauth_ms=" + timings.oauthMs + " upload_ms=" + timings.uploadMs + " uploaded=" + uploaded +
-        " reused=" + (pages - uploaded) + " chat_ms=" + timings.chatMs,
+        " reused=" + (pages - uploaded) + " chat_ms=" + timings.chatMs + (st ? streamLog(closeStream(st, firstAt)) : ""),
     );
     if (finish === "blacklist") throw new ProviderError("AI_REFUSED", "", "gigachat", 200);
     if (finish === "error") throw new ProviderError("AI_ERROR", "finish_reason=error", "gigachat", 200);
@@ -551,25 +627,264 @@ async function callGigaChat(messages: ChatMessage[], timeout: number, session?: 
       inputTokens: Number(data.usage?.prompt_tokens) || 0,
       outputTokens: Number(data.usage?.completion_tokens) || 0,
       timings,
+      ...(st ? { stream: closeStream(st, firstAt) } : {}),
       fallbacks: [],
     };
   } catch (e) {
-    if (e instanceof ProviderError) throw e;
+    clearInterval(stallTimer);
+    if (watch && st && inStream) watch.fill(st, Date.now());
+    const tm = timingsAt();
+    if (e instanceof ProviderError) {
+      if (tm.stream && !tm.stream.end) tm.stream.end = "error";
+      // ошибка внутри потока (обрыв без конца ответа, неразборчивый фрагмент, событие ошибки) — метрики потока в лог
+      if (tm.stream && inStream) {
+        console.warn("[analyze-pages] ai provider=gigachat model=" + p.model + " stage=chat stream failed: " + e.code + " after " + (Date.now() - started) +
+          " ms images=" + pages + streamLog(tm.stream));
+      }
+      e.timings ??= tm;
+      throw e;
+    }
     const aborted = ctrl.signal.aborted;
+    // оборвал сторож (не общий тайм-аут): код тот же AI_TIMEOUT — для клиента и пределов ошибок ничего не меняется
+    const stalled = aborted && stallReason ? stallReason : "";
+    if (tm.stream && !tm.stream.end) tm.stream.end = stalled || (aborted ? "timeout" : "network");
     const msg = String((e as Error)?.message || e).slice(0, 200);
     const tls = /certificate|UnknownIssuer|invalid peer|tls/i.test(msg);
+    const after = Date.now() - started;
     console.warn(
-      "[analyze-pages] ai provider=gigachat model=" + p.model + " stage=" + stage + " " + (aborted ? "timeout" : tls ? "tls error" : "network error") +
-        " after " + (Date.now() - started) + " ms images=" + pages,
+      "[analyze-pages] ai provider=gigachat model=" + p.model + " stage=" + stage + " " +
+        (stalled ? "stalled (" + stalled + ")" : aborted ? "timeout" : tls ? "tls error" : "network error") +
+        " after " + after + " ms images=" + pages + " oauth_ms=" + tm.oauthMs + " upload_ms=" + tm.uploadMs + " chat_ms=" + tm.chatMs + (tm.stream ? streamLog(tm.stream) : ""),
     );
-    throw new ProviderError(aborted ? "AI_TIMEOUT" : "AI_NETWORK", aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg, "gigachat");
+    const err = new ProviderError(
+      aborted ? "AI_TIMEOUT" : "AI_NETWORK",
+      stalled ? stage + " " + stalled + " after " + after + " ms" : aborted ? stage + " timeout " + timeout + " ms" : stage + " " + msg,
+      "gigachat",
+    );
+    if (stalled) err.stall = stalled;
+    err.timings = tm;
+    throw err;
   } finally {
     clearTimeout(timer);
+    clearInterval(stallTimer);
     // ошибка GigaChat: его файлы больше не нужны — удаление в фоне, резервный провайдер стартует сразу
     if (!ok) releaseGigaFiles(s);
     // прямой вызов без сессии — удалить сразу, как раньше
     if (!session) await closeGigaSession(s);
   }
+}
+
+const EVENT_STREAM = "text/event-stream";
+const isEventStream = (res: Response) => (res.headers.get("content-type") || "").toLowerCase().includes(EVENT_STREAM);
+
+/** Метрики потока на текущий момент (длительность генерации — от первого фрагмента до сейчас, если поток не закончен). */
+function closeStream(st: StreamStats, firstAt: number): StreamStats {
+  return { ...st, genMs: st.end && st.genMs ? st.genMs : firstAt ? Date.now() - firstAt : 0 };
+}
+
+const streamLog = (s: StreamStats) =>
+  " ttft_ms=" + s.ttftMs + " gen_ms=" + s.genMs + " chunks=" + s.chunks + " chars=" + s.chars + " tokens=" + s.tokens + " end=" + (s.end || "?") +
+  (s.maxGapMs !== undefined ? " max_gap_ms=" + s.maxGapMs + " per_page=" + s.perPage + " rep=" + s.rep + " slow_at=" + s.slowAt : "");
+
+// ---------- v66.7: сторож потока GigaChat (только генерация по частям, stream: true) ----------
+//
+// Данные 08.11.2026 (20 потоковых ответов, только числа из логов): нормальные — 95–120 знаков/с, первый фрагмент через
+// 0,5–2,4 с; зависшие — 178 / 262 / 748 знаков за 85–118 с (2–6 знаков/с); медленные ровные — 24 знака/с; «разгон» —
+// 7235–11385 знаков при нормальной скорости. Обрывает сторож только то, что надёжно отличается от нормы:
+//  • ttft — нет ни одного фрагмента 20 с после запроса (наблюдалось ≤ 2,4 с; запас ×8);
+//  • pause — за последние 30 с пришло меньше 250 знаков (норма ~2900 за 30 с; запас ×11), кроме случая, когда ответ уже
+//    выглядит законченным JSON (ждём только конца потока). Тишину посреди нормального ответа терпит до ~27 с
+//    (30 с минус время, за которое приходят 250 знаков); зависания 08.11 обрываются на ~31-й секунде генерации.
+// Не обрывает: по длине («разгон» по длине не отделяется от длинных нормальных конспектов) и по правилу «не успеет»
+// (медленный, но успевающий ответ мог бы попасть под него) — оба только считаются в метриках (rep, per_page, slow_at).
+export const STALL = {
+  /** как часто сторож проверяет поток */
+  checkMs: 1_000,
+  /** нет первого фрагмента столько мс после отправки запроса → stall_ttft */
+  ttftMs: 20_000,
+  /** окно паузы: за последние pauseMs пришло меньше pauseMinChars знаков → stall_pause */
+  pauseMs: 30_000,
+  pauseMinChars: 250,
+  /** «не успеет» (только метрика slowAt): после slowGraceMs генерации при скорости за slowWindowMs ответ не дотянет до
+   *  slowMinCharsPerPage знаков на фото к концу ожидания */
+  slowGraceMs: 30_000,
+  slowWindowMs: 20_000,
+  slowMinCharsPerPage: 1_150,
+};
+export type StallReason = "stall_ttft" | "stall_pause";
+
+const REP_TAIL = 3_000;
+const REP_SHINGLE = 40;
+const REP_STEP = 5;
+
+/** Доля повторяющихся кусков текста (40 знаков с шагом 5): 0 — повторов нет, около 1 — одно и то же. Только число. */
+export function repetition(tail: string): number {
+  if (tail.length < REP_SHINGLE * 10) return 0;
+  const seen = new Set<string>();
+  let total = 0;
+  for (let i = 0; i + REP_SHINGLE <= tail.length; i += REP_STEP) {
+    seen.add(tail.slice(i, i + REP_SHINGLE));
+    total++;
+  }
+  return Math.round((1 - seen.size / total) * 100) / 100;
+}
+
+/**
+ * Наблюдение за потоком: время и объём фрагментов, баланс скобок JSON (законченный ли ответ), последние 3000 знаков
+ * (только в памяти — для числа rep; в лог и в базу текст не попадает). check(now) — причина обрыва или null.
+ */
+export class StallWatch {
+  firstAt = 0;
+  lastAt = 0;
+  chars = 0;
+  maxGapMs = 0;
+  slowAt = -1;
+  private samples: [number, number][] = [];
+  private depth = 0;
+  private opened = false;
+  private inStr = false;
+  private esc = false;
+  private lastCh = "";
+  private tail = "";
+
+  constructor(public chatStarted: number, public deadline: number, public pages: number, private cfg = STALL) {}
+
+  onPiece(now: number, piece: string) {
+    if (!piece) return;
+    if (this.firstAt) this.maxGapMs = Math.max(this.maxGapMs, now - this.lastAt);
+    else this.firstAt = now;
+    this.lastAt = now;
+    this.chars += piece.length;
+    this.samples.push([now, this.chars]);
+    // храним только то, что нужно окнам проверки, и один отсчёт старше самого длинного окна
+    const keepFrom = now - Math.max(this.cfg.pauseMs, this.cfg.slowWindowMs) - 5_000;
+    while (this.samples.length > 1 && this.samples[1][0] <= keepFrom) this.samples.shift();
+    for (const ch of piece) {
+      if (this.inStr) {
+        if (this.esc) this.esc = false;
+        else if (ch === "\\") this.esc = true;
+        else if (ch === '"') this.inStr = false;
+      } else if (ch === '"') this.inStr = true;
+      else if (ch === "{" || ch === "[") (this.depth++, (this.opened = true));
+      else if (ch === "}" || ch === "]") this.depth--;
+      if (ch.trim()) this.lastCh = ch;
+    }
+    this.tail = (this.tail + piece).slice(-REP_TAIL);
+  }
+
+  /** Знаков пришло к моменту t. */
+  private charsAt(t: number): number {
+    let c = 0;
+    for (const [ts, n] of this.samples) {
+      if (ts > t) break;
+      c = n;
+    }
+    return c;
+  }
+
+  /** Ответ уже выглядит законченным JSON (скобки сошлись, последний знак — «}» или конец блока ```). */
+  looksComplete(): boolean {
+    return this.opened && this.depth <= 0 && !this.inStr && (this.lastCh === "}" || this.lastCh === "`");
+  }
+
+  check(now: number): StallReason | null {
+    const c = this.cfg;
+    if (!this.firstAt) return now - this.chatStarted >= c.ttftMs ? "stall_ttft" : null;
+    const gen = now - this.firstAt;
+    if (this.slowAt < 0 && gen >= c.slowGraceMs) {
+      const rate = (this.chars - this.charsAt(now - c.slowWindowMs)) / c.slowWindowMs;
+      if (this.chars + rate * Math.max(0, this.deadline - now) < c.slowMinCharsPerPage * Math.max(1, this.pages)) this.slowAt = gen;
+    }
+    if (gen >= c.pauseMs && this.chars - this.charsAt(now - c.pauseMs) < c.pauseMinChars && !this.looksComplete()) return "stall_pause";
+    return null;
+  }
+
+  /** Числовые метрики v66.7 в StreamStats. */
+  fill(st: StreamStats, now: number) {
+    st.maxGapMs = this.firstAt ? Math.max(this.maxGapMs, now - this.lastAt) : -1;
+    st.perPage = Math.round(this.chars / Math.max(1, this.pages));
+    st.rep = repetition(this.tail);
+    st.slowAt = this.slowAt;
+  }
+}
+
+/**
+ * Читает потоковый ответ GigaChat (Server-Sent Events: строки «data: {json}», в конце «data: [DONE]») и собирает его
+ * в вид обычного ответа: { model, choices: [{ message: { content }, finish_reason }], usage }. Попутно заполняет
+ * метрики st (только числа). Обрыв по тайм-ауту или сети — исключение из reader.read() (обрабатывает callGigaChat);
+ * поток закрылся без конца ответа — AI_NETWORK; неразборчивый фрагмент или ошибка в потоке — AI_ERROR.
+ */
+async function readStream(res: Response, st: StreamStats, chatStarted: number, onFirst: (at: number) => void, watch?: StallWatch) {
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let finish = "";
+  let model = "";
+  let usage: Record<string, unknown> | undefined;
+  let done = false;
+  let firstAt = 0;
+  const line = (raw: string) => {
+    const l = raw.replace(/\r$/, "");
+    if (!l.startsWith("data:")) return; // пустые строки, комментарии «:», event:/id: — пропускаем
+    const v = l.slice(5).trim();
+    if (!v) return;
+    if (v === "[DONE]") return void (done = true);
+    let obj;
+    try {
+      obj = JSON.parse(v);
+    } catch {
+      st.end = "bad_chunk";
+      throw new ProviderError("AI_ERROR", "stream: bad chunk", "gigachat", 200);
+    }
+    const ch = obj?.choices?.[0];
+    if (!ch) {
+      if (obj?.usage) usage = obj.usage;
+      if (obj?.error || obj?.message) {
+        st.end = "error";
+        throw new ProviderError("AI_ERROR", "stream: error event", "gigachat", Number(obj?.status) || 200);
+      }
+      return;
+    }
+    if (obj.model) model = String(obj.model);
+    if (obj.usage) usage = obj.usage;
+    const piece = typeof ch.delta?.content === "string" ? ch.delta.content : "";
+    if (piece) {
+      if (!firstAt) {
+        firstAt = Date.now();
+        st.ttftMs = firstAt - chatStarted;
+        onFirst(firstAt);
+      }
+      text += piece;
+      st.chunks++;
+      st.chars += piece.length;
+      watch?.onPiece(Date.now(), piece);
+    }
+    if (ch.finish_reason) finish = String(ch.finish_reason);
+  };
+  try {
+    while (!done) {
+      const { value, done: eof } = await reader.read();
+      if (eof) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while (!done && (i = buf.indexOf("\n")) >= 0) {
+        line(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+      }
+    }
+    if (!done && buf) line(buf);
+  } finally {
+    if (done) await reader.cancel().catch(() => {});
+  }
+  if (usage) st.tokens = Number((usage as { completion_tokens?: unknown }).completion_tokens) || 0;
+  st.genMs = firstAt ? Date.now() - firstAt : 0;
+  if (!done && !finish) {
+    st.end = "eof";
+    throw new ProviderError("AI_NETWORK", "stream ended before the answer was complete", "gigachat", 200);
+  }
+  st.end = finish || "stop";
+  return { model, choices: [{ message: { content: text }, finish_reason: finish || "stop" }], usage: usage || {} };
 }
 
 /** Удаление загруженных страниц из хранилища GigaChat (после ошибки GigaChat или в конце генерации). */
