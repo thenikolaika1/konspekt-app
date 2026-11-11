@@ -21,7 +21,8 @@ import { type Continuation, CONTINUATION_TTL_MS, contextOf, fitsGeneration, MAX_
 import type { StreamStats } from "./providers.ts";
 
 const BUCKET = "temp-pages";
-const MAX_PAGES = 8;
+// v66: не больше 4 фото у всех, включая владельца (тот же предел — private.ai_limits.max_pages = 4 и MAX_PAGES в app.js)
+const MAX_PAGES = 4;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 // генерация, которая «висит» в analyzing дольше этого, считается прерванной — её можно запустить снова
 const STALE_MS = 5 * 60_000;
@@ -239,7 +240,8 @@ Deno.serve(async (req) => {
 // ---------- генерация ----------
 
 /** Эксперимент v66: пробные генерации 5–8 страниц — только у владельца (см. обработчик запроса). */
-const OWNER_PAGE_TEST = true;
+// v66: выключено — пробные генерации 5–8 страниц отложены; владелец ограничен 4 фото, как все
+const OWNER_PAGE_TEST = false;
 
 /** Владелец ли это — по его JWT, как его видит база (get_my_access_v2 → status owner). Ошибка — «нет». */
 async function isOwner(url: string, token: string): Promise<boolean> {
