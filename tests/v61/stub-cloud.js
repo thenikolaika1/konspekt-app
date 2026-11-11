@@ -52,6 +52,7 @@
       if (T.libDelay) await new Promise((r) => setTimeout(r, T.libDelay));
       if (T.libError === "network" || T.offline) throw new Error("CONNECTION_LOST");
       if (T.libError === "missing") throw new Error("NOT_FOUND");
+      if (T.libError === "rate") throw Object.assign(new Error("RATE_LIMITED"), { retryAfter: T.libRetryAfter || 3600 });
       const v2 = T.v2 && typeof T.v2 === "object" ? T.v2 : null;
       if (v2 && !["owner", "paid", "trial"].includes(v2.status)) {
         const e = new Error("ACCESS_REQUIRED");

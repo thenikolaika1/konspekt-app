@@ -92,9 +92,10 @@ check "2. выдача + пробный одновременно: в каждо�
 check "2. ни одной ошибки и deadlock" "$errs" "0"
 
 # 3. две выдачи разным ученикам одновременно, свободно 15 → одна granted, вторая BUDGET_LOW
+# (ученики KN-SU/KN-SN не участвуют в разделе 2: там раунд 10 мог выдать Premium KN-SM — тогда здесь честный ALREADY_ACTIVE)
 $P -d $DB -c "select public.t_free(15)" >/dev/null
 hold
-(api "select coalesce(r ->> 'result', r ->> 'error') from (select public.owner_grant('$TOK', gen_random_uuid(), 'KN-SMAAAA', null, null) r) x" > "$OUT/a") &
+(api "select coalesce(r ->> 'result', r ->> 'error') from (select public.owner_grant('$TOK', gen_random_uuid(), 'KN-SUAAAA', null, null) r) x" > "$OUT/a") &
 (api "select coalesce(r ->> 'result', r ->> 'error') from (select public.owner_grant('$TOK', gen_random_uuid(), 'KN-SNAAAA', null, null) r) x" > "$OUT/b") &
 wait
 check "3. две выдачи при свободных 15: одна granted" "$(cat "$OUT"/a "$OUT"/b | grep -c granted)" "1"
