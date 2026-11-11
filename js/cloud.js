@@ -441,7 +441,9 @@
     const data = await retryNetwork(() =>
       callRpc("get_library_paragraph", { p_subject: subjectId, p_book: bookId, p_paragraph: paragraphId }, "LIBRARY_FAILED"));
     if (data && typeof data === "object" && data.content && typeof data.content === "object") return data.content;
-    const err = new Error(data?.error === "ACCESS_REQUIRED" || data?.error === "NOT_FOUND" ? data.error : "LIBRARY_FAILED");
+    // v66: RATE_LIMITED — сервер ограничивает число новых параграфов за час и за сутки (после миграции library_rate_limit)
+    const err = new Error(["ACCESS_REQUIRED", "NOT_FOUND", "RATE_LIMITED"].includes(data?.error) ? data.error : "LIBRARY_FAILED");
+    if (data?.error === "RATE_LIMITED") err.retryAfter = Number(data.retry_after) || 3600;
     if (data?.access && typeof data.access === "object") err.access = data.access;
     throw err;
   }
