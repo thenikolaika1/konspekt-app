@@ -357,10 +357,6 @@
   // Сроки и «осталось N дней» считаются от времени сервера (server_now), часы устройства не участвуют.
   // Это интерфейс: генерацию ИИ закрывает сервер, а тексты библиотеки лежат в публичном файле и экраном не защищены.
   const accessV2 = () => S.access.v2 || null;
-  // v66: защита текста конспекта (js/protect.js) — у всех, кроме владельца; владельцу копирование и печать нужны для работы
-  const protectOn = () => !!window.K.protect && accessV2()?.status !== "owner";
-  const protectCls = () => (protectOn() ? " kn-protected" : "");
-  const protectMark = () => (protectOn() ? window.K.protect.watermark(window.K.cloud?.peekUid?.() || "") : "");
   const paywalled = () => accessV2()?.status === "expired";
   // полный текст готового конспекта и главная заменяются экраном «Доступ закончился»; каталог остаётся виден
   const paywallHere = () => (S.screen === "home" || S.screen === "library-paragraph") && paywalled();
@@ -532,10 +528,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=66";
+        css.href = "./owner.css?v=65";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=66";
+        js.src = "./js/owner.js?v=65";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -837,7 +833,7 @@
       app("note-view lib-note nt-" + esc(content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
       '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>" +
-      '<div class="cn-doc' + protectCls() + '">' + view.head + view.body + protectMark() + "</div>" +
+      '<div class="cn-doc">' + view.head + view.body + "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
   }
@@ -859,7 +855,7 @@
         const code = e?.message || "";
         // сервер сказал «нет доступа» — это его состояние доступа: экран «Доступ закончился» / предложение Premium
         if (code === "ACCESS_REQUIRED" && e.access) setAccess(fromV2(e.access), true, e.access);
-        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : code === "RATE_LIMITED" ? (e.retryAfter > 3600 ? "rate-day" : "rate") : "network" };
+        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : "network" };
         if (S.screen === "library-paragraph" && libKey() === key) render();
       },
     );
@@ -877,9 +873,6 @@
       body =
         '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и в Premium.") +
         '<div class="error-actions"><button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button></div></div>";
-    } else if (e === "rate" || e === "rate-day") {
-      // v66: сервер ограничил число новых конспектов подряд (после миграции library_rate_limit); уже открытые открываются как обычно
-      body = '<div class="lib-state">' + emptyState("Слишком много конспектов подряд", e === "rate" ? "Новые конспекты снова откроются через час. Уже открытые сегодня — доступны." : "На сегодня лимит новых конспектов исчерпан. Уже открытые сегодня — доступны.") + "</div>";
     } else if (e === "missing") {
       body = '<div class="lib-state">' + emptyState("Конспект пока недоступен", "Мы уже готовим его. Загляни позже.") + "</div>";
     } else {
@@ -1005,11 +998,10 @@
       '<div class="cn-search"><label class="cn-search-box">' + icon("search") +
       '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
       '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div>' +
-      '<div class="cn-doc' + protectCls() + '" id="noteDoc">' +
+      '<div class="cn-doc" id="noteDoc">' +
       (isExample(n) ? '<p class="note-example-bar">' + exampleTag + "Так выглядит готовый конспект. Этот пример создан приложением, а не тобой.</p>" : "") +
       view.head +
       view.body +
-      protectMark() +
       "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
@@ -1195,8 +1187,6 @@
     UPLOAD_FAILED: ["Не удалось загрузить фотографии.", "Попробуй ещё раз."],
     UNREADABLE_PAGES: ["Не получилось прочитать текст на фотографиях.", "Сфотографируй страницы целиком, ровно и при хорошем свете."],
     AI_TIMEOUT: ["ИИ отвечал слишком долго.", "Попробуй ещё раз или отправь меньше страниц."],
-    // ответ ИИ не удалось разобрать как конспект (повреждённый JSON) — генерация не списана, фото сохранены
-    AI_BAD_JSON: ["ИИ не смог корректно сформировать конспект.", "Попробуй ещё раз."],
     AI_RATE_LIMITED: ["Сервис ИИ сейчас перегружен.", "Подожди минуту и попробуй ещё раз."],
     RATE_LIMITED: ["Слишком много конспектов за короткое время.", "Попробуй немного позже."],
     STILL_PROCESSING: ["Конспект ещё создаётся.", "Он появится в «Недавних», когда будет готов."],
@@ -2404,15 +2394,11 @@
     }
   }
 
-  // v66: рендерер ставит неразрывный пробел после однобуквенных слов («в стекле»), а в запросе — обычный пробел;
-  // ё и е ученики пишут вперемешку. Замены той же длины — позиции совпадений в тексте не сдвигаются.
-  const searchNorm = (s) => s.toLowerCase().replace(/\u00a0/g, " ").replace(/ё/g, "е");
-
   function filterList(listId, notes, q) {
     const box = root.querySelector(listId);
     if (!box) return;
-    q = searchNorm(q.trim().replace(/\s+/g, " "));
-    const found = notes.filter((n) => searchNorm(n.title + " " + (n.subjectLabel || "") + " " + (n.preview || "")).includes(q));
+    q = q.trim().toLowerCase();
+    const found = notes.filter((n) => (n.title + " " + (n.subjectLabel || "") + " " + (n.preview || "")).toLowerCase().includes(q));
     box.innerHTML = found.length ? found.map(noteCard).join("") : emptyState("Ничего не найдено", "Попробуй другой запрос");
     hydrateThumbs();
   }
@@ -2445,17 +2431,17 @@
     clearNoteMarks(doc);
     NOTE_FIND.hits = [];
     NOTE_FIND.index = -1;
-    const q = searchNorm(query.trim().replace(/\s+/g, " "));
+    const q = query.trim().toLowerCase();
     if (q.length < 2) {
       if (count) count.textContent = "";
       return;
     }
     const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
     const nodes = [];
-    while (walker.nextNode()) if (searchNorm(walker.currentNode.nodeValue).includes(q)) nodes.push(walker.currentNode);
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.toLowerCase().includes(q)) nodes.push(walker.currentNode);
     nodes.forEach((node) => {
       const text = node.nodeValue;
-      const lower = searchNorm(text);
+      const lower = text.toLowerCase();
       const frag = document.createDocumentFragment();
       let from = 0;
       for (let at = lower.indexOf(q); at !== -1; at = lower.indexOf(q, from)) {
