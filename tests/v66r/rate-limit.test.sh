@@ -29,10 +29,11 @@ ok=$(grep -c '^ok$' "${TMPDIR:-/tmp}/rl66.out" || true); lim=$(grep -c '^RATE_LI
 [ "$ok" = "1" ] && [ "$lim" = "5" ] && echo "PASS C1. 6 одновременных новых параграфов при 19 из 20: выдан ровно 1, остальные RATE_LIMITED" || { echo "FAIL C1. ok=$ok limited=$lim"; exit 1; }
 # откат: функция побайтно как до миграции, журнал удалён, тексты на месте; повторный откат и повторная миграция безопасны
 PR="$ROOT/supabase/prepared"
+before_rb=$($P -d rl66 -tA -c "$SNAP")
 $P -d rl66 -v ON_ERROR_STOP=1 -f "$PR/20261110120000_v34_4_library_rate_limit.rollback.sql" >/dev/null
 $P -d rl66 -v ON_ERROR_STOP=1 -f "$PR/20261110120000_v34_4_library_rate_limit.rollback.sql" >/dev/null
 fn_after=$($P -d rl66 -tA -c "$FN"); gone=$($P -d rl66 -tA -c "select to_regclass('private.library_reads') is null")
-[ "$fn_after" = "$fn_before" ] && [ "$gone" = "t" ] && [ "$($P -d rl66 -tA -c "$SNAP")" = "$before" ] \
+[ "$fn_after" = "$fn_before" ] && [ "$gone" = "t" ] && [ "$($P -d rl66 -tA -c "$SNAP")" = "$before_rb" ] \
   && echo "PASS M2. откат (дважды): функция как до миграции (тело, права, security definer, search_path), журнал удалён, тексты не изменились" \
   || { echo "FAIL M2. откат: fn=$([ "$fn_after" = "$fn_before" ] && echo ok || echo diff) gone=$gone"; exit 1; }
 $P -d rl66 -v ON_ERROR_STOP=1 -f "$PR/20261110120000_v34_4_library_rate_limit.sql" >/dev/null

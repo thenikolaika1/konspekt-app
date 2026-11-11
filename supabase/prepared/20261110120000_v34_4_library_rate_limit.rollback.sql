@@ -39,6 +39,7 @@ begin
     return jsonb_build_object('error', 'NOT_FOUND');
   end if;
   return jsonb_build_object('content', v_c, 'access_status', v_a ->> 'status');
+end
 $$;
 
 revoke all on function public.get_library_paragraph(text, text, text) from public, anon;

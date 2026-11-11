@@ -33,7 +33,14 @@ for (const m of s.matchAll(/\.rpc\(\s*"([a-z_0-9]+)"\s*,\s*\{([\s\S]*?)\}/g))
   console.log(m[1] + "|" + [...m[2].matchAll(/\b(p_[a-z_0-9]+)\s*:/g)].map((x) => x[1]).sort().join(",") + "|service_role");')
 ALL=$(printf '%s\n%s\n' "$CALLS" "$EDGE" | grep -v '^$' | sort -u)
 check "1. вызовы v61.3 найдены в коде: клиент, панель, Edge Function (не меньше 20 разных)" "$([ "$(echo "$ALL" | wc -l)" -ge 20 ] && echo ok)" "ok"
-check "1. Edge Function v62 = v61.3 (код analyze-pages не менялся)" "$(git -C "$ROOT" diff --quiet "$OLD" HEAD -- supabase/functions/analyze-pages/index.ts && echo same)" "same"
+# v66: код analyze-pages изменён (развёрнутая v33 + предел 4 фото), поэтому проверяется не «файл тот же», а что все его
+# вызовы базы (функция и параметры) уже есть среди вызовов v61.3 ниже — значит, база v62 их выполняет
+EDGE_HEAD=$(node -e '
+const s = require("fs").readFileSync(process.argv[1], "utf8");
+for (const m of s.matchAll(/\.rpc\(\s*"([a-z_0-9]+)"\s*(?:,\s*\{([\s\S]*?)\})?/g))
+  console.log(m[1] + "|" + [...(m[2] || "").matchAll(/\b(p_[a-z_0-9]+)\s*:/g)].map((x) => x[1]).sort().join(","));' "$ROOT/supabase/functions/analyze-pages/index.ts" | sort -u)
+MISSING=$(comm -23 <(echo "$EDGE_HEAD") <(echo "$ALL" | cut -d'|' -f1,2 | sort -u))
+check "1. Edge Function: все вызовы базы из analyze-pages есть среди проверяемых вызовов v61.3 ($(echo "$EDGE_HEAD" | wc -l) шт.)" "$([ -n "$EDGE_HEAD" ] && [ -z "$MISSING" ] && echo ok || echo "$MISSING")" "ok"
 
 $P -d postgres -c "drop database if exists old62" -c "create database old62 template base62" >/dev/null
 BAD=$(echo "$ALL" | while IFS='|' read -r fn args role; do
