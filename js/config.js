@@ -11,12 +11,12 @@
 (() => {
   const K = (window.K = window.K || {});
   K.config = {
-    supabaseUrl: "https://ohdeykbkgimvwstkwuuf.supabase.co",
-    supabaseKey: "sb_publishable_7t0cfHxy6z5QU4N1qW-4Og_6qcPhaQ_",
+    supabaseUrl: "https://supabase.invalid",
+    supabaseKey: "test-build-no-key",
     analyzeFunction: "analyze-pages",
     pagesBucket: "temp-pages",
     // аналитика использования (js/analytics.js): false — события не собираются и не отправляются
-    analytics: true,
+    analytics: false,
     // предметы, скрытые из библиотеки готовых конспектов: данные остаются в каталоге (js/library-index.js), конспект по фото
     // по этому предмету создаётся как обычно. Вернуть предмет — убрать его id из списка
     hiddenLibrarySubjects: ["biology"],

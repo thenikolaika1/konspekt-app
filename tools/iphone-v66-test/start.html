@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Konspekt — тестовая версия</title>
+<style>
+:root{--ink:#0d1747;--muted:#6c7696;--line:#e6e8ef;--soft:#f4f8fd;--blue:#0a7cf4;--green:#2f8b62;--greenbg:#eef8f2;--wine:#a54858;--winebg:#fbf0f2;color-scheme:light}
+html,body{margin:0;background:#f4f6f9;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+main{width:min(100%,460px);margin:0 auto;padding:22px 16px calc(28px + env(safe-area-inset-bottom));box-sizing:border-box;display:grid;gap:14px}
+h1{font-size:22px;margin:0;letter-spacing:-.4px}
+h2{font-size:16px;margin:0}
+p{margin:0;color:var(--muted)}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;display:grid;gap:10px}
+a.btn,button{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:12px;font:700 15px/1.2 inherit;font-family:inherit;border:1px solid var(--line);background:#fff;color:var(--ink)}
+a.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+a.btn:focus-visible,button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.row{display:flex;justify-content:space-between;gap:10px;font-size:14px;border-top:1px solid var(--line);padding-top:8px}
+.row:first-of-type{border-top:0;padding-top:0}
+.row span:last-child{text-align:right;font-weight:700}
+.ok{color:var(--green)}.bad{color:var(--wine)}.wait{color:var(--muted)}
+.cur{font-size:13px;color:var(--muted)}
+code{font:12px ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<main>
+  <h1>Konspekt v66 — тестовая версия</h1>
+  <p>Отдельная копия только для проверки. К настоящему серверу не подключена: конспекты, ученики и доступы здесь тестовые и хранятся только в этом браузере.</p>
+  <section class="card" aria-labelledby="h-role">
+    <h2 id="h-role">Открыть приложение</h2>
+    <a class="btn primary" href="index.html" data-role="student">Как ученик (пробный период)</a>
+    <a class="btn" href="index.html" data-role="owner">Как владелец</a>
+    <a class="btn" href="index.html" data-role="expired">Доступ закончился</a>
+    <p class="cur" id="cur"></p>
+  </section>
+  <section class="card" aria-labelledby="h-diag">
+    <h2 id="h-diag">Диагностика</h2>
+    <div class="row"><span>Сборка</span><span id="d-build" class="wait">…</span></div>
+    <div class="row"><span>Service Worker</span><span id="d-sw" class="wait">…</span></div>
+    <div class="row"><span>Кэш тестовой версии</span><span id="d-cache" class="wait">…</span></div>
+    <div class="row"><span>Связь с настоящим сервером</span><span id="d-net" class="wait">…</span></div>
+    <button type="button" id="d-again">Проверить ещё раз</button>
+    <p class="cur" id="d-scope"></p>
+  </section>
+  <section class="card">
+    <button type="button" id="reset">Стереть тестовые данные</button>
+    <p class="cur">Стирает только данные тестовой версии Konspekt в этом браузере.</p>
+  </section>
+</main>
+<script>
+(() => {
+  const NAMES = { student: "ученик (пробный период)", owner: "владелец", expired: "доступ закончился" };
+  const get = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const cur = () => (document.getElementById("cur").textContent = "Сейчас выбрано: " + (NAMES[get("kn-test-role")] || NAMES.student));
+  document.querySelectorAll("[data-role]").forEach((a) => a.addEventListener("click", () => { try { localStorage.setItem("kn-test-role", a.dataset.role); } catch (e) {} }));
+  document.getElementById("reset").addEventListener("click", () => {
+    try { Object.keys(localStorage).filter((k) => k.startsWith("kn-") || k.startsWith("konspekt.")).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
+    cur();
+    document.getElementById("reset").textContent = "Тестовые данные стёрты";
+  });
+  cur();
+  const out = (id, text, cls) => { const el = document.getElementById(id); el.textContent = text; el.className = cls; };
+  async function diag() {
+    ["d-build", "d-sw", "d-cache", "d-net"].forEach((id) => out(id, "…", "wait"));
+    try {
+      const html = await (await fetch("index.html", { cache: "no-store" })).text();
+      const v = (html.match(/app\.js\?v=(\d+)/) || [])[1];
+      out("d-build", v ? "v" + v : "не найдена", v ? "ok" : "bad");
+    } catch (e) { out("d-build", "ошибка загрузки", "bad"); }
+    if (!("serviceWorker" in navigator)) out("d-sw", "не поддерживается", "bad");
+    else {
+      try {
+        await navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" });
+        const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 8000))]);
+        // ready наступает, когда воркер ещё «activating» — ждём окончания активации
+        if (reg && reg.active && reg.active.state !== "activated") await Promise.race([new Promise((r) => reg.active.addEventListener("statechange", r)), new Promise((r) => setTimeout(r, 8000))]);
+        const st = reg && reg.active ? reg.active.state : "";
+        out("d-sw", st === "activated" ? "работает" : st ? "состояние: " + st : "не активировался за 8 с", st === "activated" ? "ok" : "bad");
+        if (reg) document.getElementById("d-scope").textContent = "Область: " + reg.scope;
+      } catch (e) { out("d-sw", "ошибка: " + (e && e.message || e), "bad"); }
+    }
+    try {
+      const keys = (await caches.keys()).filter((k) => k.startsWith("konspekt-test-"));
+      let n = 0;
+      for (const k of keys) n += (await (await caches.open(k)).keys()).length;
+      out("d-cache", keys.length ? keys.join(", ") + " · файлов: " + n : "пока пусто", keys.length ? "ok" : "wait");
+    } catch (e) { out("d-cache", "недоступен", "bad"); }
+    // сборка сама: в js/cloud.js — тестовый сервер без сети, в js/config.js — нет адреса и ключа настоящего сервера
+    try {
+      const [cl, cfg] = await Promise.all(["js/cloud.js", "js/config.js"].map(async (f) => (await fetch(f, { cache: "no-store" })).text()));
+      const ok = /ТЕСТОВАЯ СБОРКА/.test(cl) && !/supabase\.co|sb_publishable_/.test(cl + cfg) && /supabase\.invalid/.test(cfg);
+      out("d-net", ok ? "отключена" : "ПОДКЛЮЧЕНА", ok ? "ok" : "bad");
+    } catch (e) { out("d-net", "не удалось проверить", "bad"); }
+  }
+  document.getElementById("d-again").addEventListener("click", diag);
+  diag();
+})();
+</script>
+</body>
+</html>
