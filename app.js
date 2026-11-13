@@ -376,7 +376,11 @@
   // Premium подключает Николай вручную по ID ученика. Цены, оплаты и ссылок в приложении нет (цена обсуждается лично;
   // price_label с сервера не показывается). Срок и число генераций — только с сервера (get_plans).
   const premiumPlan = () => (S.plans.state === "list" ? S.plans.items[0] || null : null);
-  const premiumCta = () => (accessV2()?.status === "paid" ? "Продлить Premium" : "Подключить Premium");
+  // v66: в интерфейсе ученика — «Продление доступа», без слова Premium и без цены (внутренние имена plan/premium не меняются)
+  const premiumCta = () => (!accessV2() || accessV2().status === "none" || !accessV2().kind ? "Получить доступ" : "Продлить доступ");
+  // название действующего доступа для ученика: подарок — «Подарок», остальное оплаченное — «Полный доступ»
+  const accessLabel = (a) => (a?.plan === "gift" ? "Подарок" : "Полный доступ");
+  const renewDays = () => premiumPlan()?.days || 30;
   // число готовых конспектов по истории и физике — из каталога (js/library-index.js), а не из текста
   const premiumReady = () => ["history", "physics"].reduce((n, subjectId) => n + library.readyCount({ subjectId }), 0);
   // неразрывный пробел между числом и словом: «30 дней» не разрывается на узком экране
@@ -396,17 +400,19 @@
     ];
     return '<ul class="plan-facts">' + items.map((x) => "<li>" + icon("check") + "<span>" + esc(x) + "</span></li>").join("") + "</ul>";
   }
-  // «Как подключить Premium»: только ID ученика (его копирует кнопка); ключ входа здесь не показывается и не копируется
+  // «Связаться с администратором» — тот же способ, что и раньше: ученик пишет администратору (Капустину Николаю) любым
+  // удобным способом и сообщает свой ID (его копирует кнопка). Ссылок и контактов в приложении нет; ключ входа не показывается
   function premiumConnect() {
     const acc = account();
     const id = acc.kind === "participant" ? acc.id : "";
     return (
-      '<section class="premium-connect" aria-labelledby="pcTitle"><h2 id="pcTitle">🔒 Как подключить Premium?</h2>' +
-      "<p>Для подключения Premium свяжитесь с Николаем.</p>" +
+      '<section class="premium-connect" id="renewContact" aria-labelledby="pcTitle"><h2 id="pcTitle">Связаться с администратором</h2>' +
+      "<p>Напишите администратору — <b>Капустину Николаю</b> — любым удобным способом и сообщите свой ID. Доступ продлевается по ID.</p>" +
       (id
         ? '<div class="pc-id"><span>Ваш ID:</span> <b id="pcId">' + esc(id) + "</b></div>" +
           '<button class="secondary wide" data-copy-id>Скопировать ID</button><p class="pc-copied" role="status" aria-live="polite"></p>'
-        : '<p class="pc-noid">Войдите по своему ID, чтобы Николай мог подключить Premium.</p>') +
+        : '<p class="pc-noid">Войдите по своему ID, чтобы администратор мог продлить доступ.</p>') +
+      '<p class="renew-note">Условия продления обсуждаются индивидуально.</p>' +
       "</section>"
     );
   }
@@ -439,16 +445,18 @@
   function accessEnded() {
     const a = accessV2() || {};
     const inLibrary = S.screen === "library-paragraph";
+    const trial = a.kind === "trial";
     const title =
-      a.kind === "trial" ? "Пробный период закончился"
+      trial ? "Пробный период завершён"
         : a.kind === "legacy" ? "Бесплатное тестирование завершено"
         : a.kind === "owner" ? "Доступ закончился"
-        : a.status === "none" || !a.kind ? "Библиотека — в Premium"
+        : a.status === "none" || !a.kind ? "Нужен доступ"
         : a.plan === "gift" ? "Подарочный доступ закончился"
-        : "Premium закончился";
-    const lead = inLibrary
-      ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
-      : "Готовые конспекты по истории и физике и ИИ-конспекты по фотографиям — в Premium. Подключает Николай.";
+        : "Срок доступа истёк";
+    const lead =
+      (trial || a.kind === "legacy" ? "Бесплатный доступ к Konspekt закончился." : "Доступ к Konspekt закончился.") +
+      " Чтобы продолжить пользоваться приложением, продлите доступ." +
+      (inLibrary ? " Список предметов и параграфов остаётся виден." : "");
     const notes = store.listNotes().length;
     return (
       app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
@@ -457,9 +465,11 @@
       brand() +
       "<h1>" + title + "</h1>" +
       '<p class="ended-lead">' + lead + "</p>" +
+      '<div class="plan-card renew-card"><div class="plan-top"><b>Продление доступа</b></div><p class="renew-days">На ' + esc(daysText(renewDays())) + "</p></div>" +
       '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
       '<div class="ended-actions">' +
-      '<button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button>" +
+      '<button class="primary wide" data-go="tariffs" data-contact>Связаться с администратором</button>' +
+      '<p class="renew-note">Условия продления обсуждаются индивидуально.</p>' +
       (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
       "</div></div>"
     );
@@ -470,17 +480,25 @@
   function tariffs() {
     const p = S.plans;
     const plan = premiumPlan();
+    // название тарифа из базы (plan.title) ученику не показывается — только «Продление доступа» и срок
     const card =
-      '<div class="plan-card"><div class="plan-top"><b>' + esc(plan?.title || "Premium") + "</b></div>" + premiumBenefits(plan) + "</div>";
+      '<div class="plan-card"><div class="plan-top"><b>Продление доступа</b></div><p class="renew-days">На ' + esc(daysText(renewDays())) + "</p>" + premiumBenefits(plan) + "</div>";
     const body =
       p.state === "list" && plan
         ? '<div class="plan-list">' + card + "</div>"
         : p.state === "list"
-          ? emptyState("Premium пока не опубликован", "Условия подключения уточните у Николая.")
+          ? emptyState("Условия продления уточните у администратора", "Напишите администратору и сообщите свой ID.")
           : p.state === "error"
-            ? emptyState("Не удалось загрузить условия Premium", "Проверьте подключение к интернету и откройте экран ещё раз.")
-            : '<div class="plan-loading" role="status">Загружаем условия Premium…</div>';
-    return app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
+            ? emptyState("Не удалось загрузить условия продления", "Проверьте подключение к интернету и откройте экран ещё раз.")
+            : '<div class="plan-loading" role="status">Загружаем условия продления…</div>';
+    return app("tariffs-screen") + DECO.head() + head("Продление доступа", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
+  }
+  // прокрутка к блоку «Связаться с администратором»; повторяется, когда условия продления загрузились (экран перерисован)
+  function showContact() {
+    const c = root.querySelector("#renewContact");
+    if (!c) return;
+    c.scrollIntoView({ block: "start" });
+    if (S.plans.state !== "loading") S.toContact = false;
   }
   let plansAsked = false;
   function loadPlans() {
@@ -488,7 +506,7 @@
     cloud
       .getPlans()
       .then((items) => (S.plans = { state: "list", items }), () => (S.plans = { state: "error", items: [] }))
-      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && render());
+      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && (render(), S.toContact && S.screen === "tariffs" && showContact()));
   }
 
   // «Мой доступ» в профиле: статус, срок, дни, генерации — только по ответу сервера
@@ -501,7 +519,7 @@
     let status, renew = true;
     if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
     else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
-    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + (a.plan_title || "Оплачен") + " до " + msk(until);
+    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + accessLabel(a) + " до " + msk(until);
     else if (a.status === "trial") status = "Пробный период до " + msk(until);
     else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
     if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));
@@ -510,7 +528,7 @@
     return (
       '<h3 class="pf-h">Мой доступ</h3><div class="access-card status-' + esc(a.status) + '"><b class="access-status">' + esc(status) + "</b>" +
       rows.map((r) => '<span class="access-row">' + esc(r) + "</span>").join("") +
-      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить Premium" : "Premium и продление") + "</button>" : "") +
+      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить доступ" : "Продление доступа") + "</button>" : "") +
       "</div>"
     );
   }
@@ -554,7 +572,7 @@
     if (a?.status !== "paid" || a.kind !== "paid") return "";
     const left = daysLeft(a);
     if (left === null || left > 3) return "";
-    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(a.plan_title || "Premium") + " закончится " +
+    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(accessLabel(a)) + " закончится " +
       (left <= 1 ? "в течение суток" : "через " + esc(daysText(left))) + " · продлить</span>" + icon("chev") + "</button>";
   }
   function trialLine() {
@@ -875,7 +893,7 @@
       body = '<div class="lib-state" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div><p>Загружаем конспект…</p></div>';
     } else if (e === "access") {
       body =
-        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и в Premium.") +
+        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и при полном доступе.") +
         '<div class="error-actions"><button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button></div></div>";
     } else if (e === "rate" || e === "rate-day") {
       // v66: сервер ограничил число новых конспектов подряд (после миграции library_rate_limit); уже открытые открываются как обычно
@@ -1145,7 +1163,7 @@
       ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
     ];
     const faq = [
-      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или Premium. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
+      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или полного доступа. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
       ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
       ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
       ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
@@ -2400,7 +2418,11 @@
         S.bookmarkForNote = null;
         S.draftBookmark = { icon: "book", color: BM_COLORS[0] };
       }
-      return go(to);
+      // «Связаться с администратором» (экран окончания доступа): экран продления сразу на блоке связи
+      if (x.hasAttribute("data-contact")) S.toContact = true;
+      go(to);
+      if (S.toContact) showContact();
+      return;
     }
   }
 

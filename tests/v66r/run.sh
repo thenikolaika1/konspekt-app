@@ -16,6 +16,7 @@ A=$(trace "../../supabase/functions/analyze-pages"); B=$(trace "file://$V33/supa
 [ -n "$A" ] && [ "$A" = "$B" ] && echo "PASS D1. 1–4 фото: 32 сценария analyze-pages v66 = production v33 (запросы к ИИ, промпты, конспект, списание)" || { echo "FAIL D1. след v66 отличается от v33"; exit 1; }
 node tests/v66r/protect.test.js
 node tests/v66r/camera-4.test.js
+node tests/v66r/renewal.test.js
 # обновление PWA v65 → v66 под service worker: v65 — из git (47fccfc, production), без сети сразу после обновления и после запуска с сетью
 V65=$(mktemp -d); git -C "$ROOT" archive 47fccfc | tar -x -C "$V65"
 node tests/v66r/sw-update.test.js "$V65" "$ROOT" 65 66 immediate
