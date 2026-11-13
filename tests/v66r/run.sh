@@ -22,3 +22,4 @@ node tests/v66r/sw-update.test.js "$V65" "$ROOT" 65 66 immediate
 node tests/v66r/sw-update.test.js "$V65" "$ROOT" 65 66 relaunch
 node tests/v66r/sw-edge.test.js "$V65" "$ROOT"
 bash tests/v66r/rate-limit.test.sh
+bash tests/v66r/owner-tech-limit.test.sh
