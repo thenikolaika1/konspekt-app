@@ -88,16 +88,25 @@ function corsHeaders(req: Request): Record<string, string> {
 const json = (status: number, body: unknown, cors: Record<string, string>) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-function serviceKey(): string {
-  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (legacy) return legacy;
-  // проекты на новых API-ключах: {"default":"sb_secret_…"}
+// Ключ сервера: legacy service_role (пока legacy-ключи включены — он, как раньше); иначе один из секретных ключей
+// SUPABASE_SECRET_KEYS = {"имя":"sb_secret_…"}. v66: ключ `default` удалён 12.11.2026 (раскрыт), действующий —
+// `konspekt_server_2026`; на случай следующей замены берётся любой другой секретный ключ, а не только `default`.
+export const SECRET_KEY_NAMES = ["konspekt_server_2026", "default"];
+export function pickSecretKey(raw: string | undefined): string {
   try {
-    const keys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}");
-    return keys.default || "";
+    const keys = JSON.parse(raw || "{}");
+    if (!keys || typeof keys !== "object") return "";
+    for (const name of SECRET_KEY_NAMES) if (typeof keys[name] === "string" && keys[name]) return keys[name];
+    const any = Object.values(keys).find((v) => typeof v === "string" && v.startsWith("sb_secret_"));
+    return typeof any === "string" ? any : "";
   } catch {
     return "";
   }
+}
+function serviceKey(): string {
+  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacy) return legacy;
+  return pickSecretKey(Deno.env.get("SUPABASE_SECRET_KEYS"));
 }
 
 function publicKey(): string {
