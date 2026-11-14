@@ -1,0 +1,176 @@
+# Однократное развёртывание Edge Function register-invite из коммита release/v66-rc 2a1a021 — выпуск v66, разрешение владельца 14.11.2026.
+# Запускается только при push этого файла в служебную ветку deploy/v66.
+# 0) токен Supabase проверяется запросом только на чтение (значение в лог не выводится);
+# 1–2) исходники: коммит 2a1a021, файлы функции = 2a1a021 (sha256);
+# 3–4) production до развёртывания: ACTIVE, версия 4, verify_jwt false, файлы = main 47fccfc (sha256); копия — artifact;
+# 6) развёртывание Supabase CLI 2.119.0 с --no-verify-jwt;
+# 7) после: версия 4+1, verify_jwt false, sha256 всех файлов = 2a1a021; при несоответствии — 8) откат на копию.
+# Повторный запуск ничего не развернёт: шаг 3 требует production версии 4. База, секреты функций, другие функции не затрагиваются.
+name: Deploy register-invite v66 (one-shot)
+
+on:
+  push:
+    branches: [deploy/v66]
+    paths: [.github/workflows/deploy-v66-register-invite.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-v66-register-invite
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ohdeykbkgimvwstkwuuf
+      SLUG: register-invite
+      SOURCE_SHA: 2a1a021d04af6f9200e0a016fe055bc71cb3b104
+      OLD_VERSION: "4"
+      NEW_VERSION: "5"
+      FILES: "index.ts "
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
+        with:
+          version: 2.119.0
+
+      - name: 0. Tooling; Supabase token works (read-only request, value is not printed)
+        run: |
+          test "$(supabase --version)" = "2.119.0"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          code="$(curl -sS -o /tmp/token-check.json -w '%{http_code}' -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions")"
+          echo "token check HTTP $code"
+          test "$code" = "200"
+          cat > /tmp/old.sha256 <<'SUMS'
+          2cf1f2bcc4e7a901c1e980ce4fc0837ecbd9841f706c6d730f419a227424c57b  index.ts
+          SUMS
+          cat > /tmp/new.sha256 <<'SUMS'
+          57da275b27832de232cd7e5d66066a99856a4da38b7b7ed73e88100898198f5e  index.ts
+          SUMS
+          sed -i 's/^ *//' /tmp/old.sha256 /tmp/new.sha256
+
+      - name: 1. Source = 2a1a021 plus only deploy workflow files
+        run: |
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test -z "$(git diff --name-only "$SOURCE_SHA" HEAD | grep -v '^\.github/workflows/deploy-v66-')"
+
+      - name: 2. Source function files, sha256 = commit 2a1a021
+        working-directory: supabase/functions/register-invite
+        run: |
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/new.sha256
+
+      - name: S. Smoke analyze-pages v36 (no login → 401 UNAUTHORIZED; no AI call, no data change)
+        run: |
+          U="https://$PROJECT_REF.supabase.co/functions/v1/analyze-pages"
+          o="$(curl -sS -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: https://thenikolaika1.github.io' "$U")"
+          echo "analyze-pages OPTIONS HTTP $o"; test "$o" = "200"
+          c="$(curl -sS -o /tmp/ap.json -w '%{http_code}' -X POST -H 'Origin: https://thenikolaika1.github.io' -H 'Content-Type: application/json' --data '{}' "$U")"
+          echo "analyze-pages POST without login HTTP $c: $(head -c 200 /tmp/ap.json)"
+          test "$c" = "401"
+          grep -q '"UNAUTHORIZED"' /tmp/ap.json
+
+      - name: 3. Production before deploy — ACTIVE, version 4, verify_jwt false
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-before.json
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('/tmp/meta-before.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at', 'ezbr_sha256')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == int(os.environ['OLD_VERSION']), f"expected production v{os.environ['OLD_VERSION']}, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+
+      - name: 4. Download production and verify it is the checked version (sha256)
+        run: |
+          mkdir -p /tmp/dl-before/supabase/functions
+          cd /tmp/dl-before
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          mkdir -p /tmp/backup-old
+          cp -a "supabase/functions/$SLUG/." /tmp/backup-old/
+          cd /tmp/backup-old
+          find . -type f -printf '%P\n' | sort
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/old.sha256
+
+      - name: 5. Save production backup as artifact
+        id: backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: register-invite-v4-backup
+          path: |
+            /tmp/backup-old/
+            /tmp/meta-before.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 5b. Backup artifact registered
+        run: |
+          test -n "${{ steps.backup.outputs.artifact-id }}"
+          echo "backup artifact id: ${{ steps.backup.outputs.artifact-id }}"
+
+      - name: 6. Deploy (files from 2a1a021, unchanged)
+        id: deploy
+        run: supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+
+      - name: 7. Verify production after deploy — new version, verify_jwt false, sha256 of all files
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-after.json
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('/tmp/meta-after.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at', 'ezbr_sha256')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == int(os.environ['NEW_VERSION']), f"expected v{os.environ['NEW_VERSION']}, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+          mkdir -p /tmp/dl-after/supabase/functions
+          cd /tmp/dl-after
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/new.sha256
+          echo "DEPLOY OK: production $SLUG v$NEW_VERSION = 2a1a021"
+          # проверка работы: неверный запрос отклоняется до обращения к базе (аккаунты не создаются)
+          U="https://$PROJECT_REF.supabase.co/functions/v1/register-invite"
+          o="$(curl -sS -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: https://thenikolaika1.github.io' "$U")"
+          echo "register-invite OPTIONS HTTP $o"; test "$o" = "200"
+          c="$(curl -sS -o /tmp/ri.json -w '%{http_code}' -X POST -H 'Origin: https://thenikolaika1.github.io' -H 'Content-Type: application/json' --data '{}' "$U")"
+          echo "register-invite POST {} HTTP $c: $(head -c 200 /tmp/ri.json)"
+          test "$c" = "400"; grep -q '"BAD_REQUEST"' /tmp/ri.json
+          c="$(curl -sS -o /tmp/ri2.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data 'not json' "$U")"
+          echo "register-invite POST invalid JSON HTTP $c: $(head -c 200 /tmp/ri2.json)"
+          test "$c" = "400"; grep -q '"BAD_REQUEST"' /tmp/ri2.json
+          echo "SMOKE OK"
+
+      - name: 8. Rollback to production backup (only if the deploy step ran and something failed after it)
+        if: failure() && (steps.deploy.outcome == 'success' || steps.deploy.outcome == 'failure')
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-rb.json
+          v="$(python3 -c "import json; print(json.load(open('/tmp/meta-rb.json'))['version'])")"
+          echo "production version before rollback: $v"
+          if [ "$v" = "$OLD_VERSION" ]; then echo "production unchanged — rollback not needed"; exit 0; fi
+          mkdir -p "/tmp/rb/supabase/functions/$SLUG"
+          cp -a /tmp/backup-old/. "/tmp/rb/supabase/functions/$SLUG/"
+          cd /tmp/rb
+          supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+          mkdir -p /tmp/dl-rb/supabase/functions
+          cd /tmp/dl-rb
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/old.sha256
+          echo "ROLLBACK OK: production $SLUG = previous source (new version number)"
