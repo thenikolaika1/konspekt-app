@@ -1,0 +1,84 @@
+# Проверка опубликованного сайта v66 (только чтение): GitHub Pages отдаёт v66, service worker konspekt-v66,
+# приложение открывается в Chromium без ошибок JavaScript. Ничего не меняет; входа нет, ИИ не вызывается.
+name: Site check v66 (read-only)
+
+on:
+  push:
+    branches: [deploy/v66]
+    paths: [.github/workflows/deploy-v66-site-check.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SITE: https://thenikolaika1.github.io/konspekt-app/
+    steps:
+      - name: 1. Pages serves v66 (index, service worker, files)
+        run: |
+          for i in $(seq 1 20); do
+            curl -fsS -H 'Cache-Control: no-cache' "$SITE?nocache=$(date +%s)" -o index.html && grep -q 'app.js?v=66"' index.html && break
+            echo "waiting for Pages… ($i)"; sleep 15
+          done
+          grep -q 'app.js?v=66"' index.html
+          echo "index.html: $(grep -o 'app.js?v=[0-9]*' index.html | head -1), files ?v=66: $(grep -o '?v=66' index.html | wc -l), other ?v=: $(grep -oE '\?v=[0-9]+' index.html | grep -vc '?v=66')"
+          test "$(grep -oE '\?v=[0-9]+' index.html | grep -vc '?v=66')" = "0"
+          curl -fsS "${SITE}service-worker.js?nocache=$(date +%s)" -o sw.js
+          grep -q 'const VERSION = "konspekt-v66"' sw.js && echo "service-worker.js: konspekt-v66"
+          for f in app.js js/protect.js js/cloud.js styles.css; do
+            c=$(curl -sS -o /dev/null -w '%{http_code}' "${SITE}${f}?v=66"); echo "$f?v=66 HTTP $c"; test "$c" = "200"
+          done
+
+      - name: 2. Chromium — app opens, no JS errors, service worker active with cache konspekt-v66
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          cat > check.js <<'JS'
+          const { chromium } = require("playwright");
+          (async () => {
+            const b = await chromium.launch();
+            const errors = [];
+            for (const [name, vp, mobile] of [["iphone", { width: 390, height: 844 }, true], ["desktop", { width: 1280, height: 860 }, false]]) {
+              const ctx = await b.newContext({ viewport: vp, isMobile: mobile, hasTouch: mobile, locale: "ru-RU" });
+              const p = await ctx.newPage();
+              p.on("pageerror", (e) => errors.push(name + " pageerror: " + String(e).slice(0, 200)));
+              p.on("console", (m) => { if (m.type() === "error") errors.push(name + " console: " + m.text().slice(0, 200)); });
+              await p.goto(process.env.SITE, { waitUntil: "load" });
+              await p.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.controller, null, { timeout: 20000 }).catch(() => {});
+              await p.reload({ waitUntil: "load" });
+              await p.waitForTimeout(3000);
+              const info = await p.evaluate(async () => ({
+                build: ([...document.scripts].map((s) => s.src).find((s) => s.includes("app.js")) || "").split("?")[1],
+                sw: !!navigator.serviceWorker.controller,
+                caches: await caches.keys(),
+                appChildren: document.querySelector("#app")?.children.length || 0,
+                text: (document.body.innerText || "").slice(0, 120).replace(/\s+/g, " "),
+              }));
+              console.log(name, JSON.stringify(info));
+              if (info.build !== "v=66") errors.push(name + ": build " + info.build);
+              if (!info.sw) errors.push(name + ": service worker not controlling");
+              if (info.caches.join() !== "konspekt-v66") errors.push(name + ": caches " + info.caches.join());
+              if (!info.appChildren) errors.push(name + ": app did not render");
+              await p.screenshot({ path: "/tmp/pw/" + name + ".png" });
+              await ctx.close();
+            }
+            await b.close();
+            // ошибки сети к Supabase без входа (401 и т.п.) не считаются ошибками JS сайта, но показываются
+            const real = errors.filter((e) => !/Failed to load resource/.test(e));
+            errors.filter((e) => /Failed to load resource/.test(e)).forEach((e) => console.log("info:", e));
+            if (real.length) { console.log("ERRORS:\n" + real.join("\n")); process.exit(1); }
+            console.log("SITE OK: v66, service worker konspekt-v66, no JS errors (iPhone-size and desktop Chromium)");
+          })().catch((e) => { console.log("ERROR " + e); process.exit(2); });
+          JS
+          node check.js
+
+      - name: 3. Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-v66-screenshots
+          path: /tmp/pw/*.png
+          retention-days: 14
+          if-no-files-found: ignore
