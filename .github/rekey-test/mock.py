@@ -1,5 +1,6 @@
 # Заглушка Supabase Auth для проверки скрипта смены ключа (без сети, без настоящих ключей).
-import json, os, sys
+# Режим = "<ответ на PUT>+<ответ на вход>", например put200+login200, putdrop+login500.
+import json, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODE = sys.argv[1]
@@ -21,34 +22,46 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def body(self):
+        return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+
     def rec(self, body):
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"m": self.command, "p": self.path, "apikey": self.headers.get("apikey"), "auth": self.headers.get("Authorization"), "body": body}) + "\n")
+            f.write(json.dumps({"m": self.command, "p": self.path, "apikey": self.headers.get("apikey"), "auth": self.headers.get("Authorization"), "body": body, "pw_after": state["pw"]}) + "\n")
 
     def do_GET(self):
         self.rec(None)
-        if MODE == "get401":
+        if "get401" in MODE:
             return self.send(401, {"msg": "bad key"})
-        if MODE == "wrongemail":
+        if "wrongemail" in MODE:
             return self.send(200, {"id": UID, "email": "id-kn-zzzzzz@id.konspekt.invalid"})
         return self.send(200, {"id": UID, "email": MAIL})
 
     def do_PUT(self):
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-        self.rec(body)
-        if MODE == "put500":
+        b = self.body()
+        if "put422" in MODE:
+            self.rec(b)
+            return self.send(422, {"msg": "weak password"})
+        if "put500" in MODE:
+            self.rec(b)
             return self.send(500, {"msg": "boom"})
-        state["pw"] = body.get("password")
+        state["pw"] = b.get("password")
+        self.rec(b)
+        if "putdrop" in MODE:  # пароль изменён, но ответ потерян
+            self.close_connection = True
+            return
         return self.send(200, {"id": UID, "email": MAIL})
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-        self.rec(body)
+        b = self.body()
+        self.rec(b)
         if self.path.startswith("/auth/v1/logout"):
             self.send_response(204)
             self.end_headers()
             return
-        if MODE == "login400" or body.get("password") != state["pw"]:
+        if "login500" in MODE:
+            return self.send(500, {"msg": "boom"})
+        if "login400" in MODE or b.get("password") != state["pw"]:
             return self.send(400, {"error": "invalid_grant"})
         return self.send(200, {"access_token": "test-token", "user": {"id": UID, "email": MAIL}})
 

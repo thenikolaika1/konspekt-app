@@ -1,5 +1,5 @@
-# Проверка скрипта смены ключа на Windows PowerShell 5.1 против локальной заглушки Supabase.
-# Настоящий Supabase не вызывается, секретов нет.
+# Проверка скрипта смены ключа на Windows PowerShell 5.1 против локальной заглушки Supabase
+# и сверка формата ключа с кодом приложения (main). Настоящий Supabase не вызывается, секретов нет.
 name: Rekey script test (mock, no Supabase)
 
 on:
@@ -13,9 +13,14 @@ permissions:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Run scenarios
-        shell: powershell
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+      - name: Generator distribution and scenarios (Windows PowerShell 5.1)
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .github/rekey-test/run.ps1
+      - name: Key format matches the app (js/cloud.js on main)
+        run: node .github/rekey-test/client-check.js
