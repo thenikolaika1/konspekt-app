@@ -5,6 +5,9 @@ $base = 'https://ohdeykbkgimvwstkwuuf.supabase.co'
 $uid  = 'c7b537ae-8fbb-4c9a-a047-26c8ccda1cfe'
 $mail = 'id-kn-ek83ff@id.konspekt.invalid'
 $pub  = 'sb_publishable_7t0cfHxy6z5QU4N1qW-4Og_6qcPhaQ_'
+# Не браузерный User-Agent: Supabase отклоняет sb_secret_ (401), если User-Agent похож на браузер,
+# а Windows PowerShell 5.1 по умолчанию шлёт 'Mozilla/5.0 ... WindowsPowerShell'.
+$ua   = 'konspekt-admin-rekey/1.0'
 function Code($e) { try { $c = [int]$e.Exception.Response.StatusCode; if ($c) { $c } else { 0 } } catch { 0 } }
 function Say($t, $c) { Write-Host $t -ForegroundColor $c }
 
@@ -15,7 +18,7 @@ $h = @{ apikey = $s }
 if ($s.StartsWith('eyJ')) { $h['Authorization'] = "Bearer $s" }
 
 # Шаг 1. Проверяем, что это именно KN-EK83FF
-try { $u = Invoke-RestMethod -Method Get -Uri "$base/auth/v1/admin/users/$uid" -Headers $h -TimeoutSec 60 }
+try { $u = Invoke-RestMethod -UserAgent $ua -Method Get -Uri "$base/auth/v1/admin/users/$uid" -Headers $h -TimeoutSec 60 }
 catch { Say "СТОП на шаге 1: ответ $(Code $_). Ничего не изменено." Red; return }
 if ($u.id -ne $uid -or $u.email -ne $mail) { Say 'СТОП: найден не тот аккаунт. Ничего не изменено.' Red; return }
 Say 'Шаг 1: аккаунт KN-EK83FF найден' Green
@@ -36,7 +39,7 @@ try {
   $body = @{ password = "Kn-2.$k" } | ConvertTo-Json
   $sent = $true
   try {
-    $r = Invoke-RestMethod -Method Put -Uri "$base/auth/v1/admin/users/$uid" -Headers $h -ContentType 'application/json' -Body $body -TimeoutSec 60
+    $r = Invoke-RestMethod -UserAgent $ua -Method Put -Uri "$base/auth/v1/admin/users/$uid" -Headers $h -ContentType 'application/json' -Body $body -TimeoutSec 60
     if ($r.id -eq $uid -and $r.email -eq $mail) { $state = 'changed' }
   } catch {
     $c = Code $_
@@ -52,9 +55,9 @@ try {
   $login = 'error'; $lc = 0
   try {
     $lb = @{ email = $mail; password = "Kn-2.$k" } | ConvertTo-Json
-    $t = Invoke-RestMethod -Method Post -Uri "$base/auth/v1/token?grant_type=password" -Headers @{ apikey = $pub } -ContentType 'application/json' -Body $lb -TimeoutSec 60
+    $t = Invoke-RestMethod -UserAgent $ua -Method Post -Uri "$base/auth/v1/token?grant_type=password" -Headers @{ apikey = $pub } -ContentType 'application/json' -Body $lb -TimeoutSec 60
     if ($t.user.id -eq $uid) { $login = 'ok' }
-    try { Invoke-RestMethod -Method Post -Uri "$base/auth/v1/logout?scope=local" -Headers @{ apikey = $pub; Authorization = "Bearer $($t.access_token)" } -TimeoutSec 30 | Out-Null } catch {}
+    try { Invoke-RestMethod -UserAgent $ua -Method Post -Uri "$base/auth/v1/logout?scope=local" -Headers @{ apikey = $pub; Authorization = "Bearer $($t.access_token)" } -TimeoutSec 30 | Out-Null } catch {}
   } catch { $lc = Code $_; if ($lc -eq 400) { $login = 'rejected' } }
 
   Write-Host ''

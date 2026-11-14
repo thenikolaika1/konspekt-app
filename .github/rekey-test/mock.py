@@ -27,10 +27,17 @@ class H(BaseHTTPRequestHandler):
 
     def rec(self, body):
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"m": self.command, "p": self.path, "apikey": self.headers.get("apikey"), "auth": self.headers.get("Authorization"), "body": body, "pw_after": state["pw"]}) + "\n")
+            f.write(json.dumps({"m": self.command, "p": self.path, "apikey": self.headers.get("apikey"), "auth": self.headers.get("Authorization"), "ua": self.headers.get("User-Agent"), "body": body, "pw_after": state["pw"]}) + "\n")
+
+    def browser_secret(self):
+        # как шлюз Supabase: секретный ключ sb_secret_ с браузерным User-Agent -> 401
+        ua = self.headers.get("User-Agent") or ""
+        return (self.headers.get("apikey") or "").startswith("sb_secret_") and "Mozilla" in ua
 
     def do_GET(self):
         self.rec(None)
+        if self.browser_secret():
+            return self.send(401, {"message": "Forbidden use of secret API key in browser"})
         if "get401" in MODE:
             return self.send(401, {"msg": "bad key"})
         if "wrongemail" in MODE:
@@ -39,6 +46,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         b = self.body()
+        if self.browser_secret():
+            self.rec(b)
+            return self.send(401, {"message": "Forbidden use of secret API key in browser"})
         if "put422" in MODE:
             self.rec(b)
             return self.send(422, {"msg": "weak password"})

@@ -17,6 +17,41 @@ if ($cnt.Count -ne 31 -or $chi -gt 59.7) { throw 'distribution FAIL' }
 $bad = @($cnt.Keys | Where-Object { 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'.IndexOf([string]$_) -lt 0 }); if ($bad.Count) { throw "alien symbols $bad" }
 'distribution PASS'
 
+
+# 0. Регрессия: прежний скрипт (без User-Agent) против заглушки, ведущей себя как шлюз Supabase -> 401, как у владельца
+function Prep($file, $out) {
+  $x = Get-Content $file -Raw -Encoding UTF8
+  $x = $x.Replace("'https://ohdeykbkgimvwstkwuuf.supabase.co'", "'http://127.0.0.1:8765'")
+  $x = [regex]::Replace($x, '\$ss = Read-Host[^\r\n]*', '$ss = ConvertTo-SecureString $env:FAKE_SECRET -AsPlainText -Force')
+  if ($x.Contains('Read-Host') -or -not $x.Contains('127.0.0.1')) { throw "substitution failed: $file" }
+  [IO.File]::WriteAllText("$PWD\$out", $x, (New-Object Text.UTF8Encoding $true))
+}
+function RunMock($mode, $script, $secret) {
+  $log = "$PWD\log.jsonl"; Remove-Item $log -ErrorAction SilentlyContinue
+  $p = Start-Process python -ArgumentList '.github/rekey-test/mock.py', $mode, $log -PassThru -NoNewWindow
+  Start-Sleep 2
+  $env:FAKE_SECRET = $secret
+  $o = (& powershell -NoProfile -ExecutionPolicy Bypass -File "$PWD\$script" *>&1 | Out-String)
+  Stop-Process $p -Force
+  $r = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { $_ | ConvertFrom-Json })
+  return @{ out = $o; reqs = $r }
+}
+Prep '.github/rekey-test/old-rekey.ps1' 'old.ps1'
+$x = RunMock 'ok' 'old.ps1' 'sb_secret_FAKE'
+"regression old script: " + (($x.out -split "`n" | Where-Object { $_.Trim() }) -join ' | ') + " :: UA=" + $x.reqs[0].ua
+if (-not $x.out.Contains('СТОП на шаге 1: ответ 401') -or $x.reqs[0].ua -notmatch 'Mozilla') { throw 'regression not reproduced' }
+'regression reproduced (old script -> 401 like on the owner computer)'
+
+# 0b. Проверка только на чтение
+Prep '.github/rekey-test/check.ps1' 'chk.ps1'
+foreach ($c in @(@{ mode='ok'; secret='sb_secret_FAKE'; tag='ПРОВЕРКА ПРОШЛА' }, @{ mode='ok'; secret='eyJFAKE'; tag='ПРОВЕРКА ПРОШЛА' }, @{ mode='get401'; secret='sb_secret_FAKE'; tag='ПРОВЕРКА НЕ ПРОШЛА: ответ 401' }, @{ mode='wrongemail'; secret='sb_secret_FAKE'; tag='не тот аккаунт' })) {
+  $x = RunMock $c.mode 'chk.ps1' $c.secret
+  $nonGet = @($x.reqs | Where-Object { $_.m -ne 'GET' }).Count
+  $okc = $x.out.Contains($c.tag) -and $nonGet -eq 0 -and $x.out -notmatch 'FAKE' -and @($x.reqs | Where-Object { $_.ua -match 'Mozilla' }).Count -eq 0
+  "{0} check [{1}/{2}] requests={3} non-GET={4} :: {5}" -f ($(if ($okc) { 'PASS' } else { 'FAIL' })), $c.mode, $c.secret.Substring(0,3), $x.reqs.Count, $nonGet, (($x.out -split "`n" | Where-Object { $_.Trim() }) -join ' | ')
+  if (-not $okc) { throw 'read-only check failed' }
+}
+
 # 2. Сценарии против заглушки
 $t = $src.Replace("'https://ohdeykbkgimvwstkwuuf.supabase.co'", "'http://127.0.0.1:8765'")
 $t = [regex]::Replace($t, '\$ss = Read-Host[^\r\n]*', '$ss = ConvertTo-SecureString $env:FAKE_SECRET -AsPlainText -Force')
@@ -49,6 +84,7 @@ foreach ($c in @(
   if (-not $out.Contains($c.tag)) { $why += 'tag' }
   if ($m.Success -ne $c.key) { $why += 'key-shown' }
   if ($out -match 'FAKE') { $why += 'secret-leak' }
+  if (@($reqs | Where-Object { $_.ua -match 'Mozilla' -or -not $_.ua }).Count) { $why += 'browser-user-agent' }
   # главный инвариант: если пароль на сервере изменён, показанный ключ - именно он; если ключ не показан, пароль не менялся
   if ($m.Success) {
     $k = $m.Groups[1].Value.Replace('-', '')
