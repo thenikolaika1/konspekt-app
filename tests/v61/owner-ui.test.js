@@ -269,19 +269,19 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     // 8. выдача подписки из карточки ученика: форма → подтверждение с датами сервера → результат
     await owClick(page, '[data-ow-student="KN-SAAAAB"]', 1500);
     t = await owText(page);
-    check("U8. карточка ученика: ID, статус «Пробный», регистрация, история; кнопка «Выдать Premium»", t.includes("KN-SAAAAB") && t.includes("Пробный") && t.includes("Регистрация") && t.includes("Выдать Premium"), t.slice(0, 300));
+    check("U8. карточка ученика: ID, статус «Пробный», регистрация, история; кнопка «Выдать доступ» (v67)", t.includes("KN-SAAAAB") && t.includes("Пробный") && t.includes("Регистрация") && t.includes("Выдать доступ") && !t.includes("Premium"), t.slice(0, 300));
     await page.screenshot({ path: path.join(SHOTS, "owner-student.png") });
     await owClick(page, '[data-ow-act="grant"]', 600);
     check("U8. форма: ID ученика подставлен и не редактируется", (await page.$eval("#owner-root #owKn", (n) => n.value + "|" + n.readOnly)) === "KN-SAAAAB|true");
     t = await owText(page);
-    check("U8. форма v62: по умолчанию Premium · 30 дней · 10 генераций, полей срока и лимита нет", t.includes("Premium · 30 дней · 10 генераций")
+    check("U8. форма: заголовок «Выдать доступ», по умолчанию «Продление доступа · 30 дней · 10 генераций», цена 299 ₽ видна владельцу, без «Premium»; полей срока и лимита нет", t.includes("Выдать доступ") && t.includes("Продление доступа · 30 дней · 10 генераций") && t.includes("299 ₽") && !t.includes("Premium")
       && (await page.$eval('#owner-root [data-ow-terms="premium"]', (n) => n.classList.contains("active"))) && !(await page.$("#owner-root #owQuota")), t.slice(0, 300));
     await page.fill("#owner-root #owNote", "оплата 26.10");
     await owClick(page, 'button[type="submit"]', 1800);
     t = await owText(page);
     const end30 = new Date(Date.now() + 30 * 864e5).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", year: "numeric" });
-    check("U8. подтверждение: ID, «Выдача Premium», условия Premium, 30 дней, 10 генераций, начало сразу, окончание — дата сервера",
-      t.includes("KN-SAAAAB") && t.includes("Выдача Premium") && t.includes("Условия") && !t.includes("Нестандартные") && t.includes("30 дней") && t.includes("10 генераций")
+    check("U8. подтверждение: ID, «Выдача доступа», условия «продление доступа», 30 дней, 10 генераций, начало сразу, окончание — дата сервера",
+      t.includes("KN-SAAAAB") && t.includes("Выдача доступа") && t.includes("Условия") && t.includes("продление доступа") && !t.includes("Premium") && !t.includes("Нестандартные") && t.includes("30 дней") && t.includes("10 генераций")
       && t.includes("сразу после подтверждения") && t.includes(end30), t.slice(0, 400));
     check("U8. до подтверждения выдачи нет", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "0");
     await page.screenshot({ path: path.join(SHOTS, "owner-confirm.png") });
@@ -291,9 +291,9 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
       b.click();
       b.click();
     });
-    await until(page, async () => (await owText(page)).includes("Premium выдан"));
+    await until(page, async () => (await owText(page)).includes("Доступ выдан"));
     t = await owText(page);
-    check("U8. результат после ответа сервера: «Premium выдан», срок, лимит, статус с сервера", t.includes("Premium выдан") && t.includes("10 генераций") && t.includes("Premium") && t.includes("ИИ 10 из 10"), t.slice(0, 400));
+    check("U8. результат после ответа сервера: «Доступ выдан», срок, лимит, статус с сервера «Продление доступа» (из plan_title «Premium»), без «Premium»", t.includes("Доступ выдан") && t.includes("10 генераций") && t.includes("Продление доступа") && !t.includes("Premium") && t.includes("ИИ 10 из 10"), t.slice(0, 400));
     check("U8. в базе: тариф premium, 30 дней, 10 генераций", sqlv("select g.plan || '/' || (g.ends_at - g.starts_at) || '/' || g.ai_quota from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "premium/30 days/10");
     check("U19. двойное нажатие — одна выдача в базе", sqlv("select count(*) from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'") === "1");
     check("U8. журнал: выдача от имени панели", sqlv("select count(*) from private.access_log where action = 'grant' and actor = 'panel:KN-WAAAAA'") === "1");
@@ -304,9 +304,9 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     await owClick(page, 'button[type="submit"]', 1800);
     t = await owText(page);
     check("U9. подтверждение продления: начало «после текущего срока» = окончание текущего, правила v61.2 объяснены",
-      t.includes("Продление Premium") && t.includes(end30 + " (после текущего срока)") && t.includes("Оплаченные дни текущего срока сохраняются") && t.includes("на новый не переносятся"), t.slice(0, 400));
+      t.includes("Продление доступа") && !t.includes("Premium") && t.includes(end30 + " (после текущего срока)") && t.includes("Оплаченные дни текущего срока сохраняются") && t.includes("на новый не переносятся"), t.slice(0, 400));
     await owClick(page, '[data-ow-act="commit"]', 2000);
-    check("U9. «Premium продлён»", (await owText(page)).includes("Premium продлён"));
+    check("U9. «Доступ продлён»", (await owText(page)).includes("Доступ продлён"));
     check("U9. в базе 2 срока, второй начинается в конце первого", sqlv(`select count(*) || ':' || (max(starts_at) = min(ends_at))::text from private.access_grants g join auth.users u on u.id = g.user_id where u.email = private.kn_email('KN-SAAAAB') and g.kind = 'paid'`) === "2:true");
 
     // 10. отзыв: все сроки видны, подтверждение частью ID
@@ -362,8 +362,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
 
     // v62: резерв Premium, нестандартные условия, недостаток бюджета, изменение бюджета
     t = await owText(page);
-    check("U50. ИИ: карточка «Бюджет и резерв Premium» — осталось, резерв, твой резерв, свободно, «Можно продать», запас — оценка",
-      t.includes("Бюджет и резерв Premium") && t.includes("резерв Premium") && t.includes("твой резерв") && t.includes("свободно") && t.includes("Можно продать")
+    check("U50. ИИ: карточка «Бюджет и резерв продлений доступа» — осталось, резерв, твой резерв, свободно, «Можно оформить ещё N продлений доступа», запас — оценка; без «Premium»",
+      t.includes("Бюджет и резерв продлений доступа") && t.includes("резерв продлений доступа") && t.includes("твой резерв") && t.includes("свободно") && /Можно оформить\s*ещё \d+ продлени[еяй] доступа/.test(t) && !t.includes("Premium")
       && t.includes("оценка, не гарантия") && t.includes("Изменить бюджет"), t.slice(0, 900));
     await owClick(page, '[data-ow-tab="home"]', 1500);
     await owClick(page, '[data-ow-go="grant"]', 600);
@@ -411,8 +411,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     await page.fill("#owner-root #owBudget", "130");
     await owClick(page, 'button[type="submit"]', 600);
     t = await owText(page);
-    check("U53. подтверждение: «Сейчас», «Станет 130», резерв Premium; совет проверить токены GigaChat", t.includes("Подтверди бюджет") && t.includes("130")
-      && t.includes("Резерв Premium") && t.includes("кабинете GigaChat"), t.slice(0, 500));
+    check("U53. подтверждение: «Сейчас», «Станет 130», резерв продлений доступа, «Одно продление доступа — это …»; совет проверить токены GigaChat", t.includes("Подтверди бюджет") && t.includes("130")
+      && t.includes("Резерв продлений доступа") && t.includes("Одно продление доступа — это") && !t.includes("Premium") && t.includes("кабинете GigaChat"), t.slice(0, 500));
     check("U53. до подтверждения бюджет не изменён", sqlv("select max_total_starts from private.ai_limits") !== "130");
     await page.screenshot({ path: path.join(SHOTS, "owner-budget-confirm.png") });
     await owClick(page, '[data-ow-act="budget-commit"]', 2000);
@@ -426,8 +426,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     check("U60. главная: кнопка «🎁 Подарить доступ»", (await owText(page)).includes("🎁 Подарить доступ"));
     await owClick(page, '[data-ow-go="gift"]', 600);
     t = await owText(page);
-    check("U60. форма подарка: ID, «Количество дней» = 7, «Количество генераций ИИ» = 1, «Это не Premium»",
-      t.includes("Количество дней") && t.includes("Количество генераций ИИ") && t.includes("Это не Premium")
+    check("U60. форма подарка: ID, «Количество дней» = 7, «Количество генераций ИИ» = 1, «Это не продление доступа»",
+      t.includes("Количество дней") && t.includes("Количество генераций ИИ") && t.includes("Это не продление доступа") && !t.includes("Premium")
       && (await page.$eval("#owner-root #owGiftDays", (n) => n.value)) === "7" && (await page.$eval("#owner-root #owGiftQuota", (n) => n.value)) === "1", t.slice(0, 300));
     await page.screenshot({ path: path.join(SHOTS, "owner-gift-form.png") });
     await page.fill("#owner-root #owKn", "KN-SAAAAG");
@@ -653,8 +653,8 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
         for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(k + " " + new URL(r.url).pathname);
         return out;
       });
-      check("U42. ученик: сервис-воркер работает (кэш konspekt-v66), файлов панели в кэше нет",
-        keys.some((k) => k.startsWith("konspekt-v66 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
+      check("U42. ученик: сервис-воркер работает (кэш konspekt-v67), файлов панели в кэше нет",
+        keys.some((k) => k.startsWith("konspekt-v67 ")) && !keys.some((k) => /owner\.(js|css)/.test(k)), keys.slice(0, 5));
       await s1.ctx.close();
       const s2 = await open(OWNER, undefined, { sw: true });
       await s2.page.reload();
