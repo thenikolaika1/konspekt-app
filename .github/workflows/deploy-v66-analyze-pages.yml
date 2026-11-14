@@ -1,0 +1,165 @@
+# Однократное развёртывание Edge Function analyze-pages из коммита release/v66-rc 2a1a021 — выпуск v66, разрешение владельца 14.11.2026.
+# Запускается только при push этого файла в служебную ветку deploy/v66.
+# 0) токен Supabase проверяется запросом только на чтение (значение в лог не выводится);
+# 1–2) исходники: коммит 2a1a021, файлы функции = 2a1a021 (sha256);
+# 3–4) production до развёртывания: ACTIVE, версия 35, verify_jwt false, файлы = dab1677 (v33) (sha256); копия — artifact;
+# 6) развёртывание Supabase CLI 2.119.0 с --no-verify-jwt;
+# 7) после: версия 35+1, verify_jwt false, sha256 всех файлов = 2a1a021; при несоответствии — 8) откат на копию.
+# Повторный запуск ничего не развернёт: шаг 3 требует production версии 35. База, секреты функций, другие функции не затрагиваются.
+name: Deploy analyze-pages v66 (one-shot)
+
+on:
+  push:
+    branches: [deploy/v66]
+    paths: [.github/workflows/deploy-v66-analyze-pages.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-v66-analyze-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ohdeykbkgimvwstkwuuf
+      SLUG: analyze-pages
+      SOURCE_SHA: 2a1a021d04af6f9200e0a016fe055bc71cb3b104
+      OLD_VERSION: "35"
+      NEW_VERSION: "36"
+      FILES: "ca.ts index.ts parts.ts prompt.ts providers.ts study-content.ts "
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
+        with:
+          version: 2.119.0
+
+      - name: 0. Tooling; Supabase token works (read-only request, value is not printed)
+        run: |
+          test "$(supabase --version)" = "2.119.0"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          code="$(curl -sS -o /tmp/token-check.json -w '%{http_code}' -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions")"
+          echo "token check HTTP $code"
+          test "$code" = "200"
+          cat > /tmp/old.sha256 <<'SUMS'
+          6950ef014fbde7eabf518c69c7fe943d5e4e796c28fdcf6157ad68c5a73dac97  ca.ts
+          37b0ce85df2e21abc425eba4f05fa9408c61ffaac50c02be6c0b746e4ea05f80  index.ts
+          96d58a6f0e155f905e69786cd0ad80a7118658a9cd0635b3feaf6f323a6fe08a  parts.ts
+          ac649f4cf7d9dc707c7c7ce4db83490fae9f78119a01065ced3c0476c1eb3d04  prompt.ts
+          bdd5959eaa3a275a31dc46ffe52589747ff3ae5889ed2ee75746be57d02ec2a9  providers.ts
+          424d50d9e25ff32008c0c858c6881e39a6c545dfe6e93d57823b271f24aa7ab1  study-content.ts
+          SUMS
+          cat > /tmp/new.sha256 <<'SUMS'
+          6950ef014fbde7eabf518c69c7fe943d5e4e796c28fdcf6157ad68c5a73dac97  ca.ts
+          4be5979f0e20753da8807127e30a220b620aca590d8a4aa77392436f667e999d  index.ts
+          96d58a6f0e155f905e69786cd0ad80a7118658a9cd0635b3feaf6f323a6fe08a  parts.ts
+          ac649f4cf7d9dc707c7c7ce4db83490fae9f78119a01065ced3c0476c1eb3d04  prompt.ts
+          bdd5959eaa3a275a31dc46ffe52589747ff3ae5889ed2ee75746be57d02ec2a9  providers.ts
+          424d50d9e25ff32008c0c858c6881e39a6c545dfe6e93d57823b271f24aa7ab1  study-content.ts
+          SUMS
+          sed -i 's/^ *//' /tmp/old.sha256 /tmp/new.sha256
+
+      - name: 1. Source = 2a1a021 plus only deploy workflow files
+        run: |
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test -z "$(git diff --name-only "$SOURCE_SHA" HEAD | grep -v '^\.github/workflows/deploy-v66-')"
+
+      - name: 2. Source function files, sha256 = commit 2a1a021
+        working-directory: supabase/functions/analyze-pages
+        run: |
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/new.sha256
+
+      - name: 3. Production before deploy — ACTIVE, version 35, verify_jwt false
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-before.json
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('/tmp/meta-before.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at', 'ezbr_sha256')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == int(os.environ['OLD_VERSION']), f"expected production v{os.environ['OLD_VERSION']}, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+
+      - name: 4. Download production and verify it is the checked version (sha256)
+        run: |
+          mkdir -p /tmp/dl-before/supabase/functions
+          cd /tmp/dl-before
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          mkdir -p /tmp/backup-old
+          cp -a "supabase/functions/$SLUG/." /tmp/backup-old/
+          cd /tmp/backup-old
+          find . -type f -printf '%P\n' | sort
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/old.sha256
+
+      - name: 5. Save production backup as artifact
+        id: backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyze-pages-v35-backup
+          path: |
+            /tmp/backup-old/
+            /tmp/meta-before.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 5b. Backup artifact registered
+        run: |
+          test -n "${{ steps.backup.outputs.artifact-id }}"
+          echo "backup artifact id: ${{ steps.backup.outputs.artifact-id }}"
+
+      - name: 6. Deploy (files from 2a1a021, unchanged)
+        id: deploy
+        run: supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+
+      - name: 7. Verify production after deploy — new version, verify_jwt false, sha256 of all files
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-after.json
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('/tmp/meta-after.json'))
+          print({k: m.get(k) for k in ('slug', 'status', 'version', 'verify_jwt', 'updated_at', 'ezbr_sha256')})
+          assert m['status'] == 'ACTIVE', m['status']
+          assert m['version'] == int(os.environ['NEW_VERSION']), f"expected v{os.environ['NEW_VERSION']}, got {m['version']}"
+          assert m['verify_jwt'] is False, m['verify_jwt']
+          PY
+          mkdir -p /tmp/dl-after/supabase/functions
+          cd /tmp/dl-after
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/new.sha256
+          echo "DEPLOY OK: production $SLUG v$NEW_VERSION = 2a1a021"
+
+      - name: 8. Rollback to production backup (only if the deploy step ran and something failed after it)
+        if: failure() && (steps.deploy.outcome == 'success' || steps.deploy.outcome == 'failure')
+        run: |
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/functions/$SLUG" -o /tmp/meta-rb.json
+          v="$(python3 -c "import json; print(json.load(open('/tmp/meta-rb.json'))['version'])")"
+          echo "production version before rollback: $v"
+          if [ "$v" = "$OLD_VERSION" ]; then echo "production unchanged — rollback not needed"; exit 0; fi
+          mkdir -p "/tmp/rb/supabase/functions/$SLUG"
+          cp -a /tmp/backup-old/. "/tmp/rb/supabase/functions/$SLUG/"
+          cd /tmp/rb
+          supabase functions deploy "$SLUG" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+          mkdir -p /tmp/dl-rb/supabase/functions
+          cd /tmp/dl-rb
+          supabase functions download "$SLUG" --project-ref "$PROJECT_REF" --use-api
+          cd "supabase/functions/$SLUG"
+          test "$(find . -type f -printf '%P\n' | sort | tr '\n' ' ')" = "$FILES"
+          sha256sum -c --strict /tmp/old.sha256
+          echo "ROLLBACK OK: production $SLUG = previous source (new version number)"
