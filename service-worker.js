@@ -8,9 +8,28 @@
  * public.get_library_paragraph) сюда не попадают и в кэш не кладутся. Активация новой версии удаляет кэши прежних,
  * в том числе с файлом js/library-catalog.js, где до v62 лежали тексты библиотеки.
  */
-const VERSION = "konspekt-v65";
+const VERSION = "konspekt-v66";
 
-self.addEventListener("install", () => self.skipWaiting());
+// v66: при установке новой версии её стартовая страница и файлы (?v= той же сборки) сразу кладутся в новый кэш.
+// Раньше они попадали туда только при следующем запуске с сетью: если первый запуск после обновления был без сети,
+// приложение не открывалось (кэш прежней версии к тому времени удалён). Страница другой сборки (сайт ещё не обновился
+// целиком) в кэш не кладётся. Любая ошибка здесь не мешает установке — тогда всё работает как раньше.
+async function precache() {
+  const build = VERSION.replace("konspekt-v", "");
+  const res = await fetch(new Request("./", { cache: "no-cache" }));
+  if (!res.ok) return;
+  const html = await res.clone().text();
+  if (!html.includes("app.js?v=" + build + '"')) return;
+  const files = [...html.matchAll(/(?:src|href)="(\.\/[^"]+\?v=(\d+))"/g)].filter((m) => m[2] === build).map((m) => m[1]);
+  const cache = await caches.open(VERSION);
+  await Promise.all(files.map((u) => fetch(new Request(u, { cache: "no-cache" })).then((r) => (r.ok ? cache.put(u, r) : null)).catch(() => {})));
+  await cache.put("./", res);
+}
+
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+  event.waitUntil(precache().catch(() => {}));
+});
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(

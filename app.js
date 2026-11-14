@@ -357,6 +357,10 @@
   // Сроки и «осталось N дней» считаются от времени сервера (server_now), часы устройства не участвуют.
   // Это интерфейс: генерацию ИИ закрывает сервер, а тексты библиотеки лежат в публичном файле и экраном не защищены.
   const accessV2 = () => S.access.v2 || null;
+  // v66: защита текста конспекта (js/protect.js) — у всех, кроме владельца; владельцу копирование и печать нужны для работы
+  const protectOn = () => !!window.K.protect && accessV2()?.status !== "owner";
+  const protectCls = () => (protectOn() ? " kn-protected" : "");
+  const protectMark = () => (protectOn() ? window.K.protect.watermark(window.K.cloud?.peekUid?.() || "") : "");
   const paywalled = () => accessV2()?.status === "expired";
   // полный текст готового конспекта и главная заменяются экраном «Доступ закончился»; каталог остаётся виден
   const paywallHere = () => (S.screen === "home" || S.screen === "library-paragraph") && paywalled();
@@ -372,7 +376,11 @@
   // Premium подключает Николай вручную по ID ученика. Цены, оплаты и ссылок в приложении нет (цена обсуждается лично;
   // price_label с сервера не показывается). Срок и число генераций — только с сервера (get_plans).
   const premiumPlan = () => (S.plans.state === "list" ? S.plans.items[0] || null : null);
-  const premiumCta = () => (accessV2()?.status === "paid" ? "Продлить Premium" : "Подключить Premium");
+  // v66: в интерфейсе ученика — «Продление доступа», без слова Premium и без цены (внутренние имена plan/premium не меняются)
+  const premiumCta = () => (!accessV2() || accessV2().status === "none" || !accessV2().kind ? "Получить доступ" : "Продлить доступ");
+  // название действующего доступа для ученика: подарок — «Подарок», остальное оплаченное — «Полный доступ»
+  const accessLabel = (a) => (a?.plan === "gift" ? "Подарок" : "Полный доступ");
+  const renewDays = () => premiumPlan()?.days || 30;
   // число готовых конспектов по истории и физике — из каталога (js/library-index.js), а не из текста
   const premiumReady = () => ["history", "physics"].reduce((n, subjectId) => n + library.readyCount({ subjectId }), 0);
   // неразрывный пробел между числом и словом: «30 дней» не разрывается на узком экране
@@ -392,17 +400,19 @@
     ];
     return '<ul class="plan-facts">' + items.map((x) => "<li>" + icon("check") + "<span>" + esc(x) + "</span></li>").join("") + "</ul>";
   }
-  // «Как подключить Premium»: только ID ученика (его копирует кнопка); ключ входа здесь не показывается и не копируется
+  // «Связаться с администратором» — тот же способ, что и раньше: ученик пишет администратору (Капустину Николаю) любым
+  // удобным способом и сообщает свой ID (его копирует кнопка). Ссылок и контактов в приложении нет; ключ входа не показывается
   function premiumConnect() {
     const acc = account();
     const id = acc.kind === "participant" ? acc.id : "";
     return (
-      '<section class="premium-connect" aria-labelledby="pcTitle"><h2 id="pcTitle">🔒 Как подключить Premium?</h2>' +
-      "<p>Для подключения Premium свяжитесь с Николаем.</p>" +
+      '<section class="premium-connect" id="renewContact" aria-labelledby="pcTitle"><h2 id="pcTitle">Связаться с администратором</h2>' +
+      "<p>Напишите администратору — <b>Капустину Николаю</b> — любым удобным способом и сообщите свой ID. Доступ продлевается по ID.</p>" +
       (id
         ? '<div class="pc-id"><span>Ваш ID:</span> <b id="pcId">' + esc(id) + "</b></div>" +
           '<button class="secondary wide" data-copy-id>Скопировать ID</button><p class="pc-copied" role="status" aria-live="polite"></p>'
-        : '<p class="pc-noid">Войдите по своему ID, чтобы Николай мог подключить Premium.</p>') +
+        : '<p class="pc-noid">Войдите по своему ID, чтобы администратор мог продлить доступ.</p>') +
+      '<p class="renew-note">Условия продления обсуждаются индивидуально.</p>' +
       "</section>"
     );
   }
@@ -435,16 +445,18 @@
   function accessEnded() {
     const a = accessV2() || {};
     const inLibrary = S.screen === "library-paragraph";
+    const trial = a.kind === "trial";
     const title =
-      a.kind === "trial" ? "Пробный период закончился"
+      trial ? "Пробный период завершён"
         : a.kind === "legacy" ? "Бесплатное тестирование завершено"
         : a.kind === "owner" ? "Доступ закончился"
-        : a.status === "none" || !a.kind ? "Библиотека — в Premium"
+        : a.status === "none" || !a.kind ? "Нужен доступ"
         : a.plan === "gift" ? "Подарочный доступ закончился"
-        : "Premium закончился";
-    const lead = inLibrary
-      ? "Конспекты по истории и физике открываются в пробный период и в Premium. Список предметов и параграфов остаётся виден."
-      : "Готовые конспекты по истории и физике и ИИ-конспекты по фотографиям — в Premium. Подключает Николай.";
+        : "Срок доступа истёк";
+    const lead =
+      (trial || a.kind === "legacy" ? "Бесплатный доступ к Konspekt закончился." : "Доступ к Konspekt закончился.") +
+      " Чтобы продолжить пользоваться приложением, продлите доступ." +
+      (inLibrary ? " Список предметов и параграфов остаётся виден." : "");
     const notes = store.listNotes().length;
     return (
       app("welcome access ended" + (inLibrary ? " ended-lib" : "")) +
@@ -453,9 +465,11 @@
       brand() +
       "<h1>" + title + "</h1>" +
       '<p class="ended-lead">' + lead + "</p>" +
+      '<div class="plan-card renew-card"><div class="plan-top"><b>Продление доступа</b></div><p class="renew-days">На ' + esc(daysText(renewDays())) + "</p></div>" +
       '<div class="ended-safe">' + icon("check") + "<span>Твой аккаунт и личные конспекты сохранены.</span></div>" +
       '<div class="ended-actions">' +
-      '<button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button>" +
+      '<button class="primary wide" data-go="tariffs" data-contact>Связаться с администратором</button>' +
+      '<p class="renew-note">Условия продления обсуждаются индивидуально.</p>' +
       (notes ? '<button class="secondary wide" data-go="all-notes">Мои конспекты · ' + esc(String(notes)) + "</button>" : "") +
       "</div></div>"
     );
@@ -466,17 +480,25 @@
   function tariffs() {
     const p = S.plans;
     const plan = premiumPlan();
+    // название тарифа из базы (plan.title) ученику не показывается — только «Продление доступа» и срок
     const card =
-      '<div class="plan-card"><div class="plan-top"><b>' + esc(plan?.title || "Premium") + "</b></div>" + premiumBenefits(plan) + "</div>";
+      '<div class="plan-card"><div class="plan-top"><b>Продление доступа</b></div><p class="renew-days">На ' + esc(daysText(renewDays())) + "</p>" + premiumBenefits(plan) + "</div>";
     const body =
       p.state === "list" && plan
         ? '<div class="plan-list">' + card + "</div>"
         : p.state === "list"
-          ? emptyState("Premium пока не опубликован", "Условия подключения уточните у Николая.")
+          ? emptyState("Условия продления уточните у администратора", "Напишите администратору и сообщите свой ID.")
           : p.state === "error"
-            ? emptyState("Не удалось загрузить условия Premium", "Проверьте подключение к интернету и откройте экран ещё раз.")
-            : '<div class="plan-loading" role="status">Загружаем условия Premium…</div>';
-    return app("tariffs-screen") + DECO.head() + head("Premium", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
+            ? emptyState("Не удалось загрузить условия продления", "Проверьте подключение к интернету и откройте экран ещё раз.")
+            : '<div class="plan-loading" role="status">Загружаем условия продления…</div>';
+    return app("tariffs-screen") + DECO.head() + head("Продление доступа", "История, физика и ИИ по фото") + body + premiumConnect() + "</div>";
+  }
+  // прокрутка к блоку «Связаться с администратором»; повторяется, когда условия продления загрузились (экран перерисован)
+  function showContact() {
+    const c = root.querySelector("#renewContact");
+    if (!c) return;
+    c.scrollIntoView({ block: "start" });
+    if (S.plans.state !== "loading") S.toContact = false;
   }
   let plansAsked = false;
   function loadPlans() {
@@ -484,7 +506,7 @@
     cloud
       .getPlans()
       .then((items) => (S.plans = { state: "list", items }), () => (S.plans = { state: "error", items: [] }))
-      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && render());
+      .then(() => (S.screen === "tariffs" || paywallHere() || S.screen === "library-paragraph") && (render(), S.toContact && S.screen === "tariffs" && showContact()));
   }
 
   // «Мой доступ» в профиле: статус, срок, дни, генерации — только по ответу сервера
@@ -497,7 +519,7 @@
     let status, renew = true;
     if (a.status === "owner") (status = "Владелец · бессрочный доступ"), (renew = false);
     else if (a.status === "paid" && !until) (status = "Действует · бессрочно"), (renew = false);
-    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + (a.plan_title || "Оплачен") + " до " + msk(until);
+    else if (a.status === "paid") status = (a.plan === "gift" ? "🎁 " : "") + accessLabel(a) + " до " + msk(until);
     else if (a.status === "trial") status = "Пробный период до " + msk(until);
     else status = a.revoked ? "Доступ закрыт" : "Доступ закончился" + (until ? " " + msk(until) : "");
     if ((a.status === "paid" || a.status === "trial") && left !== null && until) rows.push("Осталось " + daysText(left));
@@ -506,7 +528,7 @@
     return (
       '<h3 class="pf-h">Мой доступ</h3><div class="access-card status-' + esc(a.status) + '"><b class="access-status">' + esc(status) + "</b>" +
       rows.map((r) => '<span class="access-row">' + esc(r) + "</span>").join("") +
-      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить Premium" : "Premium и продление") + "</button>" : "") +
+      (renew ? '<button class="' + (a.status === "expired" ? "primary" : "secondary") + ' wide" data-go="tariffs">' + (a.status === "expired" ? "Продлить доступ" : "Продление доступа") + "</button>" : "") +
       "</div>"
     );
   }
@@ -528,10 +550,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=65";
+        css.href = "./owner.css?v=66";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=65";
+        js.src = "./js/owner.js?v=66";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -550,7 +572,7 @@
     if (a?.status !== "paid" || a.kind !== "paid") return "";
     const left = daysLeft(a);
     if (left === null || left > 3) return "";
-    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(a.plan_title || "Premium") + " закончится " +
+    return '<button class="trial-line ending" data-go="tariffs">' + icon("sparkle") + "<span>" + esc(accessLabel(a)) + " закончится " +
       (left <= 1 ? "в течение суток" : "через " + esc(daysText(left))) + " · продлить</span>" + icon("chev") + "</button>";
   }
   function trialLine() {
@@ -833,7 +855,7 @@
       app("note-view lib-note nt-" + esc(content.meta?.subject || "") + " " + subjClass(S.lib.subjectId)) +
       '<div class="note-bar"><div class="note-head"><div class="note-head-top"><button class="back" data-back aria-label="Назад">' + icon("back") +
       '</button><span class="lib-note-bar-t">' + esc(paragraphLabel(p)) + "</span></div></div></div>" +
-      '<div class="cn-doc">' + view.head + view.body + "</div>" +
+      '<div class="cn-doc' + protectCls() + '">' + view.head + view.body + protectMark() + "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
   }
@@ -855,7 +877,7 @@
         const code = e?.message || "";
         // сервер сказал «нет доступа» — это его состояние доступа: экран «Доступ закончился» / предложение Premium
         if (code === "ACCESS_REQUIRED" && e.access) setAccess(fromV2(e.access), true, e.access);
-        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : "network" };
+        libLoad = { key, state: "error", error: code === "ACCESS_REQUIRED" ? "access" : code === "NOT_FOUND" ? "missing" : code === "RATE_LIMITED" ? (e.retryAfter > 3600 ? "rate-day" : "rate") : "network" };
         if (S.screen === "library-paragraph" && libKey() === key) render();
       },
     );
@@ -871,8 +893,11 @@
       body = '<div class="lib-state" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div><p>Загружаем конспект…</p></div>';
     } else if (e === "access") {
       body =
-        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и в Premium.") +
+        '<div class="lib-state">' + emptyState("Нужен доступ", "История и физика открыты в пробный период и при полном доступе.") +
         '<div class="error-actions"><button class="primary wide" data-go="tariffs">' + esc(premiumCta()) + "</button></div></div>";
+    } else if (e === "rate" || e === "rate-day") {
+      // v66: сервер ограничил число новых конспектов подряд (после миграции library_rate_limit); уже открытые открываются как обычно
+      body = '<div class="lib-state">' + emptyState("Слишком много конспектов подряд", e === "rate" ? "Новые конспекты снова откроются через час. Уже открытые сегодня — доступны." : "На сегодня лимит новых конспектов исчерпан. Уже открытые сегодня — доступны.") + "</div>";
     } else if (e === "missing") {
       body = '<div class="lib-state">' + emptyState("Конспект пока недоступен", "Мы уже готовим его. Загляни позже.") + "</div>";
     } else {
@@ -998,10 +1023,11 @@
       '<div class="cn-search"><label class="cn-search-box">' + icon("search") +
       '<input class="cn-search-input" id="inNoteSearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="' + esc(view.searchHint) +
       '" aria-label="Поиск по конспекту"></label><span class="cn-search-count" id="inNoteCount" aria-live="polite"></span></div></div>' +
-      '<div class="cn-doc" id="noteDoc">' +
+      '<div class="cn-doc' + protectCls() + '" id="noteDoc">' +
       (isExample(n) ? '<p class="note-example-bar">' + exampleTag + "Так выглядит готовый конспект. Этот пример создан приложением, а не тобой.</p>" : "") +
       view.head +
       view.body +
+      protectMark() +
       "</div>" +
       '<button class="to-top" data-top aria-label="Наверх" tabindex="-1">' + icon("arrowUp") + "</button></div>"
     );
@@ -1137,7 +1163,7 @@
       ["Открой готовый конспект", "Можно закрыть приложение: конспект появится в «Недавних» на главной, когда будет готов."],
     ];
     const faq = [
-      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или Premium. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
+      ["Сколько конспектов можно создать?", "Число генераций ИИ зависит от доступа — пробного периода или полного доступа. Сколько осталось, видно в профиле, в карточке «Мой доступ»."],
       ["Нужен ли интернет?", "Да, чтобы создать конспект: фотографии обрабатываются на сервере."],
       ["Насколько точен конспект?", "Конспект составляет ИИ, и он может ошибаться или что-то пропустить. Важное проверяй по учебнику."],
       ["Что происходит с фотографиями?", "После того как конспект готов, фотографии удаляются с сервера. Не снимай страницы с личными данными."],
@@ -1187,6 +1213,8 @@
     UPLOAD_FAILED: ["Не удалось загрузить фотографии.", "Попробуй ещё раз."],
     UNREADABLE_PAGES: ["Не получилось прочитать текст на фотографиях.", "Сфотографируй страницы целиком, ровно и при хорошем свете."],
     AI_TIMEOUT: ["ИИ отвечал слишком долго.", "Попробуй ещё раз или отправь меньше страниц."],
+    // ответ ИИ не удалось разобрать как конспект (повреждённый JSON) — генерация не списана, фото сохранены
+    AI_BAD_JSON: ["ИИ не смог корректно сформировать конспект.", "Попробуй ещё раз."],
     AI_RATE_LIMITED: ["Сервис ИИ сейчас перегружен.", "Подожди минуту и попробуй ещё раз."],
     RATE_LIMITED: ["Слишком много конспектов за короткое время.", "Попробуй немного позже."],
     STILL_PROCESSING: ["Конспект ещё создаётся.", "Он появится в «Недавних», когда будет готов."],
@@ -2390,15 +2418,23 @@
         S.bookmarkForNote = null;
         S.draftBookmark = { icon: "book", color: BM_COLORS[0] };
       }
-      return go(to);
+      // «Связаться с администратором» (экран окончания доступа): экран продления сразу на блоке связи
+      if (x.hasAttribute("data-contact")) S.toContact = true;
+      go(to);
+      if (S.toContact) showContact();
+      return;
     }
   }
+
+  // v66: рендерер ставит неразрывный пробел после однобуквенных слов («в стекле»), а в запросе — обычный пробел;
+  // ё и е ученики пишут вперемешку. Замены той же длины — позиции совпадений в тексте не сдвигаются.
+  const searchNorm = (s) => s.toLowerCase().replace(/\u00a0/g, " ").replace(/ё/g, "е");
 
   function filterList(listId, notes, q) {
     const box = root.querySelector(listId);
     if (!box) return;
-    q = q.trim().toLowerCase();
-    const found = notes.filter((n) => (n.title + " " + (n.subjectLabel || "") + " " + (n.preview || "")).toLowerCase().includes(q));
+    q = searchNorm(q.trim().replace(/\s+/g, " "));
+    const found = notes.filter((n) => searchNorm(n.title + " " + (n.subjectLabel || "") + " " + (n.preview || "")).includes(q));
     box.innerHTML = found.length ? found.map(noteCard).join("") : emptyState("Ничего не найдено", "Попробуй другой запрос");
     hydrateThumbs();
   }
@@ -2431,17 +2467,17 @@
     clearNoteMarks(doc);
     NOTE_FIND.hits = [];
     NOTE_FIND.index = -1;
-    const q = query.trim().toLowerCase();
+    const q = searchNorm(query.trim().replace(/\s+/g, " "));
     if (q.length < 2) {
       if (count) count.textContent = "";
       return;
     }
     const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
     const nodes = [];
-    while (walker.nextNode()) if (walker.currentNode.nodeValue.toLowerCase().includes(q)) nodes.push(walker.currentNode);
+    while (walker.nextNode()) if (searchNorm(walker.currentNode.nodeValue).includes(q)) nodes.push(walker.currentNode);
     nodes.forEach((node) => {
       const text = node.nodeValue;
-      const lower = text.toLowerCase();
+      const lower = searchNorm(text);
       const frag = document.createDocumentFragment();
       let from = 0;
       for (let at = lower.indexOf(q); at !== -1; at = lower.indexOf(q, from)) {

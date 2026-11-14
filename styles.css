@@ -1830,3 +1830,17 @@ a.primary.wide{color:#fff}
 .lib-state>p{color:var(--k-muted,#6c7696);font-size:14px;margin:0}
 .lib-state .error-actions{margin-top:8px}
 .trial-line.ending{border-color:#f0e1cb;background:#fff8ee;color:var(--brown,#9a673e)}
+
+/* v66: защита текста конспекта (js/protect.js). Внешний вид конспекта не меняется: выключено только выделение,
+   долгое нажатие (iOS/Android) и печать; внизу видимой части — небольшой полупрозрачный код ученика. Поля ввода не затронуты. */
+.cn-doc.kn-protected{position:relative;isolation:isolate;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.cn-doc.kn-protected input,.cn-doc.kn-protected textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+.cn-doc.kn-protected img{-webkit-user-drag:none}
+.kn-wm{position:sticky;bottom:calc(10px + env(safe-area-inset-bottom));height:0;z-index:3;pointer-events:none;display:flex;justify-content:center}.kn-wm span{transform:translateY(-100%);font:700 11px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;letter-spacing:.08em;color:rgba(13,23,71,.3);white-space:nowrap}
+@media print{.cn-doc.kn-protected{display:none!important}.note-view:has(.kn-protected)::after{content:"Конспект доступен только в приложении Konspekt by NK";display:block;padding:40px 20px;font:600 16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#0d1747}}
+
+/* v66: «Продление доступа» без цены — срок и подпись «Условия продления обсуждаются индивидуально» (стиль Konspekt) */
+.renew-days{margin:4px 0 0;font-size:15px;line-height:20px;color:var(--muted)}
+.renew-card{width:100%;margin:22px 0 0;text-align:left}
+.renew-note{margin:0;font-size:13.5px;line-height:1.45;color:var(--muted);text-align:center}
+.premium-connect .renew-note{text-align:left}

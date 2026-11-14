@@ -194,11 +194,11 @@ async function scenarios() {
     await page.evaluate((v) => (window.__T.v2 = v), ACC.trialExpired);
     await click(page, "[data-lib-paragraph]:not(.soon)", 1200);
     const t = await text(page);
-    check("V4. сервер отказал → «Пробный период закончился», текста нет", t.includes("Пробный период закончился") && !(await page.$(".cn-doc")), t.slice(0, 300));
-    check("V4. на экране — кнопка «Подключить Premium», цены нет (сервер её ещё присылает)", t.includes("Подключить Premium") && !/₽|299/.test(t), t.slice(0, 400));
+    check("V4. сервер отказал → «Пробный период завершён», текста нет", t.includes("Пробный период завершён") && !(await page.$(".cn-doc")), t.slice(0, 300));
+    check("V4. на экране — кнопка «Связаться с администратором», без Premium и цены (сервер её ещё присылает)", t.includes("Связаться с администратором") && !/Premium/.test(t) && !/₽|299/.test(t), t.slice(0, 400));
     await tab(page, "home");
     const h = await text(page);
-    check("V4. главная тоже перешла на «закончился» по ответу сервера", h.includes("Пробный период закончился"), h.slice(0, 200));
+    check("V4. главная тоже перешла на «закончился» по ответу сервера", h.includes("Пробный период завершён"), h.slice(0, 200));
     await click(page, '[data-go="all-notes"]', 800);
     check("V4. личные конспекты после окончания доступа открываются", (await text(page)).includes("Мой конспект по биологии"));
     check("V4. нет ошибок JS", noErr(errors), errors);
@@ -209,9 +209,9 @@ async function scenarios() {
   {
     const { ctx, page, errors } = await open(P(ACC.premiumExpired, { notes: [NOTE] }));
     const t = await text(page);
-    check("V5. «Premium закончился», «Подключить Premium», аккаунт и личные конспекты сохранены", t.includes("Premium закончился") && t.includes("Подключить Premium")
+    check("V5. «Срок доступа истёк», «Связаться с администратором», аккаунт и личные конспекты сохранены", t.includes("Срок доступа истёк") && t.includes("Связаться с администратором")
       && t.includes("личные конспекты сохранены"), t.slice(0, 400));
-    check("V5. без цены, слов об оплате и ссылок; подключает Николай", !/₽|299|оплат/i.test(t) && t.includes("Подключает Николай") && !(await page.$("#app > .app a")), t.slice(0, 500));
+    check("V5. без цены, Premium, слов об оплате и ссылок; «Условия продления обсуждаются индивидуально»", !/₽|299|оплат|Premium/i.test(t) && t.includes("Условия продления обсуждаются индивидуально") && !(await page.$("#app > .app a")), t.slice(0, 500));
     await page.screenshot({ path: path.join(SHOTS, "premium-ended-iphone.png") });
     await toBook(page, "physics");
     check("V5. каталог после окончания виден (названия параграфов)", (await page.$$("#app > .app [data-lib-paragraph]")).length === 51);
@@ -223,8 +223,8 @@ async function scenarios() {
     check("V5. экран Premium: 139 готовых конспектов (v64: + 62 по Перышкину), 10 ИИ-конспектов за 30 дней, экономия времени",
       tt.includes("139 готовых конспектов по истории и физике") && tt.includes("10 ИИ-конспектов по фотографиям за 30 дней")
       && tt.includes("Экономия времени при подготовке домашних заданий"), tt.slice(0, 700));
-    check("V5. «🔒 Как подключить Premium?», «свяжитесь с Николаем», «Ваш ID: KN-AAAAAA», кнопка «Скопировать ID»",
-      tt.includes("🔒 Как подключить Premium?") && tt.includes("Для подключения Premium свяжитесь с Николаем.") && /Ваш ID:\s*KN-AAAAAA/.test(tt)
+    check("V5. «Связаться с администратором», «Капустину Николаю», «Ваш ID: KN-AAAAAA», кнопка «Скопировать ID»",
+      tt.includes("Связаться с администратором") && tt.includes("Капустину Николаю") && !/Premium/.test(tt) && /Ваш ID:\s*KN-AAAAAA/.test(tt)
       && !!(await page.$("#app > .app [data-copy-id]")), tt.slice(0, 700));
     check("V5. экран Premium: без цены, оплаты, описания тарифа из базы и ссылок", !/₽|299|оплат|История и физика целиком/i.test(tt) && !(await page.$("#app > .app a")), tt.slice(0, 700));
     await page.screenshot({ path: path.join(SHOTS, "tariffs-premium-iphone.png"), fullPage: true });
@@ -250,7 +250,7 @@ async function scenarios() {
     check("V6. Premium (27 дней): обычная главная, «Осталось 6 конспектов», без предупреждения", t.includes("Осталось 6 конспектов") && !t.includes("закончится"), t.slice(0, 300));
     await tab(page, "me");
     t = await text(page);
-    check("V6. «Мой доступ»: «Premium до …», ИИ 6 из 10", /Premium до \d+ ноября 2026|Premium до \d+ декабря 2026/.test(t) && t.includes("осталось 6 из 10"), t.slice(0, 600));
+    check("V6. «Мой доступ»: «Полный доступ до …», ИИ 6 из 10", /Полный доступ до \d+ (ноября|декабря) 2026/.test(t) && !/Premium/.test(t) && t.includes("осталось 6 из 10"), t.slice(0, 600));
     await toBook(page, "physics");
     await click(page, "[data-lib-paragraph]:not(.soon)", 900);
     check("V6. Premium: текст физики открывается", !!(await page.$(".cn-doc")));
@@ -260,7 +260,7 @@ async function scenarios() {
   {
     const { ctx, page } = await open(P(ACC.premiumEnding));
     const t = await text(page);
-    check("V7. Premium, осталось 2 дня: строка «Premium закончится через 2 дня · продлить» на главной", t.includes("Premium закончится через 2 дня") && t.includes("продлить"), t.slice(0, 300));
+    check("V7. полный доступ, осталось 2 дня: строка «Полный доступ закончится через 2 дня · продлить» на главной", t.includes("Полный доступ закончится через 2 дня") && t.includes("продлить"), t.slice(0, 300));
     await page.screenshot({ path: path.join(SHOTS, "premium-ending-iphone.png") });
     await click(page, ".trial-line.ending", 900);
     check("V7. строка ведёт на экран Premium", !!(await page.$(".scr-tariffs")));
@@ -312,7 +312,7 @@ async function scenarios() {
     }, ACC.trialExpired);
     await page.waitForTimeout(1200);
     const t = await text(page);
-    check("V10. после возвращения в приложение — «Пробный период закончился», текста нет", t.includes("Пробный период закончился") && !(await page.$(".cn-doc")), t.slice(0, 200));
+    check("V10. после возвращения в приложение — «Пробный период завершён», текста нет", t.includes("Пробный период завершён") && !(await page.$(".cn-doc")), t.slice(0, 200));
     check("V10. текст забыт в памяти страницы", await page.evaluate(() => {
       const K = window.K, b = K.library.subjects().find((x) => x.id === "history").books.find((x) => x.grade === "8");
       return b.paragraphs.filter((p) => K.library.ready(p)).every((p) => K.library.text("history", b.id, p.id) === null);
@@ -348,7 +348,7 @@ async function scenarios() {
     await click(page, "[data-lib-paragraph]:not(.soon)", 900);
     const tb = await text(page);
     check("V11. аккаунт B (срок закончился): тот же параграф — экран доступа, текст A не показан и не запрошен заново",
-      !(await page.$(".cn-doc")) && tb.includes("Пробный период закончился") && (await libCalls(page)).length === calls0,
+      !(await page.$(".cn-doc")) && tb.includes("Пробный период завершён") && (await libCalls(page)).length === calls0,
       [tb.slice(0, 200), (await libCalls(page)).length, calls0, await page.evaluate(() => window.__T.kind + "/" + window.__T.id)]);
     check("V11. нет ошибок JS", noErr(errors), errors);
     await ctx.close();
@@ -392,8 +392,8 @@ async function scenarios() {
   {
     const { ctx, page } = await open(P(ACC.giftExpired, { notes: [NOTE] }));
     const t = await text(page);
-    check("V14. подарок закончился: «Подарочный доступ закончился», кнопка Premium, личные конспекты сохранены",
-      t.includes("Подарочный доступ закончился") && t.includes("Подключить Premium") && !/₽|299/.test(t) && t.includes("личные конспекты сохранены"), t.slice(0, 400));
+    check("V14. подарок закончился: «Подарочный доступ закончился», «Связаться с администратором», личные конспекты сохранены",
+      t.includes("Подарочный доступ закончился") && t.includes("Связаться с администратором") && !/Premium/.test(t) && !/₽|299/.test(t) && t.includes("личные конспекты сохранены"), t.slice(0, 400));
     await ctx.close();
   }
 
@@ -493,8 +493,8 @@ async function scenarios() {
       const { ctx, page } = await open(P(ACC.premiumExpired, { plansError: true }));
       await click(page, '[data-go="tariffs"]', 900);
       const t = await text(page);
-      check("V15. условия не загрузились: «Не удалось загрузить условия Premium», блок подключения с ID на месте",
-        t.includes("Не удалось загрузить условия Premium") && /Ваш ID:\s*KN-AAAAAA/.test(t) && !!(await page.$("[data-copy-id]")), t.slice(0, 500));
+      check("V15. условия не загрузились: «Не удалось загрузить условия продления», блок связи с ID на месте",
+        t.includes("Не удалось загрузить условия продления") && /Ваш ID:\s*KN-AAAAAA/.test(t) && !!(await page.$("[data-copy-id]")), t.slice(0, 500));
       await ctx.close();
     }
     // Premium действует: кнопка «Продлить Premium» в «Мой доступ» ведёт на тот же экран
@@ -601,8 +601,8 @@ async function pwaTest() {
   });
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=65", /v=65/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался только konspekt-v65", keys.length === 1 && keys[0] === "konspekt-v65", keys);
+  check("PWA: после обновления — app.js?v=66", /v=66/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался только konspekt-v66", keys.length === 1 && keys[0] === "konspekt-v66", keys);
   check("PWA: js/library-catalog.js нет ни в кэше, ни среди загруженных файлов", !after.some((x) => x.includes("library-catalog")) && !served.some((x) => x.includes("library-catalog")), after);
   check("PWA: js/library-index.js загружен", served.some((x) => x.includes("library-index.js")));
   await toBook(page, "history");
@@ -645,11 +645,11 @@ async function pwaTest() {
   // без браузера: в сайте нет текстов, SW не кэширует запросы к Supabase и POST
   const idx = fs.readFileSync(path.join(V62, "js/library-index.js"), "utf8");
   check("S1. js/library-index.js без текстов (нет content, sections, blocks)", !/"content"\s*:|"sections"\s*:|"blocks"\s*:/.test(idx));
-  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=65",
-    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=65/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
+  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=66",
+    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=66/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
     && !/library-catalog/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8")));
   const sw = fs.readFileSync(path.join(V62, "service-worker.js"), "utf8");
-  check("S2. service worker: VERSION konspekt-v65, кэширует только GET своего сайта", /VERSION = "konspekt-v65"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
+  check("S2. service worker: VERSION konspekt-v66, кэширует только GET своего сайта", /VERSION = "konspekt-v66"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
   check("S2. service worker не упоминает library-catalog в списке файлов", !/library-catalog\.js"/.test(sw.replace(/\/\/.*$/gm, "")));
   const big = fs.readdirSync(path.join(V62, "js")).filter((f) => fs.statSync(path.join(V62, "js", f)).size > 400000 && f !== "vendor");
   check("S3. в js/ нет больших файлов (тексты были 2 МБ)", !big.filter((f) => !/supabase/.test(f)).length, big);
