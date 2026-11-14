@@ -220,8 +220,8 @@ async function scenarios() {
     await tab(page, "photo");
     check("V5. «Фото» → экран Premium, не камера", !(await page.$(".scr-camera")) && !!(await page.$(".scr-tariffs")));
     const tt = await text(page);
-    check("V5. экран Premium: 139 готовых конспектов (v64: + 62 по Перышкину), 10 ИИ-конспектов за 30 дней, экономия времени",
-      tt.includes("139 готовых конспектов по истории и физике") && tt.includes("10 ИИ-конспектов по фотографиям за 30 дней")
+    check("V5. экран Premium: 181 готовый конспект (v64: + 62 по Перышкину, v68: + 42 по истории России), 10 ИИ-конспектов за 30 дней, экономия времени",
+      tt.includes("181 готовый конспект по истории и физике") && tt.includes("10 ИИ-конспектов по фотографиям за 30 дней")
       && tt.includes("Экономия времени при подготовке домашних заданий"), tt.slice(0, 700));
     check("V5. «Связаться с администратором», «Капустину Николаю», «Ваш ID: KN-AAAAAA», кнопка «Скопировать ID»",
       tt.includes("Связаться с администратором") && tt.includes("Капустину Николаю") && !/Premium/.test(tt) && /Ваш ID:\s*KN-AAAAAA/.test(tt)
@@ -459,7 +459,7 @@ async function scenarios() {
       check("V15. оба способа не сработали: ID выделен, сообщение «скопируйте вручную»", r[2] === "KN-AAAAAA" && /вручную/.test(r[1]), r);
       // число готовых конспектов — из каталога приложения, а не из текста
       const ready = await page.evaluate(() => window.K.library.readyCount({ subjectId: "history" }) + window.K.library.readyCount({ subjectId: "physics" }));
-      check("V15. «139 готовых конспектов» = число готовых параграфов истории и физики в каталоге", ready === 139 && (await text(page)).includes(ready + " готовых конспектов"), ready);
+      check("V15. «181 готовый конспект» = число готовых параграфов истории и физики в каталоге", ready === 181 && (await text(page)).includes(ready + " готовый конспект"), ready);
       // 390 px: без горизонтальной прокрутки, блок подключения и кнопка в ширине экрана, кнопка не меньше 44 px
       const box = await page.$eval(".premium-connect", (n) => n.getBoundingClientRect().toJSON());
       const btn = await page.$eval("[data-copy-id]", (n) => n.getBoundingClientRect().toJSON());
@@ -601,8 +601,8 @@ async function pwaTest() {
   });
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=67", /v=67/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался только konspekt-v67", keys.length === 1 && keys[0] === "konspekt-v67", keys);
+  check("PWA: после обновления — app.js?v=68", /v=68/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался только konspekt-v68", keys.length === 1 && keys[0] === "konspekt-v68", keys);
   check("PWA: js/library-catalog.js нет ни в кэше, ни среди загруженных файлов", !after.some((x) => x.includes("library-catalog")) && !served.some((x) => x.includes("library-catalog")), after);
   check("PWA: js/library-index.js загружен", served.some((x) => x.includes("library-index.js")));
   await toBook(page, "history");
@@ -645,11 +645,11 @@ async function pwaTest() {
   // без браузера: в сайте нет текстов, SW не кэширует запросы к Supabase и POST
   const idx = fs.readFileSync(path.join(V62, "js/library-index.js"), "utf8");
   check("S1. js/library-index.js без текстов (нет content, sections, blocks)", !/"content"\s*:|"sections"\s*:|"blocks"\s*:/.test(idx));
-  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=67",
-    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=67/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
+  check("S1. js/library-catalog.js удалён, index.html подключает library-index.js?v=68",
+    !fs.existsSync(path.join(V62, "js/library-catalog.js")) && /js\/library-index\.js\?v=68/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8"))
     && !/library-catalog/.test(fs.readFileSync(path.join(V62, "index.html"), "utf8")));
   const sw = fs.readFileSync(path.join(V62, "service-worker.js"), "utf8");
-  check("S2. service worker: VERSION konspekt-v67, кэширует только GET своего сайта", /VERSION = "konspekt-v67"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
+  check("S2. service worker: VERSION konspekt-v68, кэширует только GET своего сайта", /VERSION = "konspekt-v68"/.test(sw) && /method !== "GET"/.test(sw) && /origin/.test(sw), sw.slice(0, 300));
   check("S2. service worker не упоминает library-catalog в списке файлов", !/library-catalog\.js"/.test(sw.replace(/\/\/.*$/gm, "")));
   const big = fs.readdirSync(path.join(V62, "js")).filter((f) => fs.statSync(path.join(V62, "js", f)).size > 400000 && f !== "vendor");
   check("S3. в js/ нет больших файлов (тексты были 2 МБ)", !big.filter((f) => !/supabase/.test(f)).length, big);
