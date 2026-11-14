@@ -124,7 +124,8 @@
     let [label, cls] = STATUS[a.status] || ["—", "none"];
     if (a.kind === "legacy") (label = a.status === "expired" ? "F&F · завершено" : "F&F"), (cls = "legacy");
     if (a.revoked && a.status === "expired") label = "Отозван";
-    if (a.status === "paid" && a.plan_title) label = a.plan_title;
+    // название тарифа из базы («Premium») — в новой терминологии; код тарифа premium не меняется
+    if (a.status === "paid" && a.plan_title) label = a.plan === "premium" ? "Продление доступа" : a.plan_title;
     return '<span class="ow-badge ow-' + cls + '">' + esc(label) + "</span>";
   }
   const aiLine = (a) => (a.ai_quota === null || a.ai_quota === undefined ? (a.status === "owner" ? "ИИ без лимита" : "") : "ИИ " + (a.ai_remaining ?? 0) + " из " + a.ai_quota);

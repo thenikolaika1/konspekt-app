@@ -407,12 +407,13 @@ const PW = "HJKMN-PQRST-23456-WXYZA";
     await page.fill("#owner-root #owBudget", String(minB - 1));
     await owClick(page, 'button[type="submit"]', 600);
     check("U53. бюджет ниже минимума — форма не отправляется (min = израсходовано + резерв), в подсказке минимум", !!(await page.$("#owner-root #owBudget:invalid"))
-      && (await owText(page)).includes("Меньше " + minB + " поставить нельзя") && !(await owText(page)).includes("Подтверди бюджет"));
+      && (await owText(page)).includes("Меньше " + minB + " поставить нельзя") && !(await owText(page)).includes("Подтверди бюджет")
+      && (await owText(page)).includes("Одно продление доступа — это") && !(await owText(page)).includes("Premium"));
     await page.fill("#owner-root #owBudget", "130");
     await owClick(page, 'button[type="submit"]', 600);
     t = await owText(page);
-    check("U53. подтверждение: «Сейчас», «Станет 130», резерв продлений доступа, «Одно продление доступа — это …»; совет проверить токены GigaChat", t.includes("Подтверди бюджет") && t.includes("130")
-      && t.includes("Резерв продлений доступа") && t.includes("Одно продление доступа — это") && !t.includes("Premium") && t.includes("кабинете GigaChat"), t.slice(0, 500));
+    check("U53. подтверждение: «Сейчас», «Станет 130», резерв продлений доступа; совет проверить токены GigaChat", t.includes("Подтверди бюджет") && t.includes("130")
+      && t.includes("Резерв продлений доступа") && !t.includes("Premium") && t.includes("кабинете GigaChat"), t.slice(0, 500));
     check("U53. до подтверждения бюджет не изменён", sqlv("select max_total_starts from private.ai_limits") !== "130");
     await page.screenshot({ path: path.join(SHOTS, "owner-budget-confirm.png") });
     await owClick(page, '[data-ow-act="budget-commit"]', 2000);
