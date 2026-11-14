@@ -550,10 +550,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=67";
+        css.href = "./owner.css?v=68";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=67";
+        js.src = "./js/owner.js?v=68";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
