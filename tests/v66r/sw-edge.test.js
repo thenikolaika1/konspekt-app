@@ -44,16 +44,16 @@ function server(port, pick) {
     await verify(st, errors);
     await ctx.close(); srv.close();
   }
-  // E1: первый вход, сайт целиком v69 — SW активен, в кэше стартовая страница и все 16 файлов ?v=66, ничего другого версий
+  // E1: первый вход, сайт целиком v70 — SW активен, в кэше стартовая страница и все 16 файлов ?v=66, ничего другого версий
   await scenario("E1", () => NEW, (st, errors) => {
-    const v = st.cached.filter((c) => /\?v=69$/.test(c));
+    const v = st.cached.filter((c) => /\?v=70$/.test(c));
     check("E1. первый вход (без старой версии): SW активен, приложение работает, в кэше стартовая страница и файлы ?v=66, нет файлов других версий",
-      st.active === "activated" && st.app && st.cached.includes("konspekt-v69 /") && v.length >= 16 && !st.cached.some((c) => /\?v=(?!69$)/.test(c)) && errors.length === 0, st);
+      st.active === "activated" && st.app && st.cached.includes("konspekt-v70 /") && v.length >= 16 && !st.cached.some((c) => /\?v=(?!70$)/.test(c)) && errors.length === 0, st);
   });
-  // E2: сайт обновился не целиком — service-worker.js уже v69, а index.html ещё v68: чужая страница в кэш v69 не попадает
+  // E2: сайт обновился не целиком — service-worker.js уже v70, а index.html ещё v69: чужая страница в кэш v70 не попадает
   await scenario("E2", (p) => (p.endsWith("/index.html") ? OLD : NEW), (st, errors) => {
-    check("E2. service worker v69 + index.html ещё v68: установка прошла, стартовая страница v68 в кэш v69 предварительно НЕ положена, файлов ?v=66 заранее нет",
-      st.active === "activated" && st.app && !st.cached.some((c) => /\?v=69$/.test(c)) && errors.length === 0, st);
+    check("E2. service worker v70 + index.html ещё v69: установка прошла, стартовая страница v69 в кэш v70 предварительно НЕ положена, файлов ?v=66 заранее нет",
+      st.active === "activated" && st.app && !st.cached.some((c) => /\?v=70$/.test(c)) && errors.length === 0, st);
   });
   // E3: при установке сервер отвечает ошибкой на стартовую страницу (запрос из service worker) — установка не ломается
   await scenario("E3", (p, q) => (p.endsWith("/index.html") && q.headers["sec-fetch-dest"] === "empty" ? 500 : NEW), (st, errors) => {

@@ -112,7 +112,7 @@ function catalog() {
   }
 
   // ---------- 1. каталог ----------
-  check("каталог: в истории 7 класса один учебник — Мединский, Чубарьян (новый)", lib.books("history", "7").map((b) => b.id).join() === BOOK, lib.books("history", "7").map((b) => b.id));
+  check("каталог: в истории 7 класса учебник Мединского, Чубарьяна — первым; с v70 после него история России (history-rus-7)", lib.books("history", "7").map((b) => b.id).join() === BOOK + ",history-rus-7", lib.books("history", "7").map((b) => b.id));
   check("каталог: история 8 класса не изменилась — те же два учебника (history-8, history-rus-8)", lib.books("history", "8").map((b) => b.id).join() === "history-8,history-rus-8", lib.books("history", "8").map((b) => b.id));
   check("каталог: новый учебник — «История Нового времени. Конец XV — XVII в.», В. Р. Мединский, А. О. Чубарьян, Просвещение, 2025, 7 класс",
     hr && hr.title === "История Нового времени. Конец XV — XVII в." && hr.authors === "В. Р. Мединский, А. О. Чубарьян" && hr.publisher === "Просвещение" &&
@@ -128,8 +128,8 @@ function catalog() {
   const titles = hr.paragraphs.map((p) => p.title);
   check("каталог: названий-дублей нет", new Set(titles).size === titles.length);
   check("каталог: прежние учебники истории 8 класса — 26 и 42 материала, как раньше", lib.book("history", OLD).paragraphs.length === 26 && lib.book("history", "history-rus-8").paragraphs.length === 42 && lib.paragraph("history", OLD, "history-8-p2")?.title === "Эпоха Просвещения");
-  check("каталог: всего готовых конспектов по истории и физике — 207 (181 + 26)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 207);
-  check("каталог: 7 класс в библиотеке — только история (26 готовых)", lib.subjectsIn("7").map((s) => s.id).join() === "history" && lib.readyCount({ gradeId: "7" }) === 26);
+  check("каталог: всего готовых конспектов по истории и физике — 207 (181 + 26) + 34 (v70, история России 7 класса)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 241);
+  check("каталог: 7 класс в библиотеке — только история (26 готовых + 34 с v70)", lib.subjectsIn("7").map((s) => s.id).join() === "history" && lib.readyCount({ gradeId: "7" }) === 60);
 
   // ---------- 2. экраны на 320 / 390 / 768 ----------
   const GROUPS = CH.map(([ch, pars]) => ch + (pars.length + 1)).join("|");
@@ -137,8 +137,8 @@ function catalog() {
     const { ctx, page, errors } = await open(TRIAL, vp);
     await toHistory(page);
     const books = await page.evaluate(() => [...document.querySelectorAll("[data-lib-book]")].map((b) => ({ id: b.dataset.libBook, text: b.textContent.replace(/\s+/g, " ") })));
-    check(`[${name}] экран «История» 7 класса: один учебник — авторы, 26 конспектов и 3 главы`,
-      books.length === 1 && books[0].id === BOOK && /В\. Р\. Мединский, А\. О\. Чубарьян/.test(books[0].text) && /26 конспект/.test(books[0].text) && /3 глав/.test(books[0].text), books);
+    check(`[${name}] экран «История» 7 класса: первым — учебник Мединского, Чубарьяна (авторы, 26 конспектов, 3 главы); с v70 вторым — история России`,
+      books.length === 2 && books[1].id === "history-rus-7" && books[0].id === BOOK && /В\. Р\. Мединский, А\. О\. Чубарьян/.test(books[0].text) && /26 конспект/.test(books[0].text) && /3 глав/.test(books[0].text), books);
     check(`[${name}] экран «История»: без горизонтальной прокрутки`, !(await hscroll(page)));
     await page.screenshot({ path: path.join(SHOTS, `books-${name}.png`), fullPage: true });
     await click(page, `[data-lib-book="${BOOK}"]`);

@@ -256,6 +256,286 @@
      ]
     },
     {
+     "id": "history-rus-7",
+     "title": "История России. XVI–XVII вв.",
+     "authors": "В. Р. Мединский, А. В. Торкунов",
+     "publisher": "Просвещение",
+     "edition": "2025",
+     "grade": "7",
+     "paragraphs": [
+      {
+       "id": "history-rus-7-intro",
+       "number": "",
+       "order": 1,
+       "title": "Введение. Россия в XVI–XVII вв.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p1-2",
+       "number": "1–2",
+       "order": 10,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Россия в 1533–1547 гг.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p3-4",
+       "number": "3–4",
+       "order": 30,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Начало царствования Ивана IV",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p5-6",
+       "number": "5–6",
+       "order": 50,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Русское общество в XVI в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p7-8",
+       "number": "7–8",
+       "order": 70,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Военные реформы Ивана IV и Избранной рады",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p9",
+       "number": "9",
+       "order": 90,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Наследники Золотой Орды в середине XVI в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p10-11",
+       "number": "10–11",
+       "order": 100,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Присоединение Поволжья. Начало Ливонской войны",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p12-13",
+       "number": "12–13",
+       "order": 120,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Падение Избранной рады и введение опричнины",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p14-15",
+       "number": "14–15",
+       "order": 140,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Завершение эпохи Ивана Грозного",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p16-17",
+       "number": "16–17",
+       "order": 160,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Россия при царе Фёдоре Ивановиче",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p18",
+       "number": "18",
+       "order": 180,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Развитие культуры в XVI в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p19",
+       "number": "19",
+       "order": 190,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Духовная жизнь общества в XVI в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-chapter-1-summary",
+       "number": "",
+       "order": 195,
+       "chapter": "Глава I. Россия в XVI в.",
+       "title": "Итоги главы I. Россия в XVI в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p20",
+       "number": "20",
+       "order": 200,
+       "chapter": "Глава II. Смута в России",
+       "title": "В преддверии грозных испытаний: кризис власти и общества на рубеже XVI–XVII вв.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p21-22",
+       "number": "21–22",
+       "order": 210,
+       "chapter": "Глава II. Смута в России",
+       "title": "Начало Смуты. Самозванец на троне",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p23-24",
+       "number": "23–24",
+       "order": 230,
+       "chapter": "Глава II. Смута в России",
+       "title": "Апогей Смуты. «Всенародное разорение»",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p25-26",
+       "number": "25–26",
+       "order": 250,
+       "chapter": "Глава II. Смута в России",
+       "title": "Спасители Отечества",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p27-28",
+       "number": "27–28",
+       "order": 270,
+       "chapter": "Глава II. Смута в России",
+       "title": "Завершение Смуты и иностранной интервенции",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-chapter-2-summary",
+       "number": "",
+       "order": 285,
+       "chapter": "Глава II. Смута в России",
+       "title": "Итоги главы II. Смута в России",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p29-30",
+       "number": "29–30",
+       "order": 290,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "«Куда сохá ходила…» Социально-экономическое развитие России в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p31",
+       "number": "31",
+       "order": 310,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Сословия в XVII в.: верхи общества",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p32",
+       "number": "32",
+       "order": 320,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Сословия в XVII в.: низы общества",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p33-34",
+       "number": "33–34",
+       "order": 330,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Государственное устройство России в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p35",
+       "number": "35",
+       "order": 350,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Внутренняя политика царя Алексея Михайловича",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p36-37",
+       "number": "36–37",
+       "order": 360,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "«Государство правит по своей воле…» На путях к абсолютной монархии",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p38-39",
+       "number": "38–39",
+       "order": 380,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Русская церковь в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p40-41",
+       "number": "40–41",
+       "order": 400,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Социальное противостояние в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p42-43",
+       "number": "42–43",
+       "order": 420,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Внешняя политика России в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p44",
+       "number": "44",
+       "order": 440,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "«Встречь солнцу»: освоение Сибири и Дальнего Востока",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p45",
+       "number": "45",
+       "order": 450,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Внутренняя политика царя Фёдора Алексеевича",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p46-47",
+       "number": "46–47",
+       "order": 460,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Культура России в XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-p48",
+       "number": "48",
+       "order": 480,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Мир человека XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-chapter-3-summary",
+       "number": "",
+       "order": 485,
+       "chapter": "Глава III. Россия при первых Романовых",
+       "title": "Итоги главы III. Россия при первых Романовых",
+       "ready": true
+      },
+      {
+       "id": "history-rus-7-conclusion",
+       "number": "",
+       "order": 600,
+       "title": "Заключение. Россия на пороге Нового времени",
+       "ready": true
+      }
+     ]
+    },
+    {
      "id": "history-8",
      "title": "История Нового времени. XVIII — начало XIX в.",
      "authors": "В. Р. Мединский, А. О. Чубарьян",
