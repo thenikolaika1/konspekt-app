@@ -135,7 +135,7 @@ function catalog() {
   const titles = hr.paragraphs.map((p) => p.title);
   check("каталог: названий-дублей нет", new Set(titles).size === titles.length);
   check("каталог: прежний учебник истории — 26 материалов, как раньше", lib.book("history", OLD).paragraphs.length === 26 && lib.paragraph("history", OLD, "history-8-p2")?.title === "Эпоха Просвещения");
-  check("каталог: всего готовых конспектов по истории и физике — 181 (139 + 42) + 26 (v69, история 7 класса) + 34 (v70, история России 7 класса)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 241);
+  check("каталог: всего готовых конспектов по истории и физике — 181 (139 + 42) + 26 (v69, история 7 класса) + 34 (v70, история России 7 класса) + 47 (v71, физика 7 класса)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 288);
 
   // ---------- 2. экраны на 320 / 390 / 768 ----------
   const GROUPS = CH.map(([ch, pars]) => ch + (pars.length + 1)).join("|");

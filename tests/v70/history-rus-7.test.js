@@ -133,8 +133,8 @@ function catalog() {
   check("каталог: названий-дублей нет", new Set(titles).size === titles.length);
   check("каталог: прежние учебники истории — 26 (всеобщая, 7 кл.), 26 и 42 (8 кл.) материала, как раньше",
     lib.book("history", WORLD7).paragraphs.length === 26 && lib.book("history", "history-8").paragraphs.length === 26 && lib.book("history", OLD).paragraphs.length === 42 && lib.paragraph("history", OLD, "history-rus-8-p1-2")?.title === "Борьба за власть в конце XVII в.");
-  check("каталог: всего готовых конспектов по истории и физике — 241 (207 + 34)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 241);
-  check("каталог: 7 класс в библиотеке — только история (26 + 34 = 60 готовых)", lib.subjectsIn("7").map((s) => s.id).join() === "history" && lib.readyCount({ gradeId: "7" }) === 60);
+  check("каталог: всего готовых конспектов по истории и физике — 241 (207 + 34) + 47 (v71, физика 7 класса)", lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) === 288);
+  check("каталог: 7 класс в библиотеке — история (26 + 34 = 60 готовых) и с v71 физика (47)", lib.subjectsIn("7").map((s) => s.id).join() === "history,physics" && lib.readyCount({ gradeId: "7" }) === 107);
 
   // ---------- 2. экраны на 320 / 390 / 768 ----------
   const GROUPS = CH.map(([ch, pars]) => ch + (pars.length + 1)).join("|");

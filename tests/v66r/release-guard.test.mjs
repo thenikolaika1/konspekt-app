@@ -13,10 +13,10 @@ const siteText = site.map((f) => [f, read(f)]);
 
 const idx = read("index.html"), sw = read("service-worker.js"), app = read("app.js"), cfg = read("js/config.js");
 const vers = [...idx.matchAll(/\?v=([^"']+)/g)].map((m) => m[1]);
-check("G1. index.html: у всех файлов один номер сборки ?v=70 (только цифры — по нему приложение замечает обновление)", vers.length >= 15 && vers.every((v) => v === "70"), [...new Set(vers)]);
-check("G2. service worker: VERSION konspekt-v70 (старые кэши удаляются при активации)", /const VERSION = "konspekt-v70";/.test(sw) && /caches\.delete/.test(sw));
-check("G3. панель владельца грузится той же версии (owner.css/owner.js ?v=70)", /owner\.css\?v=70/.test(app) && /owner\.js\?v=70/.test(app));
-check("G4. js/protect.js подключён до app.js", idx.indexOf("js/protect.js?v=70") > 0 && idx.indexOf("js/protect.js") < idx.indexOf("app.js?v="));
+check("G1. index.html: у всех файлов один номер сборки ?v=71 (только цифры — по нему приложение замечает обновление)", vers.length >= 15 && vers.every((v) => v === "71"), [...new Set(vers)]);
+check("G2. service worker: VERSION konspekt-v71 (старые кэши удаляются при активации)", /const VERSION = "konspekt-v71";/.test(sw) && /caches\.delete/.test(sw));
+check("G3. панель владельца грузится той же версии (owner.css/owner.js ?v=71)", /owner\.css\?v=71/.test(app) && /owner\.js\?v=71/.test(app));
+check("G4. js/protect.js подключён до app.js", idx.indexOf("js/protect.js?v=71") > 0 && idx.indexOf("js/protect.js") < idx.indexOf("app.js?v="));
 check("G5. сайт не обращается к экспериментальной функции analyze-pages-exp и не содержит метки эксперимента",
   !siteText.some(([, s]) => /analyze-pages-exp|kn-exp|эксперимент v34/.test(s)) && /analyzeFunction: "analyze-pages"/.test(cfg), siteText.filter(([, s]) => /analyze-pages-exp|kn-exp/.test(s)).map(([f]) => f));
 check("G6. клиент: MAX_PAGES = 4", /const MAX_PAGES = 4;/.test(app) && !/const MAX_PAGES = [5-9]/.test(app));
