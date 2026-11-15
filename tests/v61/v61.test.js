@@ -50,14 +50,14 @@ function staticTests() {
   // v64: в физике два учебника — «Инженеры будущего» (51) и Перышкин, Иванов (62)
   const nb = (bookId) => all.subjects.flatMap((s) => s.books).find((b) => b.id === bookId)?.paragraphs.filter((p) => p.ready).length;
   // v68: в истории два учебника — Мединский, Чубарьян (26) и «История России» Мединского, Торкунова (42)
-  check("данные (v70): готовы история 26 + 42 + 26 + 34 (7 класс), физика 51 + 62, биология без текстов (скрыта)", nb("history-8") === 26 && nb("history-rus-8") === 42 && nb("history-7") === 26 && nb("history-rus-7") === 34 && n("history", (p) => p.ready) === 128 && nb("physics-8-engineers-1") === 51 && nb("physics-8-peryshkin") === 62 && n("physics", (p) => p.ready) === 113 && n("biology", (p) => p.ready) === 0);
+  check("данные (v71): готовы история 26 + 42 + 26 + 34 (7 класс), физика 51 + 62 + 47 (7 класс), биология без текстов (скрыта)", nb("history-8") === 26 && nb("history-rus-8") === 42 && nb("history-7") === 26 && nb("history-rus-7") === 34 && n("history", (p) => p.ready) === 128 && nb("physics-8-engineers-1") === 51 && nb("physics-8-peryshkin") === 62 && nb("physics-7-engineers-1") === 47 && n("physics", (p) => p.ready) === 160 && n("biology", (p) => p.ready) === 0);
   check("данные (v62): в публичном каталоге нет ни одного текста (content) и служебных пометок (source)", all.subjects.every((s) => s.books.every((b) => b.paragraphs.every((p) => !("content" in p) && !("source" in p)))));
   // структура каталога (классы, предметы, учебники, номера и названия параграфов) — та же, что в v59
   const shape = (c) => JSON.stringify(c.subjects.map((s) => [s.id, s.title, s.books.map((b) => [b.id, b.title, b.grade, b.paragraphs.map((p) => [p.id, p.number, p.title, p.chapter || ""])])]));
   // v64/v68: прежние учебники и параграфы — те же, что в v59; добавлены только physics-8-peryshkin (v64) и history-rus-8 (v68)
-  const NEW_BOOK = "physics-8-peryshkin", NEW_BOOKS = [NEW_BOOK, "history-rus-8", "history-7", "history-rus-7"];
+  const NEW_BOOK = "physics-8-peryshkin", NEW_BOOKS = [NEW_BOOK, "history-rus-8", "history-7", "history-rus-7", "physics-7-engineers-1"];
   const withoutNew = (c) => ({ subjects: c.subjects.map((s) => ({ ...s, books: s.books.filter((b) => !NEW_BOOKS.includes(b.id)) })) });
-  check("данные (v70): прежние учебники и параграфы = v59 (ничего не изменено)", shape(withoutNew(all)) === shape(loadCatalog(V59).library.catalog()));
+  check("данные (v71): прежние учебники и параграфы = v59 (ничего не изменено)", shape(withoutNew(all)) === shape(loadCatalog(V59).library.catalog()));
   const per = all.subjects.find((s) => s.id === "physics").books.find((b) => b.id === NEW_BOOK);
   const allIds = all.subjects.flatMap((s) => s.books.flatMap((b) => b.paragraphs.map((p) => p.id)));
   check("данные (v64): новый учебник — 8 класс, профили math+general, ровно 62 параграфа § 1–62, id без пересечений",
@@ -69,7 +69,7 @@ function staticTests() {
   // v64/v68: строки справочника v59 (107) не изменились, добавлены ровно 62 (Перышкин) + 42 (История России) строки
   const rowsOf = (dir) => sql(dir).split("\n").filter((l) => /^\s+\('/.test(l)).map((l) => l.replace(/,$/, ""));
   const r59 = rowsOf(V59), r64 = rowsOf(V61), extra = r64.filter((l) => !r59.includes(l));
-  check("данные (v70): справочник аналитики = v59 (107) + 62 + 42 + 26 + 34 строки новых учебников", r59.length === 107 && r59.every((l) => r64.includes(l)) && extra.length === 164 && extra.every((l) => NEW_BOOKS.some((id) => l.includes("'" + id + "'"))), [r59.length, r64.length, extra.length]);
+  check("данные (v71): справочник аналитики = v59 (107) + 62 + 42 + 26 + 34 + 47 строк новых учебников", r59.length === 107 && r59.every((l) => r64.includes(l)) && extra.length === 211 && extra.every((l) => NEW_BOOKS.some((id) => l.includes("'" + id + "'"))), [r59.length, r64.length, extra.length]);
   const app = fs.readFileSync(path.join(V61, "app.js"), "utf8");
   check("код: старой проверки F&F (ffEnded/serverMarks/ffEndsAt) больше нет", !/ffEnded|serverMarks|FF_ENDS_AT|ffEndsAt/.test(app + fs.readFileSync(path.join(V61, "js/cloud.js"), "utf8") + fs.readFileSync(path.join(V61, "js/config.js"), "utf8")));
   check("код: нет Date.now() в решении о доступе (paywalled/daysLeft)", !/Date\.now\(\)/.test(app.slice(app.indexOf("// ---------- доступ v61"), app.indexOf("function earlyAccess"))));
@@ -482,8 +482,8 @@ async function pwaTest() {
   await page.waitForTimeout(800);
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=70", /v=70/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался konspekt-v70", keys.length === 1 && keys[0] === "konspekt-v70", keys);
+  check("PWA: после обновления — app.js?v=71", /v=71/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался konspekt-v71", keys.length === 1 && keys[0] === "konspekt-v71", keys);
   check("PWA: после обновления — статус с сервера (экран «Пробный период завершён»)", (await text(page)).includes("Пробный период завершён"));
   check("PWA: личный конспект сохранён", await page.evaluate(() => Object.values(localStorage).some((v) => v.includes("Мой конспект по биологии"))));
   await ctx.close();
