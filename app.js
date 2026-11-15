@@ -550,10 +550,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=68";
+        css.href = "./owner.css?v=69";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=68";
+        js.src = "./js/owner.js?v=69";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -1177,7 +1177,7 @@
       '<h3 class="pf-h">Конспект по фотографиям</h3><ol class="pf-card info-steps">' +
       steps.map((s, i) => '<li><span class="info-num">' + (i + 1) + "</span><div><b>" + esc(s[0]) + "</b><p>" + esc(s[1]) + "</p></div></li>").join("") +
       '</ol><p class="info-tip">' + icon("sparkle") + "<span>Снимай страницу целиком, ровно и при хорошем свете — так текст прочитается точнее.</span></p>" +
-      '<h3 class="pf-h">Библиотека</h3><div class="pf-card info-text"><p>Готовые конспекты по учебникам: вкладка «Библиотека» → класс → предмет → учебник → параграф. Сейчас там история и физика за 8 класс.</p>' +
+      '<h3 class="pf-h">Библиотека</h3><div class="pf-card info-text"><p>Готовые конспекты по учебникам: вкладка «Библиотека» → класс → предмет → учебник → параграф. Сейчас там история за 7 и 8 класс и физика за 8 класс.</p>' +
       "<p>Свои конспекты — в разделе «Я» → «Конспекты». Через «⋯» у конспекта его можно добавить в закладку, переименовать или удалить.</p></div>" +
       '<h3 class="pf-h">Частые вопросы</h3><div class="pf-card info-faq">' +
       faq.map((q) => "<details><summary>" + esc(q[0]) + '<span class="chev">' + icon("chev") + "</span></summary><p>" + esc(q[1]) + "</p></details>").join("") +

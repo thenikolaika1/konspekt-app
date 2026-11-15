@@ -40,6 +40,222 @@
    "title": "История",
    "books": [
     {
+     "id": "history-7",
+     "title": "История Нового времени. Конец XV — XVII в.",
+     "authors": "В. Р. Мединский, А. О. Чубарьян",
+     "publisher": "Просвещение",
+     "edition": "2025",
+     "grade": "7",
+     "paragraphs": [
+      {
+       "id": "history-7-intro",
+       "number": "",
+       "order": 1,
+       "title": "Введение. Что такое Новое время",
+       "ready": true
+      },
+      {
+       "id": "history-7-p1",
+       "number": "1",
+       "order": 10,
+       "chapter": "Глава I. Эпоха Великих географических открытий",
+       "title": "Мир на заре Нового времени",
+       "ready": true
+      },
+      {
+       "id": "history-7-p2",
+       "number": "2",
+       "order": 20,
+       "chapter": "Глава I. Эпоха Великих географических открытий",
+       "title": "Великие географические открытия",
+       "ready": true
+      },
+      {
+       "id": "history-7-p3",
+       "number": "3",
+       "order": 30,
+       "chapter": "Глава I. Эпоха Великих географических открытий",
+       "title": "Колониальные империи раннего Нового времени",
+       "ready": true
+      },
+      {
+       "id": "history-7-chapter-1-summary",
+       "number": "",
+       "order": 35,
+       "chapter": "Глава I. Эпоха Великих географических открытий",
+       "title": "Итоги главы I. Главное по главе",
+       "ready": true
+      },
+      {
+       "id": "history-7-p4",
+       "number": "4",
+       "order": 40,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Сельский и городской мир в эпоху зарождения капитализма",
+       "ready": true
+      },
+      {
+       "id": "history-7-p5",
+       "number": "5",
+       "order": 50,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Человек, общество, государство",
+       "ready": true
+      },
+      {
+       "id": "history-7-p6",
+       "number": "6",
+       "order": 60,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Реформация и Контрреформация",
+       "ready": true
+      },
+      {
+       "id": "history-7-p7",
+       "number": "7",
+       "order": 70,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Германские земли и держава австрийских Габсбургов",
+       "ready": true
+      },
+      {
+       "id": "history-7-p8",
+       "number": "8",
+       "order": 80,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Испанская монархия",
+       "ready": true
+      },
+      {
+       "id": "history-7-p9",
+       "number": "9",
+       "order": 90,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Нидерланды: путь к расцвету",
+       "ready": true
+      },
+      {
+       "id": "history-7-p10",
+       "number": "10",
+       "order": 100,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Франция: становление абсолютизма",
+       "ready": true
+      },
+      {
+       "id": "history-7-p11",
+       "number": "11",
+       "order": 110,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Англия в XVI — начале XVII в.",
+       "ready": true
+      },
+      {
+       "id": "history-7-p12",
+       "number": "12",
+       "order": 120,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Век революций в Англии",
+       "ready": true
+      },
+      {
+       "id": "history-7-p13",
+       "number": "13",
+       "order": 130,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Сила и слабость Речи Посполитой",
+       "ready": true
+      },
+      {
+       "id": "history-7-p14-15",
+       "number": "14–15",
+       "order": 140,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Международные отношения в XVI–XVII вв.",
+       "ready": true
+      },
+      {
+       "id": "history-7-p16-17",
+       "number": "16–17",
+       "order": 160,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Культура эпохи Возрождения",
+       "ready": true
+      },
+      {
+       "id": "history-7-p18",
+       "number": "18",
+       "order": 180,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Культура XVII в.: барокко и классицизм",
+       "ready": true
+      },
+      {
+       "id": "history-7-p19",
+       "number": "19",
+       "order": 190,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Научная революция",
+       "ready": true
+      },
+      {
+       "id": "history-7-chapter-2-summary",
+       "number": "",
+       "order": 195,
+       "chapter": "Глава II. Европа в XVI–XVII вв.: традиции и новизна",
+       "title": "Итоги главы II. Главное по главе",
+       "ready": true
+      },
+      {
+       "id": "history-7-p20",
+       "number": "20",
+       "order": 200,
+       "chapter": "Глава III. Страны Азии и Африки в XVI–XVII вв.",
+       "title": "Османская империя и Иран: могущество и упадок",
+       "ready": true
+      },
+      {
+       "id": "history-7-p21",
+       "number": "21",
+       "order": 210,
+       "chapter": "Глава III. Страны Азии и Африки в XVI–XVII вв.",
+       "title": "Индия в эпоху Великих Моголов",
+       "ready": true
+      },
+      {
+       "id": "history-7-p22",
+       "number": "22",
+       "order": 220,
+       "chapter": "Глава III. Страны Азии и Африки в XVI–XVII вв.",
+       "title": "Китай и Япония: в поисках стабильности",
+       "ready": true
+      },
+      {
+       "id": "history-7-p23",
+       "number": "23",
+       "order": 230,
+       "chapter": "Глава III. Страны Азии и Африки в XVI–XVII вв.",
+       "title": "Африка: разные судьбы государств и народов",
+       "ready": true
+      },
+      {
+       "id": "history-7-chapter-3-summary",
+       "number": "",
+       "order": 235,
+       "chapter": "Глава III. Страны Азии и Африки в XVI–XVII вв.",
+       "title": "Итоги главы III. Главное по главе",
+       "ready": true
+      },
+      {
+       "id": "history-7-conclusion",
+       "number": "",
+       "order": 600,
+       "title": "Заключение. Мир к концу XVII века",
+       "ready": true
+      }
+     ]
+    },
+    {
      "id": "history-8",
      "title": "История Нового времени. XVIII — начало XIX в.",
      "authors": "В. Р. Мединский, А. О. Чубарьян",
