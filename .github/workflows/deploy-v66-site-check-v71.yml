@@ -1,0 +1,134 @@
+# Проверка опубликованного сайта v71 (только чтение): GitHub Pages отдаёт v71 (service worker konspekt-v71),
+# опубликованные файлы побайтно совпадают с main 4af0e47, приложение открывается в Chromium без ошибок JavaScript,
+# новый учебник «Физика. Инженеры будущего. 7 класс. Часть 1»: 47 материалов, 4 главы, навигация и открытие конспектов,
+# прежняя библиотека на месте. Ничего не меняет; входа нет, ИИ не вызывается, тексты не скачиваются.
+name: Site check v71 (read-only)
+
+on:
+  push:
+    branches: [deploy/v66]
+    paths: [.github/workflows/deploy-v66-site-check-v71.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SITE: https://thenikolaika1.github.io/konspekt-app/
+      MAIN_SHA: 4af0e47e912706c8165c3b4bd3e0e0e3e152c4cb
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          path: main
+
+      - name: 1. Pages serves v71 (index, service worker)
+        run: |
+          for i in $(seq 1 20); do
+            curl -fsS -H 'Cache-Control: no-cache' "$SITE?nocache=$(date +%s)" -o index.html && grep -q 'app.js?v=71"' index.html && break
+            echo "waiting for Pages… ($i)"; sleep 15
+          done
+          grep -q 'app.js?v=71"' index.html
+          echo "index.html: $(grep -o 'app.js?v=[0-9]*' index.html | head -1), files ?v=71: $(grep -o '?v=71' index.html | wc -l), other ?v=: $(grep -oE '\?v=[0-9]+' index.html | grep -vc '?v=71')"
+          test "$(grep -oE '\?v=[0-9]+' index.html | grep -vc '?v=71')" = "0"
+          curl -fsS "${SITE}service-worker.js?nocache=$(date +%s)" -o sw.js
+          grep -q 'const VERSION = "konspekt-v71"' sw.js && echo "service-worker.js: konspekt-v71"
+
+      - name: 1b. Published files are byte-identical to main
+        run: |
+          cd main
+          bad=0
+          for f in index.html app.js styles.css owner.css service-worker.js manifest.json js/*.js; do
+            curl -fsS "${SITE}${f}?v=71&nocache=$(date +%s)" -o /tmp/pub.bin || { echo "HTTP error: $f"; bad=1; continue; }
+            if cmp -s /tmp/pub.bin "$f"; then echo "same: $f"; else echo "DIFFERENT: $f"; bad=1; fi
+          done
+          test "$bad" = "0"
+
+      - name: 1c. Published catalog — physics-7-engineers-1 with 47 materials, old books unchanged
+        run: |
+          cd main
+          node -e '
+            const fs = require("fs"), vm = require("vm");
+            const ctx = vm.createContext({ console: { warn() {}, log() {} } }); ctx.window = ctx;
+            for (const f of ["js/study-content.js", "js/library.js", "js/library-index.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+            const lib = ctx.K.library, b = lib.book("physics", "physics-7-engineers-1");
+            const chapters = new Set(b.paragraphs.map((p) => p.chapter).filter(Boolean));
+            const books = lib.subjects().map((s) => s.id + ": " + s.books.map((x) => x.id + "=" + x.paragraphs.length + "(grade " + x.grade + ")").join(", "));
+            console.log(books.join("\n"));
+            console.log("physics-7-engineers-1:", b.title, "|", b.authors, "| grade", b.grade, "| materials", b.paragraphs.length, "| chapters", chapters.size);
+            if (b.paragraphs.length !== 47 || chapters.size !== 4 || String(b.grade) !== "7" || !b.paragraphs.every((p) => p.ready)) process.exit(1);
+            if (lib.book("history", "history-rus-8").paragraphs.length !== 42) process.exit(1);
+            if (lib.book("history", "history-7").paragraphs.length !== 26) process.exit(1);
+            if (lib.books("history", "7").map((x) => x.id).join() !== "history-7,history-rus-7") process.exit(1);
+            if (lib.book("history", "history-rus-7").paragraphs.length !== 34) process.exit(1);
+            if (lib.books("physics", "8").map((x) => x.id + "=" + x.paragraphs.length).join() !== "physics-8-engineers-1=51,physics-8-peryshkin=62") process.exit(1);
+            if (lib.subjectsIn("7").map((s) => s.id).join() !== "history,physics") process.exit(1);
+            if (lib.book("history", "history-8").paragraphs.length !== 26) process.exit(1);
+            if (lib.readyCount({ subjectId: "history" }) + lib.readyCount({ subjectId: "physics" }) !== 288) process.exit(1);
+            console.log("catalog OK");'
+
+      - name: 2. Install Chromium
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+
+      - name: 3. Real site in Chromium — opens, no JS errors, service worker konspekt-v71
+        run: |
+          cd /tmp/pw
+          cat > check.js <<'JS'
+          const { chromium } = require("playwright");
+          (async () => {
+            const b = await chromium.launch();
+            const errors = [];
+            for (const [name, vp, mobile] of [["iphone", { width: 390, height: 844 }, true], ["desktop", { width: 1280, height: 860 }, false]]) {
+              const ctx = await b.newContext({ viewport: vp, isMobile: mobile, hasTouch: mobile, locale: "ru-RU" });
+              const p = await ctx.newPage();
+              p.on("pageerror", (e) => errors.push(name + " pageerror: " + String(e).slice(0, 200)));
+              p.on("console", (m) => { if (m.type() === "error") errors.push(name + " console: " + m.text().slice(0, 200)); });
+              await p.goto(process.env.SITE, { waitUntil: "load" });
+              await p.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.controller, null, { timeout: 20000 }).catch(() => {});
+              await p.reload({ waitUntil: "load" });
+              await p.waitForTimeout(3000);
+              const info = await p.evaluate(async () => ({
+                build: ([...document.scripts].map((s) => s.src).find((s) => s.includes("app.js")) || "").split("?")[1],
+                sw: !!navigator.serviceWorker.controller,
+                caches: await caches.keys(),
+                appChildren: document.querySelector("#app")?.children.length || 0,
+                lib: (window.K && window.K.library && window.K.library.book("physics", "physics-7-engineers-1")?.paragraphs.length) || 0,
+              }));
+              console.log(name, JSON.stringify(info));
+              if (info.build !== "v=71") errors.push(name + ": build " + info.build);
+              if (!info.sw) errors.push(name + ": service worker not controlling");
+              if (info.caches.join() !== "konspekt-v71") errors.push(name + ": caches " + info.caches.join());
+              if (!info.appChildren) errors.push(name + ": app did not render");
+              if (info.lib !== 47) errors.push(name + ": physics-7-engineers-1 materials " + info.lib);
+              await p.screenshot({ path: "/tmp/pw/site-" + name + ".png" });
+              await ctx.close();
+            }
+            await b.close();
+            const real = errors.filter((e) => !/Failed to load resource/.test(e));
+            errors.filter((e) => /Failed to load resource/.test(e)).forEach((e) => console.log("info:", e));
+            if (real.length) { console.log("ERRORS:\n" + real.join("\n")); process.exit(1); }
+            console.log("SITE OK: v71, service worker konspekt-v71, 47 materials in physics-7-engineers-1, no JS errors");
+          })().catch((e) => { console.log("ERROR " + e); process.exit(2); });
+          JS
+          SITE="$SITE" node check.js
+
+      - name: 4. Library UI on the published files — physics-7-engineers-1, 4 chapters, navigation, opening notes, old library
+        run: |
+          cd main
+          PLAYWRIGHT_MODULE=/tmp/pw/node_modules/playwright SHOTS_DIR=/tmp/pw/v71 node tests/v71/physics-7.test.js | tee /tmp/pw/v71.log
+          grep -q ', 0 FAIL' /tmp/pw/v71.log
+
+      - name: 5. Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-v71-screenshots
+          path: |
+            /tmp/pw/*.png
+            /tmp/pw/v71/*.png
+          retention-days: 14
+          if-no-files-found: ignore
