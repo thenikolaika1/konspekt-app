@@ -1,0 +1,128 @@
+/*
+ * Konspekt by NK — v72: компьютер (окно от 1024 px).
+ * Все правила — внутри @media (min-width:1024px): телефон и узкое окно выглядят как раньше.
+ * Нижняя панель становится боковой (app.js оставляет её и на экранах чтения/камеры), экран занимает
+ * свободную ширину с разумным пределом, длинный текст — колонка комфортной ширины, оглавление рядом.
+ */
+.d-only,.drop-hint,.tab-brand{display:none}
+.tab.tab-install{display:none!important}
+
+@media (min-width:1024px){
+  :root{--side:248px;--desk-max:1120px;--desk-pad:40px}
+  html,body{background:#f3f6fb}
+  .m-only{display:none!important}
+  .d-only{display:inline}
+
+  /* ---------- боковая панель ---------- */
+  .tabbar{left:0;top:0;bottom:0;right:auto;transform:none;width:var(--side);display:flex;flex-direction:column;align-items:stretch;gap:4px;
+    padding:22px 14px 24px;border-top:0;border-right:1px solid #e3e9f3;background:rgba(255,255,255,.92);box-shadow:none;will-change:auto}
+  .tab-brand{display:block;padding:4px 10px 22px}
+  .tab-brand .brand{font-size:24px}
+  .tab{flex-direction:row;justify-content:flex-start;gap:12px;padding:6px 10px 6px 6px;border-radius:14px;font-size:15px;line-height:20px;font-weight:700;color:#55617a;text-align:left}
+  .tab .tab-ico{width:40px;height:36px;border-radius:12px;background:transparent}
+  .tab.active{color:var(--blue);background:#eaf3ff}
+  .tab.active .tab-ico{background:transparent}
+  .tab:hover{background:#f2f6fc;color:var(--navy)}
+  .tab.active:hover{background:#e2eeff;color:var(--blue)}
+  .tab:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  .tab .ui-icon{width:22px;height:22px}
+  .tab.tab-install:not([hidden]){display:flex!important;margin-top:auto;border:1px solid #d6e4f7;background:#f7fbff;color:var(--blue);font-size:14px}
+  .tab.tab-install:not([hidden]):hover{background:#eaf3ff}
+
+  /* ---------- рабочая область ---------- */
+  .app{width:min(calc(100vw - 48px),560px);margin:24px auto;min-height:calc(100vh - 48px);border-radius:28px;box-shadow:0 18px 60px rgba(20,28,64,.08)}
+  body.has-tabbar .app{width:min(calc(100vw - var(--side) - 2 * var(--desk-pad)),var(--desk-max));
+    margin:0 0 0 calc(var(--side) + max(var(--desk-pad),(100vw - var(--side) - var(--desk-max)) / 2));
+    min-height:100vh;border-radius:0;box-shadow:none;background:transparent;padding:28px 0 64px;overflow:visible}
+  body.has-tabbar .app.scr-camera{padding-top:20px}
+  .fab{right:40px;bottom:36px}
+
+  /* заголовки экранов */
+  body.has-tabbar .top{height:72px}
+  body.has-tabbar .section-row h2{font-size:22px}
+
+  /* ---------- главная ---------- */
+  body.has-tabbar .scr-home{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:28px;align-content:start}
+  body.has-tabbar .scr-home > *{grid-column:1 / -1}
+  body.has-tabbar .scr-home .hero{margin-top:18px}
+  body.has-tabbar .scr-home .note-list{grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+  body.has-tabbar .bookmarks{flex-wrap:wrap;overflow:visible;justify-content:flex-start;gap:14px 22px}
+  body.has-tabbar .bookmarks .bm{flex:0 0 84px}
+  body.has-tabbar .scr-home > .home-kicker{justify-self:start}
+
+  /* ---------- библиотека ---------- */
+  body.has-tabbar .lib-list{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+  body.has-tabbar .scr-library-subject .lib-list,body.has-tabbar .scr-library-grade .lib-list{grid-template-columns:repeat(auto-fill,minmax(460px,1fr))}
+  body.has-tabbar .lib-pars{grid-template-columns:repeat(auto-fill,minmax(400px,1fr));column-gap:14px}
+  body.has-tabbar .lib-book-hero{margin-bottom:16px}
+  .lib-coll,.lib-book,.lib-grade,.lib-par,.pf-tile,.note-card,.bm{transition:box-shadow .18s ease,border-color .18s ease,transform .18s ease}
+  .lib-coll:hover,.lib-book:hover,.lib-grade:hover,.lib-par:hover,.pf-tile:hover,.note-card:hover{box-shadow:0 10px 26px rgba(20,40,90,.10);border-color:#cfdcf0}
+  .lib-par:focus-visible,.lib-book:focus-visible,.lib-coll:focus-visible,.note-card:focus-visible,.bm:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  button{cursor:pointer}
+  button:disabled{cursor:default}
+
+  /* ---------- чтение: оглавление слева, текст — колонка до 760 px ---------- */
+  body.has-tabbar .app.note-view{--desk-max:1180px}
+  .note-view .note-bar{position:sticky;top:0;z-index:5;margin:0 0 6px;padding:10px 0;background:linear-gradient(180deg,#f3f6fb 70%,rgba(243,246,251,0))}
+  .note-view .cn-doc{max-width:860px;margin:0 auto}
+  .note-view:not(:has(.lr-toc)) .note-bar{max-width:860px;margin-left:auto;margin-right:auto}
+  .note-view .cn-doc:has(> .lr-toc){max-width:none;display:grid;grid-template-columns:280px minmax(0,760px);column-gap:32px;align-items:start;justify-content:center}
+  .note-view .cn-doc > *{grid-column:1 / -1}
+  .note-view .cn-doc > .lr-hero{grid-column:1 / -1;margin-top:0}
+  .note-view .cn-doc > .lr-toc{grid-column:1;grid-row:2;position:sticky;top:76px;max-height:calc(100vh - 96px);overflow:auto;margin:0}
+  .note-view .cn-doc > .cn-body{grid-column:2;grid-row:2;min-width:0}
+  .note-view .cn-body{font-size:17px;line-height:1.6}
+  .note-view .cn-h2{font-size:22px}
+  .note-view .table-wrap{overflow-x:auto}
+  .note-view .table-wrap table{min-width:100%}
+  .note-view .formula{font-size:22px}
+  .to-top{right:40px!important;bottom:36px!important}
+
+  /* ---------- камера: на компьютере — место для фото с компьютера ---------- */
+  body.has-tabbar .app.scr-camera{--desk-max:920px}
+  .scr-camera .viewfinder{height:clamp(380px,calc(100vh - 330px),640px);min-height:0;border-radius:24px}
+  .scr-camera .camera-bottom{margin-top:-20px;border-radius:24px}
+  .scr-camera .viewfinder{padding-bottom:20px}
+  .scr-camera .viewfinder > .fake-page,.scr-camera .viewfinder > .guide,.scr-camera .viewfinder > .hint:not(:has(+ .preview-actions)){display:none}
+  .scr-camera .drop-hint{display:flex;flex-direction:column;align-items:center;gap:10px;position:relative;z-index:2;max-width:460px;padding:36px 32px;
+    border:2px dashed #9db8dc;border-radius:22px;background:rgba(255,255,255,.72);color:var(--navy);text-align:center;box-shadow:0 12px 30px rgba(20,40,90,.08)}
+  .scr-camera .drop-hint .ui-icon{color:var(--blue)}
+  .scr-camera .drop-hint span{color:var(--muted)}
+  .scr-camera .drop-hint .ui-icon{width:40px;height:40px}
+  .scr-camera .drop-hint b{font-size:19px}
+  .scr-camera .drop-hint span{font-size:14px;opacity:.9}
+  .scr-camera .drop-hint .drop-pick{margin-top:8px;width:auto;padding:12px 26px}
+  .scr-camera.drop-over .viewfinder{outline:3px solid var(--blue);outline-offset:-3px}
+  .scr-camera.drop-over .drop-hint{background:#eaf3ff;border-color:var(--blue)}
+  .scr-camera .shutter{display:none}
+  .scr-camera .camera-actions{grid-template-columns:auto minmax(0,1fr);align-items:center;max-width:640px;margin-left:auto;margin-right:auto}
+  .scr-camera .camera-actions .primary{grid-column:2;grid-row:1}
+  .scr-camera .shot-preview{max-height:calc(100% - 56px);max-width:calc(100% - 48px);object-fit:contain}
+
+  /* ---------- профиль, тарифы, списки ---------- */
+  body.has-tabbar .pf-tiles{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  body.has-tabbar .plan-list{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+  body.has-tabbar .scr-profile,body.has-tabbar .scr-tariffs,body.has-tabbar .scr-help,body.has-tabbar .scr-about,body.has-tabbar .scr-login,body.has-tabbar .scr-register{--desk-max:860px}
+  body.has-tabbar .scr-all-notes .note-list,body.has-tabbar .scr-bookmark .note-list{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+
+  /* экран «доступ закончился» и вход — не шире формы */
+  body.has-tabbar .app.ended-screen,body.has-tabbar .app:has(.ended-actions){--desk-max:760px}
+  .app.scr-login,.app.scr-register{min-height:0;margin-top:10vh}
+
+  /* ---------- листы и окна: по центру экрана, а не снизу ---------- */
+  .overlay{align-items:center;padding:24px}
+  .sheet{width:min(100%,520px);border-radius:24px;padding:14px 24px 24px;max-height:calc(100vh - 48px);overflow:auto;box-shadow:0 24px 70px rgba(16,24,52,.22)}
+  .overlay .sheet{animation-name:modal-in}
+  .sheet .grab{display:none}
+  .overlay.modal-wrap{align-items:center;padding-top:24px}
+}
+
+@media (min-width:1024px) and (max-width:1279px){
+  :root{--side:216px;--desk-pad:28px}
+  .note-view .cn-doc{grid-template-columns:240px minmax(0,1fr);column-gap:24px}
+}
+
+@media (min-width:1800px){
+  :root{--desk-max:1280px}
+  .note-view .cn-doc{grid-template-columns:300px minmax(0,800px)}
+}

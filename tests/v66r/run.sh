@@ -17,10 +17,10 @@ A=$(trace "../../supabase/functions/analyze-pages"); B=$(trace "file://$V33/supa
 node tests/v66r/protect.test.js
 node tests/v66r/camera-4.test.js
 node tests/v66r/renewal.test.js
-# v71: обновление PWA v70 → v71 под service worker: v70 — из git (ce4abbd, production 15.11.2026), без сети сразу после обновления и после запуска с сетью
-V70=$(mktemp -d); git -C "$ROOT" archive ce4abbd | tar -x -C "$V70"
-node tests/v66r/sw-update.test.js "$V70" "$ROOT" 70 71 immediate
-node tests/v66r/sw-update.test.js "$V70" "$ROOT" 70 71 relaunch
-node tests/v66r/sw-edge.test.js "$V70" "$ROOT"
+# v72: обновление PWA v71 → v72 под service worker: v71 — из git (4af0e47, production 15.11.2026), без сети сразу после обновления и после запуска с сетью
+V71=$(mktemp -d); git -C "$ROOT" archive 4af0e47 | tar -x -C "$V71"
+node tests/v66r/sw-update.test.js "$V71" "$ROOT" 71 72 immediate
+node tests/v66r/sw-update.test.js "$V71" "$ROOT" 71 72 relaunch
+node tests/v66r/sw-edge.test.js "$V71" "$ROOT"
 bash tests/v66r/rate-limit.test.sh
 bash tests/v66r/owner-tech-limit.test.sh
