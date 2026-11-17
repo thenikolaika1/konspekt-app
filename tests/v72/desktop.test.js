@@ -190,8 +190,8 @@ const pngSize = (f) => { const b = fs.readFileSync(path.join(ROOT, f)); return b
   {
     const { ctx, page, errors } = await open(P(), { width: 1440, height: 900 });
     await click(page, "[data-note-menu]");
-    const sh = await page.evaluate(() => { const s = document.querySelector(".overlay .sheet")?.getBoundingClientRect(); return s && { top: Math.round(s.top), bottom: Math.round(s.bottom), w: Math.round(s.width), cx: Math.round(s.left + s.width / 2) }; });
-    check("[1440] меню конспекта — окно по центру экрана, а не лист снизу", sh && sh.bottom < 900 - 20 && sh.top > 20 && sh.w <= 520 && Math.abs(sh.cx - 720) < 4, sh);
+    const sh = await page.evaluate(() => { const s = document.querySelector(".overlay .sheet")?.getBoundingClientRect(); return s && { top: Math.round(s.top), bottom: Math.round(s.bottom), w: Math.round(s.width), cx: Math.round(s.left + s.width / 2), mid: Math.round((({ left, width }) => left + width / 2)(document.querySelector(".overlay").getBoundingClientRect())) }; });
+    check("[1440] меню конспекта — окно по центру экрана, а не лист снизу", sh && sh.bottom < 900 - 20 && sh.top > 20 && sh.w <= 520 && Math.abs(sh.cx - sh.mid) < 4, sh); // по центру видимой области (без места под полосу прокрутки — оно зарезервировано, v72.1)
     await page.screenshot({ path: path.join(SHOTS, "1440-menu.png") });
     await page.keyboard.press("Escape");
     await page.waitForTimeout(500);
