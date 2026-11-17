@@ -551,10 +551,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=72";
+        css.href = "./owner.css?v=73";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=72";
+        js.src = "./js/owner.js?v=73";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -1486,7 +1486,15 @@
     },
   };
 
+  // v72.1: на компьютере экран не «перелистывается» (сдвиг ±28 px и двойной слой — мобильный жест): боковая панель
+  // и заголовки стоят на месте, новый экран только коротко проявляется поверх того же места
+  const DESK_IN = [{ opacity: 0.55 }, { opacity: 1 }];
   function animateScreens(el, ghost, dir) {
+    if (desk()) {
+      ghost?.remove();
+      el.animate(DESK_IN, { duration: 140, easing: EASE_OUT });
+      return;
+    }
     const cam = CAMERA_MOTION[dir];
     if (cam) {
       el.animate(cam.in, { duration: cam.inMs, easing: EASE_OUT });
@@ -1512,7 +1520,7 @@
     [[".top", ".home-kicker"], [".section-row", ".bookmarks", ".hero"], [".hero + .section-row", ".note-list", ".empty"]].forEach((group, i) =>
       group.forEach((sel) => {
         const e = el.querySelector(sel);
-        e?.animate([{ opacity: 0, transform: "translate3d(0,8px,0)" }, { opacity: 1, transform: "none" }], { duration: 320, delay: i * 40, easing: EASE_OUT, fill: "backwards" });
+        e?.animate(desk() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translate3d(0,8px,0)" }, { opacity: 1, transform: "none" }], { duration: desk() ? 200 : 320, delay: i * 40, easing: EASE_OUT, fill: "backwards" });
       }),
     );
   }
@@ -1523,7 +1531,7 @@
     ov.setAttribute("aria-hidden", "true");
     ov.removeAttribute("data-backdrop");
     const panel = ov.querySelector(".sheet, .modal");
-    const isModal = !!ov.querySelector(".modal");
+    const isModal = !!ov.querySelector(".modal") || desk(); // на компьютере лист — окно по центру: уходит так же, как появился (v72.1)
     const done = () => ov.remove();
     if (calm() || !panel) return done();
     const fromY = closeFromY ?? 0;
@@ -1667,7 +1675,7 @@
     // экран: пересоздаём только если он изменился
     if (dir || html !== lastScreenHtml || !oldScreen) {
       const el = fromHtml(html);
-      const ghost = dir && oldScreen && S.screen !== "splash" ? ghostOf(oldScreen) : null;
+      const ghost = dir && !desk() && oldScreen && S.screen !== "splash" ? ghostOf(oldScreen) : null;
       if (oldScreen && !ghost) oldScreen.remove();
       root.querySelector(":scope > .fab-layer")?.remove();
       root.prepend(el);

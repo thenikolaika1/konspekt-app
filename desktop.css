@@ -10,6 +10,8 @@
 @media (min-width:1024px){
   :root{--side:248px;--desk-max:1120px;--desk-pad:40px}
   html,body{background:#f3f6fb}
+  /* место под полосу прокрутки (Windows) зарезервировано всегда: короткий и длинный экран не сдвигают раскладку (v72.1) */
+  html{scrollbar-gutter:stable}
   .m-only{display:none!important}
   .d-only{display:inline}
 
@@ -65,7 +67,9 @@
   body.has-tabbar .app.note-view{--desk-max:1180px}
   .note-view .note-bar{position:sticky;top:0;z-index:5;margin:0 0 6px;padding:10px 0;background:linear-gradient(180deg,#f3f6fb 70%,rgba(243,246,251,0))}
   .note-view .cn-doc{max-width:860px;margin:0 auto}
-  .note-view:not(:has(.lr-toc)) .note-bar{max-width:860px;margin-left:auto;margin-right:auto}
+  /* своя заметка без оглавления — панель над колонкой текста; у параграфа библиотеки панель всегда во всю ширину,
+     и пока текст загружается, и после — «Назад» и название не перескакивают (v72.1) */
+  .note-view:not(.lib-note):not(:has(.lr-toc)) .note-bar{max-width:860px;margin-left:auto;margin-right:auto}
   .note-view .cn-doc:has(> .lr-toc){max-width:none;display:grid;grid-template-columns:280px minmax(0,760px);column-gap:32px;align-items:start;justify-content:center}
   .note-view .cn-doc > *{grid-column:1 / -1}
   .note-view .cn-doc > .lr-hero{grid-column:1 / -1;margin-top:0}
