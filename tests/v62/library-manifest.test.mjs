@@ -44,9 +44,22 @@ for (const s of cat.subjects) for (const b of s.books || []) for (const p of b.p
 // v72: после v62 библиотека пополнялась (v64, v68–v71) — у каждого учебника свой манифест; «готовые» в каталоге
 // сверяются с объединением всех манифестов выпусков, а не только с 77 параграфами v62
 const relDir = path.join(ROOT, "supabase/release");
-const allRows = readdirSync(relDir).filter((f) => /^v\d+-.*manifest\.tsv$/.test(f)).sort()
-  .flatMap((f) => readFileSync(path.join(relDir, f), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((l) => l.split("\t")));
-check("M4. манифесты всех выпусков: без повторов, v62 входит целиком", [new Set(allRows.map(key)).size === allRows.length, rows.every((r) => allRows.some((a) => key(a) === key(r)))], [true, true]);
+// выпуски по номеру (v62 < v64 < … < v74); манифест «поправок» (v74 и далее) заменяет суммы уже выпущенных параграфов
+const relFiles = readdirSync(relDir).filter((f) => /^v\d+-.*manifest\.tsv$/.test(f)).sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)) || a.localeCompare(b));
+const rowsOf = (f) => readFileSync(path.join(relDir, f), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((l) => l.split("\t"));
+const latest = new Map(), dupInOne = [], newInPatch = [];
+for (const f of relFiles) {
+  const rs = rowsOf(f), patch = parseInt(f.slice(1)) >= 74;
+  if (new Set(rs.map(key)).size !== rs.length) dupInOne.push(f);
+  for (const r of rs) { if (patch && !latest.has(key(r))) newInPatch.push(key(r)); latest.set(key(r), r); }
+}
+const allRows = [...latest.values()];
+check("M4. манифесты выпусков: внутри файла без повторов, v62 входит целиком; поправки (v74+) только к уже выпущенным параграфам",
+  [dupInOne, rows.every((r) => latest.has(key(r))), newInPatch], [[], true, []]);
+const v74 = relFiles.includes("v74-grade8-format-manifest.tsv") ? rowsOf("v74-grade8-format-manifest.tsv") : [];
+check("M4. v74: 181 параграф 8 класса (history-8 26, history-rus-8 42, physics-8-engineers-1 51, physics-8-peryshkin 62), sha256 из 64 hex",
+  [v74.length, ["history-8", "history-rus-8", "physics-8-engineers-1", "physics-8-peryshkin"].map((b) => v74.filter((r) => r[1] === b).length), v74.every((r) => r.length === 4 && /^[0-9a-f]{64}$/.test(r[3]))],
+  [181, [26, 42, 51, 62], true]);
 const man = new Set(allRows.map(key));
 check("M4. «готовые» в каталоге = ровно параграфы манифестов (ни лишних, ни пропущенных)",
   [ready.filter((k) => !man.has(k)), [...man].filter((k) => !ready.includes(k))], [[], []]);
