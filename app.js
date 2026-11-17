@@ -65,6 +65,7 @@
       home: '<path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6.5H9V21H4.5a1 1 0 0 1-1-1z"/>',
       dots: '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>',
       doc: '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/>',
+      install: '<path d="M12 3v11m-4.5-4.5L12 14l4.5-4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
       gallery: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 5"/>',
       back: '<path d="M20 12H4M10 6l-6 6 6 6"/>',
       close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -550,10 +551,10 @@
       new Promise((resolve, reject) => {
         const css = document.createElement("link");
         css.rel = "stylesheet";
-        css.href = "./owner.css?v=71";
+        css.href = "./owner.css?v=72";
         document.head.appendChild(css);
         const js = document.createElement("script");
-        js.src = "./js/owner.js?v=71";
+        js.src = "./js/owner.js?v=72";
         js.onload = resolve;
         js.onerror = () => {
           ownerLoad = null;
@@ -959,7 +960,10 @@
       ? '<img class="shot-preview" src="' + sel.url + '" alt="Страница ' + (S.selectedPage + 1) + '"><div class="hint">Страница ' +
         (S.selectedPage + 1) + " из " + n + '</div><div class="preview-actions"><button data-retake="' + S.selectedPage +
         '">Переснять</button><button data-remove-page="' + S.selectedPage + '">Удалить</button></div>'
-      : '<div class="fake-page">' + window.K.demoPage.render("history") + '</div><div class="guide"></div><div class="hint">Помести страницу в кадр</div>';
+      : '<div class="fake-page">' + window.K.demoPage.render("history") + '</div><div class="guide"></div><div class="hint">Помести страницу в кадр</div>' +
+        // v72: на ПК вместо видоискателя — место для фото с компьютера (перетащить, выбрать, вставить из буфера)
+        '<div class="drop-hint">' + icon("gallery") + "<b>Перетащите сюда фото страниц учебника</b><span>JPG, PNG или HEIC · до " + MAX_PAGES +
+        ' страниц · можно вставить скриншот: Ctrl+V</span><button class="primary drop-pick" data-gallery' + (canAdd ? "" : " disabled") + ">Выбрать файлы</button></div>";
     return (
       app("camera") +
       '<div class="screen-head"><button class="back" data-back aria-label="Закрыть">' + icon("close") +
@@ -980,7 +984,7 @@
       (S.pagesMessage ? '</div><div class="meta camera-message">' + esc(S.pagesMessage) : "") +
       '</div><div class="camera-actions"><div class="gallery-wrap"><button class="gallery" data-gallery aria-label="Галерея"' + (canAdd ? "" : " disabled") + ">" +
       icon("gallery") +
-      '</button><span>Галерея</span></div><button class="shutter" data-camera aria-label="Сфотографировать"' + (canAdd ? "" : " disabled") +
+      '</button><span class="m-only">Галерея</span><span class="d-only">Файлы</span></div><button class="shutter" data-camera aria-label="Сфотографировать"' + (canAdd ? "" : " disabled") +
       '></button><button class="primary" data-process ' + (!n || S.pagesLoading ? "disabled" : "") +
       ">" + icon("sparkle") + "Создать конспект</button></div></div></div>"
     );
@@ -1544,6 +1548,16 @@
   // экран → вкладка; null — общий экран (подсвечивается вкладка, из которой он открыт)
   const TAB_OF = { home: "home", library: "library", "library-grade": "library", "library-subject": "library", "library-book": "library", profile: "me", login: "me", register: "me", help: "me", about: "me", "all-notes": null, bookmarks: null, bookmark: null, tariffs: null };
   let tabbar = null;
+  // v72: ПК (окно от 1024 px) — нижняя панель становится боковой и остаётся на экранах чтения, камеры, конспектов:
+  // с любого экрана можно перейти в другой раздел. Телефон и узкое окно — как раньше.
+  const deskMQ = window.matchMedia ? window.matchMedia("(min-width: 1024px)") : { matches: false };
+  const desk = () => deskMQ.matches;
+  const NO_SIDEBAR = ["splash", "welcome", "credentials"];
+  let installEvent = null; // отложенное предложение установки (beforeinstallprompt), см. installApp
+  function syncInstall() {
+    const b = tabbar?.querySelector("[data-install]");
+    if (b) b.hidden = !installEvent || !desk();
+  }
 
   function currentTab() {
     if (!(S.screen in TAB_OF) || S.access.state === "none") return ""; // без раннего доступа — экран кода приглашения, как раньше
@@ -1553,7 +1567,7 @@
   }
 
   // отступ под панелью = её настоящая высота (вместе с safe-area), а не подобранное число
-  const syncTabbarHeight = () => tabbar && !tabbar.hidden && document.documentElement.style.setProperty("--tabbar-h", Math.ceil(tabbar.getBoundingClientRect().height) + "px");
+  const syncTabbarHeight = () => tabbar && !tabbar.hidden && document.documentElement.style.setProperty("--tabbar-h", (desk() ? 0 : Math.ceil(tabbar.getBoundingClientRect().height)) + "px");
   let tabbarAnim = null;
   let tabbarReady = false; // первый показ — без анимации
   function showTabbar(show) {
@@ -1563,7 +1577,7 @@
     tabbarAnim?.cancel();
     tabbarAnim = null;
     tabbar.classList.remove("leaving");
-    const moving = !calm() && tabbarReady;
+    const moving = !calm() && tabbarReady && !desk(); // боковая панель на ПК не выезжает снизу
     if (show) {
       tabbar.hidden = false;
       syncTabbarHeight();
@@ -1578,18 +1592,22 @@
   }
 
   function renderTabbar() {
-    const active = currentTab();
+    const own = currentTab();
+    const side = !own && desk() && S.access.state !== "none" && !NO_SIDEBAR.includes(S.screen);
+    const active = own || (side ? (/^(camera|processing)$/.test(S.screen) ? "photo" : S.tab || "home") : "");
     if (!tabbar) {
       tabbar = document.createElement("nav");
       tabbar.className = "tabbar";
       tabbar.hidden = true;
       tabbar.setAttribute("aria-label", "Разделы");
-      tabbar.innerHTML = TABS.map((t) => '<button class="tab" data-tab="' + t.id + '"><span class="tab-ico">' + icon(t.icon) + "</span><span>" + t.label + "</span></button>").join("");
+      tabbar.innerHTML = '<div class="tab-brand" aria-hidden="true">' + brand() + "</div>" + TABS.map((t) => '<button class="tab" data-tab="' + t.id + '"><span class="tab-ico">' + icon(t.icon) + "</span><span>" + t.label + "</span></button>").join("") +
+        '<button class="tab tab-install" data-install hidden><span class="tab-ico">' + icon("install") + "</span><span>Установить приложение</span></button>";
       root.append(tabbar);
       if (window.ResizeObserver) new ResizeObserver(syncTabbarHeight).observe(tabbar);
     }
-    showTabbar(!!active);
+    showTabbar(!!own || side);
     tabbarReady = true;
+    syncInstall();
     tabbar.querySelectorAll(".tab").forEach((b) => {
       const on = b.dataset.tab === active;
       b.classList.toggle("active", on);
@@ -2254,6 +2272,7 @@
     let x;
 
     if ((x = el("[data-backdrop]")) && t === x) return closeSheet();
+    if (el("[data-install]")) return installApp();
     if (el("[data-close]")) return closeSheet();
     if (el("[data-back]")) return back();
 
@@ -2539,6 +2558,8 @@
       nextNoteHit();
     }
     if (e.key === "Escape" && S.sheet) closeSheet();
+    // v72: на ПК Esc на экране чтения и в разделах библиотеки — «Назад»
+    else if (e.key === "Escape" && desk() && /^(note|library-(grade|subject|book|paragraph)|all-notes|tariffs)$/.test(S.screen) && !e.target.matches?.("input,textarea")) root.querySelector("[data-back]")?.click();
   }
 
   // Действия, которые меняют данные, выполняются один раз: повторное быстрое нажатие,
@@ -2608,6 +2629,71 @@
     addFiles(files);
     gallery.value = "";
   };
+
+  // v72: ПК — фото страниц можно перетащить в окно на экране «Новый конспект» или вставить из буфера (Ctrl+V).
+  // Дальше тот же путь, что у «Галереи» (addFiles: проверка числа страниц, сжатие). На других экранах брошенный файл
+  // не открывается вместо приложения.
+  const imageFiles = (list) => [...(list || [])].filter((f) => /^image\//.test(f.type) || /\.(heic|heif)$/i.test(f.name || ""));
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  const dropZone = (on) => root.querySelector(":scope > .scr-camera")?.classList.toggle("drop-over", on);
+  document.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const here = S.screen === "camera" && !S.sheet;
+    e.dataTransfer.dropEffect = here ? "copy" : "none";
+    if (here) dropZone(true);
+  });
+  document.addEventListener("dragleave", (e) => !e.relatedTarget && dropZone(false));
+  document.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone(false);
+    if (S.screen !== "camera" || S.sheet) return;
+    const files = imageFiles(e.dataTransfer.files);
+    S.replacePage = null;
+    S.pagesMessage = "";
+    if (!files.length) {
+      S.pagesMessage = "Можно добавить только фотографии или скриншоты страниц";
+      return render();
+    }
+    addFiles(files);
+  });
+  document.addEventListener("paste", (e) => {
+    if (S.screen !== "camera" || S.sheet || e.target.matches?.("input,textarea")) return;
+    const files = imageFiles(e.clipboardData?.files);
+    if (!files.length) return;
+    e.preventDefault();
+    S.replacePage = null;
+    S.pagesMessage = "";
+    addFiles(files);
+  });
+  // v72: установка на компьютер. Кнопка появляется только когда браузер сам предложил установку (Chrome, Edge —
+  // событие beforeinstallprompt) и только на ПК: на телефоне поведение браузера не меняется. Уже установленное
+  // приложение (отдельное окно) и браузеры без установки PWA кнопку не показывают — ничего не имитируем.
+  window.addEventListener("beforeinstallprompt", (e) => {
+    if (!desk()) return;
+    e.preventDefault();
+    installEvent = e;
+    syncInstall();
+  });
+  window.addEventListener("appinstalled", () => {
+    installEvent = null;
+    syncInstall();
+  });
+  async function installApp() {
+    const ev = installEvent;
+    if (!ev) return syncInstall();
+    installEvent = null;
+    syncInstall();
+    try {
+      await ev.prompt();
+      await ev.userChoice;
+    } catch (err) {
+      console.warn("[install]", err);
+    }
+  }
+  // окно стало шире или уже 1024 px — панель переходит между нижней и боковой
+  deskMQ.addEventListener?.("change", () => tabbar && (renderTabbar(), syncTabbarHeight(), syncInstall()));
 
   // вернулись в приложение — обновляем облачные конспекты (в том числе те, что создавались без нас)
   document.addEventListener("visibilitychange", () => {

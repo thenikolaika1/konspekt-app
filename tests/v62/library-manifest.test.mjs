@@ -2,7 +2,7 @@
 // v62: перенос 77 параграфов — согласованность публичного каталога (js/library-index.js) и манифеста контрольных сумм
 // (supabase/release/v62-library-manifest.tsv), и что закрытых текстов нет в публичных файлах. База не нужна.
 // Запуск: node tests/v62/library-manifest.test.mjs (из tests/v62/run.sh)
-import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -41,8 +41,14 @@ for (const s of cat.subjects) for (const b of s.books || []) for (const p of b.p
   if (p.ready) ready.push(k);
   if ("content" in p || "source" in p) extra.push(k);
 }
-const man = new Set(rows.map(key));
-check("M4. «готовые» в каталоге = ровно параграфы манифеста (ни лишних, ни пропущенных)",
+// v72: после v62 библиотека пополнялась (v64, v68–v71) — у каждого учебника свой манифест; «готовые» в каталоге
+// сверяются с объединением всех манифестов выпусков, а не только с 77 параграфами v62
+const relDir = path.join(ROOT, "supabase/release");
+const allRows = readdirSync(relDir).filter((f) => /^v\d+-.*manifest\.tsv$/.test(f)).sort()
+  .flatMap((f) => readFileSync(path.join(relDir, f), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((l) => l.split("\t")));
+check("M4. манифесты всех выпусков: без повторов, v62 входит целиком", [new Set(allRows.map(key)).size === allRows.length, rows.every((r) => allRows.some((a) => key(a) === key(r)))], [true, true]);
+const man = new Set(allRows.map(key));
+check("M4. «готовые» в каталоге = ровно параграфы манифестов (ни лишних, ни пропущенных)",
   [ready.filter((k) => !man.has(k)), [...man].filter((k) => !ready.includes(k))], [[], []]);
 check("M4. каждый параграф манифеста есть в каталоге", [...man].filter((k) => !all.includes(k)).length, 0);
 check("M4. в каталоге нет повторяющихся параграфов", new Set(all).size, all.length);
@@ -92,8 +98,8 @@ if (!hasOld) {
     const head = existsSync(path.join(tmp, "git.seed.sql")) ? readFileSync(path.join(tmp, "git.seed.sql"), "utf8").split("\n").slice(1, 3) : [];
     check("G3. --git: файл собран, в шапке назначенный исходник и 77 (26/51)",
       [r.status, (head[0] || "").includes(wantSrc), /Параграфов: 77 \(history: 26, physics: 51\)/.test(head[1] || "")], [0, true, true]);
-    check("G3. --git: публичный каталог байт в байт = js/library-index.js",
-      existsSync(path.join(tmp, "git.index.js")) && readFileSync(path.join(tmp, "git.index.js"), "utf8") === read("js/library-index.js"), true);
+    check("G3. --git: публичный каталог байт в байт = js/library-index.js выпуска v62 (27f06c2; позже каталог пополнялся)",
+      existsSync(path.join(tmp, "git.index.js")) && readFileSync(path.join(tmp, "git.index.js"), "utf8") === execSync("git show 27f06c2:js/library-index.js", { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }), true);
     // кириллица, прочитанная в кодировке консоли (cp866) и записанная как UTF-8, — как PowerShell 7 «git show … > файл»
     const cp866 = " АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмноп░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀рстуфхцчшщъыьэюяЁёЄєЇїЎў°∙·√№¤■ ";
     const mangled = Buffer.from([...src].map((b) => (b < 0x80 ? String.fromCharCode(b) : cp866[b - 0x7f] || "?")).join(""), "utf8");

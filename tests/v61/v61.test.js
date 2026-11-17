@@ -441,7 +441,9 @@ async function scenarios() {
     check("вид " + name + ": экран доступа без горизонтальной прокрутки", (await noHScroll(page)) && (await text(page)).includes("Пробный период завершён"));
     await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
     await page.waitForTimeout(200);
-    const vis = await page.$eval('.ended [data-go="all-notes"]', (n) => n.getBoundingClientRect().bottom <= document.querySelector(".tabbar").getBoundingClientRect().top + 1);
+    const vis = await page.$eval('.ended [data-go="all-notes"]', (n) => { const b = n.getBoundingClientRect(), t = document.querySelector(".tabbar").getBoundingClientRect();
+      // v72: на компьютере панель сбоку — проверяем, что кнопка не перекрыта панелью (ни снизу, ни сбоку)
+      return b.bottom <= t.top + 1 || b.left >= t.right - 1 || b.right <= t.left + 1; });
     check("вид " + name + ": кнопки не под панелью вкладок", vis);
     await page.screenshot({ path: path.join(SHOTS, "trial-ended-" + name + ".png") });
     await tab(page, "me");
@@ -482,8 +484,8 @@ async function pwaTest() {
   await page.waitForTimeout(800);
   const keys = await page.evaluate(() => caches.keys());
   const build = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /app\.js/.test(s)));
-  check("PWA: после обновления — app.js?v=71", /v=71/.test(build || ""), build);
-  check("PWA: старый кэш удалён, остался konspekt-v71", keys.length === 1 && keys[0] === "konspekt-v71", keys);
+  check("PWA: после обновления — app.js?v=72", /v=72/.test(build || ""), build);
+  check("PWA: старый кэш удалён, остался konspekt-v72", keys.length === 1 && keys[0] === "konspekt-v72", keys);
   check("PWA: после обновления — статус с сервера (экран «Пробный период завершён»)", (await text(page)).includes("Пробный период завершён"));
   check("PWA: личный конспект сохранён", await page.evaluate(() => Object.values(localStorage).some((v) => v.includes("Мой конспект по биологии"))));
   await ctx.close();

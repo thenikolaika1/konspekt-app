@@ -1,1 +1,25 @@
-{"name": "Konspekt by NK", "short_name": "Konspekt", "description": "Конспекты из страниц учебника", "id": "/konspekt-app/", "start_url": "/konspekt-app/", "scope": "/konspekt-app/", "display": "standalone", "background_color": "#ffffff", "theme_color": "#ffffff", "lang": "ru", "icons": [{"src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png"}, {"src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png"}, {"src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
+{
+  "name": "Konspekt by NK",
+  "short_name": "Konspekt",
+  "description": "Готовые конспекты по учебникам истории и физики и конспекты по фотографиям страниц",
+  "id": "/konspekt-app/",
+  "start_url": "/konspekt-app/",
+  "scope": "/konspekt-app/",
+  "display": "standalone",
+  "background_color": "#f3f6fb",
+  "theme_color": "#ffffff",
+  "lang": "ru",
+  "dir": "ltr",
+  "categories": ["education"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "./icons/screen-wide-home.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Главная Konspekt by NK на компьютере" },
+    { "src": "./icons/screen-wide-library.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Библиотека готовых конспектов" },
+    { "src": "./icons/screen-narrow-home.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Konspekt by NK на телефоне" }
+  ]
+}
